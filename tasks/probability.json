@@ -1,0 +1,282 @@
+[
+    {
+        "id": "PR_001",
+        "type": "multiple_choice",
+        "question": "A disease affects 1 in 10,000 people. A test is 99% accurate: it correctly detects the disease 99% of the time and falsely reports disease in 1% of healthy people. If someone tests positive, what is the probability they actually have the disease?",
+        "choices": [
+            "About 0.98%.",
+            "About 99%.",
+            "About 9.9%.",
+            "About 50%."
+        ],
+        "answer": [
+            "A"
+        ]
+    },
+    {
+        "id": "PR_002",
+        "type": "multiple_choice",
+        "question": "A city has 1,000 taxis: 85% are green and 15% are blue. A witness identifies a taxi involved in an accident as blue. The witness is correct 80% of the time. What is the probability the taxi was actually blue?",
+        "choices": [
+            "About 41.4%.",
+            "About 15%.",
+            "About 94.4%.",
+            "About 80%."
+        ],
+        "answer": [
+            "A"
+        ]
+    },
+    {
+        "id": "PR_003",
+        "type": "multiple_choice",
+        "question": "A spam filter flags emails as spam. Only 2% of emails are spam. The filter catches 95% of spam emails but falsely flags 10% of legitimate emails. If an email is flagged, how likely is it to actually be spam?",
+        "choices": [
+            "About 98%.",
+            "About 16.2%.",
+            "About 2%.",
+            "About 95%."
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "PR_004",
+        "type": "multiple_choice",
+        "question": "A DNA match has a random-match probability of 1 in 1,000,000. Does this mean there is only a 1 in 1,000,000 chance the suspect is innocent? Explain.",
+        "choices": [
+            "Yes; DNA evidence always uniquely identifies a suspect.",
+            "No; guilt also depends on priors, population/search process, and error rates.",
+            "No; it means the suspect is certainly innocent.",
+            "Yes; the random-match probability is exactly the chance the suspect is innocent."
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "PR_005",
+        "type": "multiple_choice",
+        "question": "A rare blood type is found at a crime scene and occurs in 0.5% of the population. A suspect has that blood type. Is the probability that the suspect is innocent 0.5%?",
+        "choices": [
+            "Yes; rare blood types are unique identifiers.",
+            "Yes; 0.5% is the probability of innocence.",
+            "No; many people may share the blood type, so priors and other evidence matter.",
+            "No; it proves guilt beyond all doubt."
+        ],
+        "answer": [
+            "C"
+        ]
+    },
+    {
+        "id": "PR_006",
+        "type": "multiple_choice",
+        "question": "A fingerprint analyst says the chance of a random fingerprint matching the crime-scene print is 1 in 100,000. What information is still needed before concluding the suspect is probably guilty?",
+        "choices": [
+            "Only the analyst's confidence.",
+            "Only whether the suspect has a prior record.",
+            "No additional information is needed.",
+            "Prior probability, suspect pool/search process, lab/error rates, and analysis reliability."
+        ],
+        "answer": [
+            "D"
+        ]
+    },
+    {
+        "id": "PR_007",
+        "type": "multiple_choice",
+        "question": "You choose one of three doors. Behind one is a car; behind the other two are goats. The host, who knows what is behind each door, opens a goat door and offers you the chance to switch. Should you switch, stay, or does it not matter?",
+        "choices": [
+            "Switch; it wins with probability 2/3.",
+            "Switching wins with probability 1/3.",
+            "Stay; it wins with probability 2/3.",
+            "It does not matter; both are 1/2."
+        ],
+        "answer": [
+            "A"
+        ]
+    },
+    {
+        "id": "PR_008",
+        "type": "multiple_choice",
+        "question": "In the Monty Hall problem, why does opening a goat door not simply make the odds 50/50?",
+        "choices": [
+            "Because the first choice becomes impossible.",
+            "Because Monty Hall has no probabilities.",
+            "Because the host knowingly reveals a goat, so the original 1/3 remains and the other unopened door carries 2/3.",
+            "Because the host picked a door randomly without knowledge."
+        ],
+        "answer": [
+            "C"
+        ]
+    },
+    {
+        "id": "PR_009",
+        "type": "multiple_choice",
+        "question": "Suppose there are 100 doors, one car, and 99 goats. You pick one door. The host opens 98 goat doors and offers you a switch to the remaining unopened door. Should you switch?",
+        "choices": [
+            "Switch; the remaining unopened door has 99/100.",
+            "It does not matter; both are 1/2.",
+            "Stay; switching has 1/100.",
+            "Stay; your original door has 99/100."
+        ],
+        "answer": [
+            "A"
+        ]
+    },
+    {
+        "id": "PR_010",
+        "type": "multiple_choice",
+        "question": "A couple has two children. At least one child is a girl. Assuming boys and girls are equally likely, what is the probability both children are girls?",
+        "choices": [
+            "1/3.",
+            "2/3.",
+            "1/2.",
+            "1/4."
+        ],
+        "answer": [
+            "A"
+        ]
+    },
+    {
+        "id": "PR_011",
+        "type": "multiple_choice",
+        "question": "A business book studies only companies that became highly successful and identifies traits they share. Why might this lead to misleading conclusions?",
+        "choices": [
+            "It proves the traits caused success.",
+            "It only needs more successful companies.",
+            "It is misleading because successful companies have no traits.",
+            "It ignores failed companies that may share the same traits."
+        ],
+        "answer": [
+            "D"
+        ]
+    },
+    {
+        "id": "PR_012",
+        "type": "multiple_choice",
+        "question": "A military analyst inspects planes that returned from battle and recommends reinforcing the areas with the most bullet holes. What is the flaw in this reasoning?",
+        "choices": [
+            "Only surviving planes were inspected; missing bullet holes may mark fatal damage areas.",
+            "The most-hit areas are always most critical.",
+            "The analyst should reinforce every area equally by definition.",
+            "Returned planes contain no useful information."
+        ],
+        "answer": [
+            "A"
+        ]
+    },
+    {
+        "id": "PR_013",
+        "type": "multiple_choice",
+        "question": "A lottery ticket costs $2 and has a 1 in 100 million chance of winning $50 million. Ignoring smaller prizes, is the expected value positive or negative?",
+        "choices": [
+            "Zero; expected payout equals ticket cost.",
+            "Positive; net expected value is +$0.50.",
+            "Negative; expected payout is $0.50 and net expected value is -$1.50.",
+            "Positive; net expected value is +$50 million."
+        ],
+        "answer": [
+            "C"
+        ]
+    },
+    {
+        "id": "PR_014",
+        "type": "multiple_choice",
+        "question": "A game offers a 90% chance to win $1 and a 10% chance to lose $20. Should a risk-neutral player accept the bet?",
+        "choices": [
+            "Accept; expected value is +$1.10.",
+            "Indifferent; expected value is $0.",
+            "Accept; expected value is +$0.90.",
+            "Reject; expected value is -$1.10."
+        ],
+        "answer": [
+            "D"
+        ]
+    },
+    {
+        "id": "PR_015",
+        "type": "multiple_choice",
+        "question": "A researcher tests 100 unrelated hypotheses at the 5% significance level and finds 5 significant results. Should we be surprised?",
+        "choices": [
+            "Yes, five is impossible by chance.",
+            "Yes, all five must be real effects.",
+            "No, about five false positives are expected at the 5% level.",
+            "No, exactly zero false positives are expected."
+        ],
+        "answer": [
+            "C"
+        ]
+    },
+    {
+        "id": "PR_016",
+        "type": "multiple_choice",
+        "question": "A company analyzes thousands of customer traits and finds one trait strongly associated with purchases. Why might this be misleading?",
+        "choices": [
+            "Many comparisons create chances for random associations unless corrected or validated.",
+            "It is always reliable because many traits were tested.",
+            "It proves causation.",
+            "It is misleading only if the trait is rare."
+        ],
+        "answer": [
+            "A"
+        ]
+    },
+    {
+        "id": "PR_017",
+        "type": "multiple_choice",
+        "question": "A treatment has a higher success rate than another treatment for men and also for women separately, but a lower success rate overall. Is this possible? Explain.",
+        "choices": [
+            "Yes, but only if all group sizes are equal.",
+            "No, subgroup and overall rates can never disagree.",
+            "No, this violates arithmetic.",
+            "Yes, Simpson's paradox can occur due to different group sizes or baseline rates."
+        ],
+        "answer": [
+            "D"
+        ]
+    },
+    {
+        "id": "PR_018",
+        "type": "multiple_choice",
+        "question": "Two departments compare admission rates. Department A admits a higher percentage of male applicants than female applicants in each program, but overall female applicants have a higher admission rate. How can this happen?",
+        "choices": [
+            "It happens only if records are fraudulent.",
+            "Applicants may be distributed differently across selective and less selective programs.",
+            "It cannot happen.",
+            "It proves there were no program-level differences."
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "PR_019",
+        "type": "multiple_choice",
+        "question": "A disease affects 2% of a population. Test A is 95% sensitive and 90% specific. Anyone who tests positive on Test A is given Test B, which is 90% sensitive and 95% specific. Assume the two tests are conditionally independent given whether the person has the disease. If a person tests positive on both tests, what is the probability they actually have the disease?",
+        "choices": [
+            "About 2.0%.",
+            "About 77.7%.",
+            "About 94.5%.",
+            "About 17.1%."
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "PR_020",
+        "type": "multiple_choice",
+        "question": "An analyst models next quarter's market as bull, neutral, or bear with probabilities 30%, 50%, and 20%, respectively. A volatility warning signal flashes red with probability 10% in a bull market, 30% in a neutral market, and 70% in a bear market. Conditional on the market state, the probability that a portfolio loses more than 5% is 5% in a bull market, 20% in a neutral market, and 60% in a bear market. If the signal flashes red, what is the probability that the portfolio loses more than 5%?",
+        "choices": [
+            "About 36.1%.",
+            "About 32.0%.",
+            "About 60.0%.",
+            "About 11.6%."
+        ],
+        "answer": [
+            "A"
+        ]
+    }
+]

@@ -1,0 +1,142 @@
+[
+    {
+        "id": "CR_001",
+        "type": "text_recall",
+        "question": "This recall benchmark provides a large Python source file directly inside the prompt. Read the complete source below, treat it as the entire context window, locate the method `BaseHTTPRequestHandler.parse_request`, and reproduce exactly the first 6 physical lines of that method as they appear in the source. Preserve indentation, punctuation, blank lines, and capitalization exactly.\n\n<source>\n{{REFERENCE_CODE}}\n</source>",
+        "reference_path": "ref/http_server.py",
+        "expected_text": "    def parse_request(self):\n        \"\"\"Parse a request (internal).\n\n        The request should be stored in self.raw_requestline; the results\n        are in self.command, self.path, self.request_version and\n        self.headers."
+    },
+    {
+        "id": "CR_002",
+        "type": "text_recall",
+        "question": "This recall benchmark provides a large Python source file directly inside the prompt. Read the complete source below, treat it as the entire context window, locate the method `SimpleHTTPRequestHandler.send_head`, and reproduce exactly the first 6 physical lines of that method as they appear in the source. Preserve indentation, punctuation, blank lines, and capitalization exactly.\n\n<source>\n{{REFERENCE_CODE}}\n</source>",
+        "reference_path": "ref/http_server.py",
+        "expected_text": "    def send_head(self):\n        \"\"\"Common code for GET and HEAD commands.\n\n        This sends the response code and MIME headers.\n\n        Return value is either a file object (which has to be copied"
+    },
+    {
+        "id": "CR_003",
+        "type": "text_recall",
+        "question": "This recall benchmark provides a large JavaScript source file directly inside the prompt. Read the complete source below, treat it as the entire context window, locate the function `tokenize`, and reproduce exactly the first 6 physical lines of that function as they appear in the source. Preserve tabs, punctuation, blank lines, and capitalization exactly.\n\n<source>\n{{REFERENCE_CODE}}\n</source>",
+        "reference_path": "ref/jquery.js",
+        "expected_text": "function tokenize( selector, parseOnly ) {\n\tvar matched, match, tokens, type,\n\t\tsoFar, groups, preFilters,\n\t\tcached = tokenCache[ selector + \" \" ];\n\n\tif ( cached ) {"
+    },
+    {
+        "id": "CR_004",
+        "type": "text_recall",
+        "question": "This recall benchmark provides a large JavaScript source file directly inside the prompt. Read the complete source below, treat it as the entire context window, locate the function `ajaxConvert`, and reproduce exactly the first 7 physical lines of that function as they appear in the source. Preserve tabs, punctuation, comments, blank lines, and capitalization exactly.\n\n<source>\n{{REFERENCE_CODE}}\n</source>",
+        "reference_path": "ref/jquery.js",
+        "expected_text": "function ajaxConvert( s, response, jqXHR, isSuccess ) {\n\tvar conv2, current, conv, tmp, prev,\n\t\tconverters = {},\n\n\t\t// Work with a copy of dataTypes in case we need to modify it for conversion\n\t\tdataTypes = s.dataTypes.slice();\n"
+    },
+    {
+        "id": "CR_005",
+        "type": "text_recall",
+        "question": "This recall benchmark provides a large Python source file directly inside the prompt. Read the complete source below, treat it as the entire context window, locate the method `BaseHTTPRequestHandler.handle_one_request`, and reproduce exactly the first 7 physical lines of that method as they appear in the source. Preserve indentation, punctuation, blank lines, and capitalization exactly.\n\n<source>\n{{REFERENCE_CODE}}\n</source>",
+        "reference_path": "ref/http_server.py",
+        "expected_text": "    def handle_one_request(self):\n        \"\"\"Handle a single HTTP request.\n\n        You normally don't need to override this method; see the class\n        __doc__ string for information on how to handle specific HTTP\n        commands such as GET and POST.\n"
+    },
+    {
+        "id": "CR_006",
+        "type": "text_recall",
+        "question": "This recall benchmark provides a large Python source file directly inside the prompt. Read the complete source below, treat it as the entire context window, locate the method `BaseHTTPRequestHandler.send_error`, and reproduce exactly the first 7 physical lines of that method as they appear in the source. Preserve indentation, punctuation, blank lines, and capitalization exactly.\n\n<source>\n{{REFERENCE_CODE}}\n</source>",
+        "reference_path": "ref/http_server.py",
+        "expected_text": "    def send_error(self, code, message=None, explain=None):\n        \"\"\"Send and log an error reply.\n\n        Arguments are\n        * code:    an HTTP error code\n                   3 digits\n        * message: a simple optional 1 line reason phrase."
+    },
+    {
+        "id": "CR_007",
+        "type": "text_recall",
+        "question": "This recall benchmark provides a large Python source file directly inside the prompt. Read the complete source below, treat it as the entire context window, locate the method `BaseHTTPRequestHandler.send_response`, and reproduce exactly the first 7 physical lines of that method as they appear in the source. Preserve indentation, punctuation, blank lines, and capitalization exactly.\n\n<source>\n{{REFERENCE_CODE}}\n</source>",
+        "reference_path": "ref/http_server.py",
+        "expected_text": "    def send_response(self, code, message=None):\n        \"\"\"Add the response header to the headers buffer and log the\n        response code.\n\n        Also send two standard headers with the server software\n        version and the current date.\n"
+    },
+    {
+        "id": "CR_008",
+        "type": "text_recall",
+        "question": "This recall benchmark provides a large Python source file directly inside the prompt. Read the complete source below, treat it as the entire context window, locate the method `BaseHTTPRequestHandler.send_header`, and reproduce exactly the first 7 physical lines of that method as they appear in the source. Preserve indentation, punctuation, blank lines, and capitalization exactly.\n\n<source>\n{{REFERENCE_CODE}}\n</source>",
+        "reference_path": "ref/http_server.py",
+        "expected_text": "    def send_header(self, keyword, value):\n        \"\"\"Send a MIME header to the headers buffer.\"\"\"\n        if self.request_version != 'HTTP/0.9':\n            if not hasattr(self, '_headers_buffer'):\n                self._headers_buffer = []\n            self._headers_buffer.append(\n                (\"%s: %s\\r\\n\" % (keyword, value)).encode('latin-1', 'strict'))"
+    },
+    {
+        "id": "CR_009",
+        "type": "text_recall",
+        "question": "This recall benchmark provides a large Python source file directly inside the prompt. Read the complete source below, treat it as the entire context window, locate the method `BaseHTTPRequestHandler.log_message`, and reproduce exactly the first 7 physical lines of that method as they appear in the source. Preserve indentation, punctuation, blank lines, and capitalization exactly.\n\n<source>\n{{REFERENCE_CODE}}\n</source>",
+        "reference_path": "ref/http_server.py",
+        "expected_text": "    def log_message(self, format, *args):\n        \"\"\"Log an arbitrary message.\n\n        This is used by all other logging functions.  Override\n        it if you have specific logging wishes.\n\n        The first argument, FORMAT, is a format string for the"
+    },
+    {
+        "id": "CR_010",
+        "type": "text_recall",
+        "question": "This recall benchmark provides a large Python source file directly inside the prompt. Read the complete source below, treat it as the entire context window, locate the method `SimpleHTTPRequestHandler.list_directory`, and reproduce exactly the first 7 physical lines of that method as they appear in the source. Preserve indentation, punctuation, blank lines, and capitalization exactly.\n\n<source>\n{{REFERENCE_CODE}}\n</source>",
+        "reference_path": "ref/http_server.py",
+        "expected_text": "    def list_directory(self, path):\n        \"\"\"Helper to produce a directory listing (absent index.html).\n\n        Return value is either a file object, or None (indicating an\n        error).  In either case, the headers are sent, making the\n        interface the same as for send_head().\n"
+    },
+    {
+        "id": "CR_011",
+        "type": "text_recall",
+        "question": "This recall benchmark provides a large Python source file directly inside the prompt. Read the complete source below, treat it as the entire context window, locate the method `SimpleHTTPRequestHandler.translate_path`, and reproduce exactly the first 7 physical lines of that method as they appear in the source. Preserve indentation, punctuation, blank lines, and capitalization exactly.\n\n<source>\n{{REFERENCE_CODE}}\n</source>",
+        "reference_path": "ref/http_server.py",
+        "expected_text": "    def translate_path(self, path):\n        \"\"\"Translate a /-separated PATH to the local filename syntax.\n\n        Components that mean special things to the local file system\n        (e.g. drive or directory names) are ignored.  (XXX They should\n        probably be diagnosed.)\n"
+    },
+    {
+        "id": "CR_012",
+        "type": "text_recall",
+        "question": "This recall benchmark provides a large Python source file directly inside the prompt. Read the complete source below, treat it as the entire context window, locate the method `CGIHTTPRequestHandler.run_cgi`, and reproduce exactly the first 7 physical lines of that method as they appear in the source. Preserve indentation, punctuation, blank lines, and capitalization exactly.\n\n<source>\n{{REFERENCE_CODE}}\n</source>",
+        "reference_path": "ref/http_server.py",
+        "expected_text": "    def run_cgi(self):\n        \"\"\"Execute a CGI script.\"\"\"\n        dir, rest = self.cgi_info\n        path = dir + '/' + rest\n        i = path.find('/', len(dir)+1)\n        while i >= 0:\n            nextdir = path[:i]"
+    },
+    {
+        "id": "CR_013",
+        "type": "text_recall",
+        "question": "This recall benchmark provides a large JavaScript source file directly inside the prompt. Read the complete source below, treat it as the entire context window, locate the function `setDocument`, and reproduce exactly the first 7 physical lines of that function as they appear in the source. Preserve tabs, punctuation, comments, blank lines, and capitalization exactly.\n\n<source>\n{{REFERENCE_CODE}}\n</source>",
+        "reference_path": "ref/jquery.js",
+        "expected_text": "function setDocument( node ) {\n\tvar subWindow,\n\t\tdoc = node ? node.ownerDocument || node : preferredDoc;\n\n\t// Return early if doc is invalid or already selected\n\t// Support: IE 11+, Edge 17 - 18+\n\t// IE/Edge sometimes throw a \"Permission denied\" error when strict-comparing"
+    },
+    {
+        "id": "CR_014",
+        "type": "text_recall",
+        "question": "This recall benchmark provides a large JavaScript source file directly inside the prompt. Read the complete source below, treat it as the entire context window, locate the function `compile`, and reproduce exactly the first 7 physical lines of that function as they appear in the source. Preserve tabs, punctuation, comments, blank lines, and capitalization exactly.\n\n<source>\n{{REFERENCE_CODE}}\n</source>",
+        "reference_path": "ref/jquery.js",
+        "expected_text": "function compile( selector, match /* Internal Use Only */ ) {\n\tvar i,\n\t\tsetMatchers = [],\n\t\telementMatchers = [],\n\t\tcached = compilerCache[ selector + \" \" ];\n\n\tif ( !cached ) {"
+    },
+    {
+        "id": "CR_015",
+        "type": "text_recall",
+        "question": "This recall benchmark provides a large JavaScript source file directly inside the prompt. Read the complete source below, treat it as the entire context window, locate the function `select`, and reproduce exactly the first 7 physical lines of that function as they appear in the source. Preserve tabs, punctuation, comments, blank lines, and capitalization exactly.\n\n<source>\n{{REFERENCE_CODE}}\n</source>",
+        "reference_path": "ref/jquery.js",
+        "expected_text": "function select( selector, context, results, seed ) {\n\tvar i, tokens, token, type, find,\n\t\tcompiled = typeof selector === \"function\" && selector,\n\t\tmatch = !seed && tokenize( ( selector = compiled.selector || selector ) );\n\n\tresults = results || [];\n"
+    },
+    {
+        "id": "CR_016",
+        "type": "text_recall",
+        "question": "This recall benchmark provides a large JavaScript source file directly inside the prompt. Read the complete source below, treat it as the entire context window, locate the function `adjustCSS`, and reproduce exactly the first 7 physical lines of that function as they appear in the source. Preserve tabs, punctuation, comments, blank lines, and capitalization exactly.\n\n<source>\n{{REFERENCE_CODE}}\n</source>",
+        "reference_path": "ref/jquery.js",
+        "expected_text": "function adjustCSS( elem, prop, valueParts, tween ) {\n\tvar adjusted, scale,\n\t\tmaxIterations = 20,\n\t\tcurrentValue = tween ?\n\t\t\tfunction() {\n\t\t\t\treturn tween.cur();\n\t\t\t} :"
+    },
+    {
+        "id": "CR_017",
+        "type": "text_recall",
+        "question": "This recall benchmark provides a large JavaScript source file directly inside the prompt. Read the complete source below, treat it as the entire context window, locate the function `domManip`, and reproduce exactly the first 7 physical lines of that function as they appear in the source. Preserve tabs, punctuation, comments, blank lines, and capitalization exactly.\n\n<source>\n{{REFERENCE_CODE}}\n</source>",
+        "reference_path": "ref/jquery.js",
+        "expected_text": "function domManip( collection, args, callback, ignored ) {\n\n\t// Flatten any nested arrays\n\targs = flat( args );\n\n\tvar fragment, first, scripts, hasScripts, node, doc,\n\t\ti = 0,"
+    },
+    {
+        "id": "CR_018",
+        "type": "text_recall",
+        "question": "This recall benchmark provides a large JavaScript source file directly inside the prompt. Read the complete source below, treat it as the entire context window, locate the function `Animation`, and reproduce exactly the first 7 physical lines of that function as they appear in the source. Preserve tabs, punctuation, comments, blank lines, and capitalization exactly.\n\n<source>\n{{REFERENCE_CODE}}\n</source>",
+        "reference_path": "ref/jquery.js",
+        "expected_text": "function Animation( elem, properties, options ) {\n\tvar result,\n\t\tstopped,\n\t\tindex = 0,\n\t\tlength = Animation.prefilters.length,\n\t\tdeferred = jQuery.Deferred().always( function() {\n"
+    },
+    {
+        "id": "CR_019",
+        "type": "text_recall",
+        "question": "This recall benchmark provides a large JavaScript source file directly inside the prompt. Read the complete source below, treat it as the entire context window, locate the function `buildParams`, and reproduce exactly the first 7 physical lines of that function as they appear in the source. Preserve tabs, punctuation, comments, blank lines, and capitalization exactly.\n\n<source>\n{{REFERENCE_CODE}}\n</source>",
+        "reference_path": "ref/jquery.js",
+        "expected_text": "function buildParams( prefix, obj, traditional, add ) {\n\tvar name;\n\n\tif ( Array.isArray( obj ) ) {\n\n\t\t// Serialize array item.\n\t\tjQuery.each( obj, function( i, v ) {"
+    },
+    {
+        "id": "CR_020",
+        "type": "text_recall",
+        "question": "This recall benchmark provides a large JavaScript source file directly inside the prompt. Read the complete source below, treat it as the entire context window, locate the function `ajaxHandleResponses`, and reproduce exactly the first 7 physical lines of that function as they appear in the source. Preserve tabs, punctuation, comments, blank lines, and capitalization exactly.\n\n<source>\n{{REFERENCE_CODE}}\n</source>",
+        "reference_path": "ref/jquery.js",
+        "expected_text": "function ajaxHandleResponses( s, jqXHR, responses ) {\n\n\tvar ct, type, finalDataType, firstDataType,\n\t\tcontents = s.contents,\n\t\tdataTypes = s.dataTypes;\n\n\t// Remove auto dataType and get content-type in the process"
+    }
+]

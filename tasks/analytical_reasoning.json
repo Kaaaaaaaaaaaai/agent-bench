@@ -1,0 +1,287 @@
+[
+    {
+        "id": "AR_001",
+        "type": "multiple_choice",
+        "question": "Rules: The database migration must occur before API deployment; monitoring setup must occur after API deployment. Which order is valid?",
+        "choices": [
+            "API deployment, migration, monitoring",
+            "Migration, monitoring, API deployment",
+            "Monitoring, migration, API deployment",
+            "Migration, API deployment, monitoring"
+        ],
+        "answer": [
+            "D"
+        ]
+    },
+    {
+        "id": "AR_002",
+        "type": "multiple_choice",
+        "question": "Given: Either the shipment is delayed or the warehouse record is wrong. The shipment is not delayed. What follows?",
+        "choices": [
+            "The warehouse record is correct",
+            "The warehouse record is wrong",
+            "The shipment is early",
+            "Both statements are false"
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "AR_003",
+        "type": "multiple_choice",
+        "question": "A customer survey is sent only to users who renewed their subscriptions. What issue most threatens conclusions about all users?",
+        "choices": [
+            "Perfect randomization",
+            "Measurement precision",
+            "Selection bias",
+            "Logical equivalence"
+        ],
+        "answer": [
+            "C"
+        ]
+    },
+    {
+        "id": "AR_004",
+        "type": "multiple_choice",
+        "question": "City officials installed cameras and theft reports fell afterward. Which finding most weakens the claim that cameras caused the fall?",
+        "choices": [
+            "Camera manuals were updated",
+            "Residents noticed the cameras",
+            "Some cameras were mounted on poles",
+            "Theft reports fell by the same amount in similar cities without cameras"
+        ],
+        "answer": [
+            "D"
+        ]
+    },
+    {
+        "id": "AR_005",
+        "type": "multiple_choice",
+        "question": "Premises: No contractors can approve invoices. Some reviewers are contractors. Which conclusion necessarily follows?",
+        "choices": [
+            "All reviewers are contractors",
+            "Some reviewers cannot approve invoices",
+            "No reviewers can approve invoices",
+            "Some contractors are not reviewers"
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "AR_006",
+        "type": "multiple_choice",
+        "question": "Select all statements consistent with: 'Only managers can edit payroll.'",
+        "choices": [
+            "A non-manager edits payroll",
+            "A manager edits payroll",
+            "A manager does not edit payroll",
+            "A non-manager does not edit payroll"
+        ],
+        "answer": [
+            "B",
+            "C",
+            "D"
+        ]
+    },
+    {
+        "id": "AR_007",
+        "type": "multiple_choice",
+        "question": "A diagnostic test for a rare condition is very accurate. A positive result is described as proving the condition is present. What reasoning concern is most relevant?",
+        "choices": [
+            "The test cannot have false positives by definition",
+            "Rare conditions are impossible",
+            "Accuracy and evidence are unrelated",
+            "It may ignore the base rate of the condition"
+        ],
+        "answer": [
+            "D"
+        ]
+    },
+    {
+        "id": "AR_008",
+        "type": "multiple_choice",
+        "question": "Given: If the cache is stale, the page refreshes. If the page refreshes, the banner reloads. The cache is stale. What follows?",
+        "choices": [
+            "The cache is fresh",
+            "The banner caused the cache to be stale",
+            "The banner reloads",
+            "The page does not refresh"
+        ],
+        "answer": [
+            "C"
+        ]
+    },
+    {
+        "id": "AR_009",
+        "type": "multiple_choice",
+        "question": "Two bug explanations fit the current logs. Explanation 1 also predicts an error in a separate service that is later observed. What does this do?",
+        "choices": [
+            "Proves Explanation 2 is impossible",
+            "Strengthens Explanation 1 relative to Explanation 2",
+            "Makes both explanations equally weak",
+            "Shows logs are irrelevant"
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "AR_010",
+        "type": "multiple_choice",
+        "question": "Select all evidence that would strengthen the claim: 'Long checkout delays cause cart abandonment.'",
+        "choices": [
+            "Abandonment pages use a blue button",
+            "Randomly adding checkout delay increases abandonment",
+            "Product names are sorted alphabetically",
+            "Server traces show delays usually occur before abandonment events"
+        ],
+        "answer": [
+            "B",
+            "D"
+        ]
+    },
+    {
+        "id": "AR_011",
+        "type": "multiple_choice",
+        "question": "An argument says: 'Either we rebuild the entire system or we must accept frequent outages.' What flaw is most likely?",
+        "choices": [
+            "Appeal to popularity",
+            "Post hoc reasoning",
+            "False dilemma",
+            "Affirming the consequent"
+        ],
+        "answer": [
+            "C"
+        ]
+    },
+    {
+        "id": "AR_012",
+        "type": "multiple_choice",
+        "question": "Which argument is circular?",
+        "choices": [
+            "The rule is fair because it applies equally to all teams",
+            "The rule is costly because it requires new tools",
+            "The rule is unclear because two clauses conflict",
+            "The rule is fair because it is just"
+        ],
+        "answer": [
+            "D"
+        ]
+    },
+    {
+        "id": "AR_013",
+        "type": "multiple_choice",
+        "question": "A report uses 'significant' to mean statistically unlikely in one section and important in another. What issue is this?",
+        "choices": [
+            "Random assignment",
+            "Equivocation",
+            "Contraposition",
+            "Replication"
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "AR_014",
+        "type": "multiple_choice",
+        "question": "Average session length increased from 5 to 6 minutes. Which conclusion is justified from that fact alone?",
+        "choices": [
+            "Every user's session length increased",
+            "The median session length increased",
+            "Individual user behavior cannot be determined from the average alone",
+            "No user had a shorter session"
+        ],
+        "answer": [
+            "C"
+        ]
+    },
+    {
+        "id": "AR_015",
+        "type": "multiple_choice",
+        "question": "Which hypothesis is falsifiable?",
+        "choices": [
+            "The system has an invisible quality that cannot be measured",
+            "All API requests return within 200 ms under the stated test conditions",
+            "The best design is the one I like most",
+            "Success is whatever happens after launch"
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "AR_016",
+        "type": "multiple_choice",
+        "question": "Select all pairs that cannot both be true under the stated terms.",
+        "choices": [
+            "The file is encrypted; the same file is backed up",
+            "The ticket is closed; the same ticket is open, and open and closed are mutually exclusive",
+            "All requests are approved; some requests are not approved",
+            "The user is active; the user logged in today"
+        ],
+        "answer": [
+            "B",
+            "C"
+        ]
+    },
+    {
+        "id": "AR_017",
+        "type": "multiple_choice",
+        "question": "Most premium users enabled feature X. All users who enabled feature X saw tutorial T. What necessarily follows?",
+        "choices": [
+            "All tutorial viewers are premium users",
+            "No non-premium user enabled X",
+            "Feature X caused tutorial viewing",
+            "Most premium users saw tutorial T"
+        ],
+        "answer": [
+            "D"
+        ]
+    },
+    {
+        "id": "AR_018",
+        "type": "multiple_choice",
+        "question": "A time-series forecast is evaluated on a test set, but feature values include totals computed using data from after each prediction date. What issue is this?",
+        "choices": [
+            "Class imbalance",
+            "Future information leakage",
+            "Random sampling error only",
+            "Correct blinding"
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "AR_019",
+        "type": "multiple_choice",
+        "question": "In a causal model, X affects Y only through M. If an intervention fully blocks M, what should happen to the effect of X on Y through that path?",
+        "choices": [
+            "It must become stronger",
+            "It proves X never changed M",
+            "It should disappear through that path",
+            "It creates a confounder automatically"
+        ],
+        "answer": [
+            "C"
+        ]
+    },
+    {
+        "id": "AR_020",
+        "type": "multiple_choice",
+        "question": "Select all issues that can weaken a causal conclusion from observational data.",
+        "choices": [
+            "Unmeasured confounding",
+            "Random assignment to treatment",
+            "Pre-registering the analysis",
+            "Reverse causation"
+        ],
+        "answer": [
+            "A",
+            "D"
+        ]
+    }
+]

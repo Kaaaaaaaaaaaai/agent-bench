@@ -1,0 +1,282 @@
+[
+    {
+        "id": "MR_001",
+        "type": "multiple_choice",
+        "question": "If f(x)=x^2 and g(x)=x+3, what is f(g(2))?",
+        "choices": [
+            "7",
+            "10",
+            "25",
+            "49"
+        ],
+        "answer": [
+            "C"
+        ]
+    },
+    {
+        "id": "MR_002",
+        "type": "multiple_choice",
+        "question": "If P(A)=0.5, P(B)=0.4, and A and B are independent, what is P(A and B)?",
+        "choices": [
+            "0.1",
+            "0.2",
+            "0.4",
+            "0.9"
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "MR_003",
+        "type": "multiple_choice",
+        "question": "If P(A)=0.6, P(B)=0.5, and P(A and B)=0.2, what is P(A or B)?",
+        "choices": [
+            "0.3",
+            "0.7",
+            "0.9",
+            "1.1"
+        ],
+        "answer": [
+            "C"
+        ]
+    },
+    {
+        "id": "MR_004",
+        "type": "multiple_choice",
+        "question": "Minimize f(x)=(x-3)^2+2. What x gives the minimum?",
+        "choices": [
+            "-3",
+            "0",
+            "2",
+            "3"
+        ],
+        "answer": [
+            "D"
+        ]
+    },
+    {
+        "id": "MR_005",
+        "type": "multiple_choice",
+        "question": "For f(x)=x^2, what is f'(3)?",
+        "choices": [
+            "3",
+            "6",
+            "9",
+            "12"
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "MR_006",
+        "type": "multiple_choice",
+        "question": "Which function is convex on all real numbers?",
+        "choices": [
+            "x^2",
+            "-x^2",
+            "sin(x)",
+            "-abs(x)"
+        ],
+        "answer": [
+            "A"
+        ]
+    },
+    {
+        "id": "MR_007",
+        "type": "multiple_choice",
+        "question": "Solve the system: x+y=5 and x-y=1.",
+        "choices": [
+            "x=2,y=3",
+            "x=3,y=2",
+            "x=4,y=1",
+            "x=1,y=4"
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "MR_008",
+        "type": "multiple_choice",
+        "question": "What is the determinant of [[1,2],[3,4]]?",
+        "choices": [
+            "-2",
+            "2",
+            "10",
+            "14"
+        ],
+        "answer": [
+            "A"
+        ]
+    },
+    {
+        "id": "MR_009",
+        "type": "multiple_choice",
+        "question": "What is the dot product of (1,2) and (3,4)?",
+        "choices": [
+            "5",
+            "8",
+            "11",
+            "14"
+        ],
+        "answer": [
+            "C"
+        ]
+    },
+    {
+        "id": "MR_010",
+        "type": "multiple_choice",
+        "question": "Which vector is orthogonal to (1,2)?",
+        "choices": [
+            "(2,1)",
+            "(-2,1)",
+            "(1,2)",
+            "(0,2)"
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "MR_011",
+        "type": "multiple_choice",
+        "question": "How many ways are there to choose 2 items from 4 distinct items?",
+        "choices": [
+            "4",
+            "5",
+            "6",
+            "8"
+        ],
+        "answer": [
+            "C"
+        ]
+    },
+    {
+        "id": "MR_012",
+        "type": "multiple_choice",
+        "question": "A binary variable has entropy 1 bit when p=0.5. What happens when p=1?",
+        "choices": [
+            "Entropy is 0",
+            "Entropy is 1",
+            "Entropy is 2",
+            "Entropy is undefined only"
+        ],
+        "answer": [
+            "A"
+        ]
+    },
+    {
+        "id": "MR_013",
+        "type": "multiple_choice",
+        "question": "For nonnegative a and b, which inequality is always true?",
+        "choices": [
+            "a+b < a",
+            "a+b >= a",
+            "ab < 0",
+            "a-b >= b"
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "MR_014",
+        "type": "multiple_choice",
+        "question": "What are the roots of x^2 - 5x + 6 = 0?",
+        "choices": [
+            "1 and 6",
+            "2 and 3",
+            "-2 and -3",
+            "0 and 5"
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "MR_015",
+        "type": "multiple_choice",
+        "question": "What is the integral of 2x from x=0 to x=3?",
+        "choices": [
+            "3",
+            "6",
+            "9",
+            "18"
+        ],
+        "answer": [
+            "C"
+        ]
+    },
+    {
+        "id": "MR_016",
+        "type": "multiple_choice",
+        "question": "Solve |x - 3| = 2.",
+        "choices": [
+            "x = 1 only",
+            "x = 5 only",
+            "x = -1 or x = 5",
+            "x = 1 or x = 5"
+        ],
+        "answer": [
+            "D"
+        ]
+    },
+    {
+        "id": "MR_017",
+        "type": "multiple_choice",
+        "question": "If y is inversely proportional to x and y=6 when x=2, what is y when x=3?",
+        "choices": [
+            "4",
+            "2",
+            "3",
+            "9"
+        ],
+        "answer": [
+            "A"
+        ]
+    },
+    {
+        "id": "MR_018",
+        "type": "multiple_choice",
+        "question": "For theta in [0, pi], which values satisfy sin(theta)=0?",
+        "choices": [
+            "0 only",
+            "pi only",
+            "pi/2",
+            "0 and pi"
+        ],
+        "answer": [
+            "D"
+        ]
+    },
+    {
+        "id": "MR_019",
+        "type": "multiple_choice",
+        "question": "What is the determinant of the diagonal matrix [[2,0,0],[0,3,0],[0,0,4]]?",
+        "choices": [
+            "9",
+            "12",
+            "24",
+            "36"
+        ],
+        "answer": [
+            "C"
+        ]
+    },
+    {
+        "id": "MR_020",
+        "type": "multiple_choice",
+        "question": "A set has 5 elements. How many subsets does it have?",
+        "choices": [
+            "32",
+            "10",
+            "25",
+            "120"
+        ],
+        "answer": [
+            "A"
+        ]
+    }
+]

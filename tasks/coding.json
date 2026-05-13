@@ -1,0 +1,758 @@
+[
+    {
+        "id": "CO_001",
+        "type": "coding",
+        "title": "LRU Cache",
+        "function_name": "LRUCache",
+        "question": "Design a data structure that follows the constraints of a Least Recently Used (LRU) cache. Implement the LRUCache class:\n- `LRUCache(int capacity)` - Initialize the LRU cache with positive size capacity\n- `int get(int key)` - Return the value of the key if it exists, otherwise return -1\n- `void put(int key, int value)` - Update the value of the key if it exists, otherwise add the key-value pair to the cache. If the number of keys exceeds capacity, evict the least recently used key.\nBoth get and put must operate in O(1) average time complexity.\n**Example:**\n```Input: [\"LRUCache\", \"put\", \"put\", \"get\", \"put\", \"get\", \"put\", \"get\", \"get\", \"get\"]\n       [[2], [1, 1], [2, 2], [1], [3, 3], [2], [4, 4], [1], [3], [4]]\nOutput: [null, null, null, 1, null, -1, null, -1, 3, 4]```\n**Constraints:**\n- 1 <= capacity <= 3000\n- 0 <= key <= 10^4\n- 0 <= value <= 10^5\n- At most 2 * 10^5 operations",
+        "test_cases": [
+            {
+                "input": {"operations": ["LRUCache", "put", "put", "get", "put", "get", "put", "get", "get", "get"], "arguments": [[2], [1, 1], [2, 2], [1], [3, 3], [2], [4, 4], [1], [3], [4]]},
+                "output": [null, null, null, 1, null, -1, null, -1, 3, 4]
+            },
+            {
+                "input": {"operations": ["LRUCache", "put", "get", "put", "get", "get"], "arguments": [[1], [1, 1], [1], [2, 2], [1], [2]]},
+                "output": [null, null, 1, null, -1, 2]
+            },
+            {
+                "input": {"operations": ["LRUCache", "put", "put", "put", "put", "get", "get", "get"], "arguments": [[2], [1, 1], [2, 2], [1, 10], [3, 3], [1], [2], [3]]},
+                "output": [null, null, null, null, null, 10, -1, 3]
+            },
+            {
+                "input": {"operations": ["LRUCache", "put", "put", "get", "put", "get", "get", "get"], "arguments": [[2], [1, 1], [2, 2], [1], [3, 3], [1], [2], [3]]},
+                "output": [null, null, null, 1, null, 1, -1, 3]
+            },
+            {
+                "input": {"operations": ["LRUCache", "put", "get", "get", "put", "get"], "arguments": [[2], [0, 0], [0], [1], [1, 0], [1]]},
+                "output": [null, null, 0, -1, null, 0]
+            },
+            {
+                "input": {"operations": ["LRUCache", "put", "put", "put", "get", "put", "get", "get", "get"], "arguments": [[3], [1, 1], [2, 2], [3, 3], [1], [4, 4], [2], [3], [4]]},
+                "output": [null, null, null, null, 1, null, -1, 3, 4]
+            }
+        ]
+    },
+    {
+        "id": "CO_002",
+        "type": "coding",
+        "title": "Word Break",
+        "function_name": "wordBreak",
+        "question": "Given a string `s` and a dictionary of words `wordDict`, return `true` if `s` can be segmented into a space-separated sequence of dictionary words, or `false` otherwise.\n**Example:**\n```Input: s = \"leetcode\", wordDict = [\"leet\", \"code\"]\nOutput: true\n\nInput: s = \"applepenapple\", wordDict = [\"apple\", \"pen\"]\nOutput: true\n\nInput: s = \"catsandog\", wordDict = [\"cat\", \"cats\", \"and\", \"sand\", \"dog\"]\nOutput: false```\n**Constraints:**\n- 1 <= s.length <= 300\n- 1 <= wordDict.length <= 1000\n- 1 <= wordDict[i].length <= 20\n- s and wordDict[i] consist of only lowercase English letters",
+        "test_cases": [
+            {
+                "input": {"s": "leetcode", "wordDict": ["leet", "code"]},
+                "output": true
+            },
+            {
+                "input": {"s": "applepenapple", "wordDict": ["apple", "pen"]},
+                "output": true
+            },
+            {
+                "input": {"s": "catsandog", "wordDict": ["cat", "cats", "and", "sand", "dog"]},
+                "output": false
+            },
+            {
+                "input": {"s": "a", "wordDict": ["a"]},
+                "output": true
+            },
+            {
+                "input": {"s": "aaaaaaa", "wordDict": ["aaaa", "aaa"]},
+                "output": true
+            },
+            {
+                "input": {"s": "cats", "wordDict": ["cat", "cats", "and", "sand", "dog"]},
+                "output": true
+            },
+            {
+                "input": {"s": "", "wordDict": ["a"]},
+                "output": true
+            },
+            {
+                "input": {"s": "aaaaab", "wordDict": ["a", "aa", "aaa", "aaaa"]},
+                "output": false
+            },
+            {
+                "input": {"s": "cars", "wordDict": ["car", "ca", "rs"]},
+                "output": true
+            },
+            {
+                "input": {"s": "pineapplepenapple", "wordDict": ["apple", "pen", "applepen", "pine", "pineapple"]},
+                "output": true
+            }
+        ]
+    },
+    {
+        "id": "CO_003",
+        "type": "coding",
+        "title": "Merge Intervals",
+        "function_name": "mergeIntervals",
+        "question": "Given an array of intervals `[start, end]`, merge all overlapping intervals and return the result sorted by start time.\n**Example:**\n```Input: intervals = [[1, 3], [2, 6], [8, 10], [15, 18]]\nOutput: [[1, 6], [8, 10], [15, 18]]```\n**Constraints:**\n- 0 <= intervals.length <= 10^4\n- -10^9 <= start <= end <= 10^9",
+        "test_cases": [
+            {
+                "input": {"intervals": [[1, 3], [2, 6], [8, 10], [15, 18]]},
+                "output": [[1, 6], [8, 10], [15, 18]]
+            },
+            {
+                "input": {"intervals": [[1, 4], [4, 5]]},
+                "output": [[1, 5]]
+            },
+            {
+                "input": {"intervals": []},
+                "output": []
+            },
+            {
+                "input": {"intervals": [[5, 7]]},
+                "output": [[5, 7]]
+            },
+            {
+                "input": {"intervals": [[1, 4], [2, 3]]},
+                "output": [[1, 4]]
+            },
+            {
+                "input": {"intervals": [[1, 4], [0, 2], [3, 5]]},
+                "output": [[0, 5]]
+            },
+            {
+                "input": {"intervals": [[-10, -1], [-5, 0], [1, 2]]},
+                "output": [[-10, 0], [1, 2]]
+            }
+        ]
+    },
+    {
+        "id": "CO_004",
+        "type": "coding",
+        "title": "Insert Interval",
+        "function_name": "insertInterval",
+        "question": "Given a sorted list of non-overlapping intervals and a new interval, insert the new interval and merge if necessary. Return the resulting intervals sorted by start time.\n**Example:**\n```Input: intervals = [[1, 3], [6, 9]], newInterval = [2, 5]\nOutput: [[1, 5], [6, 9]]```\n**Constraints:**\n- 0 <= intervals.length <= 10^4\n- intervals is sorted by start time",
+        "test_cases": [
+            {
+                "input": {"intervals": [], "newInterval": [5, 7]},
+                "output": [[5, 7]]
+            },
+            {
+                "input": {"intervals": [[1, 3], [6, 9]], "newInterval": [2, 5]},
+                "output": [[1, 5], [6, 9]]
+            },
+            {
+                "input": {"intervals": [[1, 2], [3, 5], [6, 7], [8, 10], [12, 16]], "newInterval": [4, 8]},
+                "output": [[1, 2], [3, 10], [12, 16]]
+            },
+            {
+                "input": {"intervals": [[1, 5]], "newInterval": [2, 3]},
+                "output": [[1, 5]]
+            },
+            {
+                "input": {"intervals": [[1, 5]], "newInterval": [6, 8]},
+                "output": [[1, 5], [6, 8]]
+            },
+            {
+                "input": {"intervals": [[3, 5], [7, 9]], "newInterval": [0, 1]},
+                "output": [[0, 1], [3, 5], [7, 9]]
+            },
+            {
+                "input": {"intervals": [[-10, -5], [0, 2]], "newInterval": [-6, 1]},
+                "output": [[-10, 2]]
+            }
+        ]
+    },
+    {
+        "id": "CO_005",
+        "type": "coding",
+        "title": "Longest Palindromic Substring",
+        "function_name": "longestPalindrome",
+        "question": "Given a string `s`, return the longest palindromic substring. If multiple answers have the same maximum length, return the earliest one.\n**Example:**\n```Input: s = \"babad\"\nOutput: \"bab\"```\n**Constraints:**\n- 0 <= s.length <= 1000",
+        "test_cases": [
+            {
+                "input": {"s": "babad"},
+                "output": "bab"
+            },
+            {
+                "input": {"s": "cbbd"},
+                "output": "bb"
+            },
+            {
+                "input": {"s": ""},
+                "output": ""
+            },
+            {
+                "input": {"s": "a"},
+                "output": "a"
+            },
+            {
+                "input": {"s": "ac"},
+                "output": "a"
+            },
+            {
+                "input": {"s": "aaaa"},
+                "output": "aaaa"
+            },
+            {
+                "input": {"s": "forgeeksskeegfor"},
+                "output": "geeksskeeg"
+            },
+            {
+                "input": {"s": "abb"},
+                "output": "bb"
+            }
+        ]
+    },
+    {
+        "id": "CO_006",
+        "type": "coding",
+        "title": "Minimum Window Substring",
+        "function_name": "minWindow",
+        "question": "Given strings `s` and `t`, return the smallest substring of s that contains every character in t including duplicates. If no such substring exists, return an empty string. If t is empty, return an empty string.\n**Example:**\n```Input: s = \"ADOBECODEBANC\", t = \"ABC\"\nOutput: \"BANC\"```\n**Constraints:**\n- 0 <= s.length, t.length <= 10^5",
+        "test_cases": [
+            {
+                "input": {"s": "ADOBECODEBANC", "t": "ABC"},
+                "output": "BANC"
+            },
+            {
+                "input": {"s": "a", "t": "a"},
+                "output": "a"
+            },
+            {
+                "input": {"s": "a", "t": "aa"},
+                "output": ""
+            },
+            {
+                "input": {"s": "", "t": "a"},
+                "output": ""
+            },
+            {
+                "input": {"s": "a", "t": ""},
+                "output": ""
+            },
+            {
+                "input": {"s": "aa", "t": "aa"},
+                "output": "aa"
+            },
+            {
+                "input": {"s": "ab", "t": "b"},
+                "output": "b"
+            },
+            {
+                "input": {"s": "bba", "t": "ab"},
+                "output": "ba"
+            },
+            {
+                "input": {"s": "aaaaaaaaaaaabbbbbcdd", "t": "abcdd"},
+                "output": "abbbbbcdd"
+            }
+        ]
+    },
+    {
+        "id": "CO_007",
+        "type": "coding",
+        "title": "Daily Temperatures",
+        "function_name": "dailyTemperatures",
+        "question": "Given an array of daily temperatures, return an array where each element is the number of days until a warmer temperature. If there is no future warmer day, use 0.\n**Example:**\n```Input: temperatures = [73, 74, 75, 71, 69, 72, 76, 73]\nOutput: [1, 1, 4, 2, 1, 1, 0, 0]```\n**Constraints:**\n- 0 <= temperatures.length <= 10^5\n- 30 <= temperatures[i] <= 100",
+        "test_cases": [
+            {
+                "input": {"temperatures": [73, 74, 75, 71, 69, 72, 76, 73]},
+                "output": [1, 1, 4, 2, 1, 1, 0, 0]
+            },
+            {
+                "input": {"temperatures": []},
+                "output": []
+            },
+            {
+                "input": {"temperatures": [30]},
+                "output": [0]
+            },
+            {
+                "input": {"temperatures": [30, 40, 50, 60]},
+                "output": [1, 1, 1, 0]
+            },
+            {
+                "input": {"temperatures": [30, 60, 90]},
+                "output": [1, 1, 0]
+            },
+            {
+                "input": {"temperatures": [90, 80, 70]},
+                "output": [0, 0, 0]
+            },
+            {
+                "input": {"temperatures": [70, 70, 70]},
+                "output": [0, 0, 0]
+            }
+        ]
+    },
+    {
+        "id": "CO_008",
+        "type": "coding",
+        "title": "Kth Largest Element in an Array",
+        "function_name": "findKthLargest",
+        "question": "Given an integer array `nums` and an integer `k`, return the kth largest element in the array. Duplicates count as separate elements.\n**Example:**\n```Input: nums = [3, 2, 1, 5, 6, 4], k = 2\nOutput: 5```\n**Constraints:**\n- 1 <= k <= nums.length <= 10^5",
+        "test_cases": [
+            {
+                "input": {"nums": [3, 2, 1, 5, 6, 4], "k": 2},
+                "output": 5
+            },
+            {
+                "input": {"nums": [3, 2, 3, 1, 2, 4, 5, 5, 6], "k": 4},
+                "output": 4
+            },
+            {
+                "input": {"nums": [1], "k": 1},
+                "output": 1
+            },
+            {
+                "input": {"nums": [-1, -2, -3], "k": 1},
+                "output": -1
+            },
+            {
+                "input": {"nums": [-1, 2, 0], "k": 2},
+                "output": 0
+            },
+            {
+                "input": {"nums": [5, 5, 5], "k": 2},
+                "output": 5
+            },
+            {
+                "input": {"nums": [10, 9, 8, 7, 6, 5, 4, 3, 2, 1], "k": 10},
+                "output": 1
+            }
+        ]
+    },
+    {
+        "id": "CO_009",
+        "type": "coding",
+        "title": "Top K Frequent Elements",
+        "function_name": "topKFrequent",
+        "question": "Given an integer array `nums` and integer `k`, return the k most frequent elements. Break frequency ties by smaller numeric value first. If k is 0, return an empty array.\n**Example:**\n```Input: nums = [1, 1, 1, 2, 2, 3], k = 2\nOutput: [1, 2]```\n**Constraints:**\n- 0 <= k <= number of unique values in nums",
+        "test_cases": [
+            {
+                "input": {"nums": [1, 1, 1, 2, 2, 3], "k": 2},
+                "output": [1, 2]
+            },
+            {
+                "input": {"nums": [1], "k": 1},
+                "output": [1]
+            },
+            {
+                "input": {"nums": [], "k": 0},
+                "output": []
+            },
+            {
+                "input": {"nums": [4, 4, 1, 1, 2, 2, 3], "k": 2},
+                "output": [1, 2]
+            },
+            {
+                "input": {"nums": [-1, -1, -2, -2, -2, 3], "k": 2},
+                "output": [-2, -1]
+            },
+            {
+                "input": {"nums": [5, 3, 1, 1, 1, 3, 73, 1], "k": 2},
+                "output": [1, 3]
+            },
+            {
+                "input": {"nums": [0, 0, 0, 1, 1, 2], "k": 3},
+                "output": [0, 1, 2]
+            }
+        ]
+    },
+    {
+        "id": "CO_010",
+        "type": "coding",
+        "title": "Coin Change",
+        "function_name": "coinChange",
+        "question": "Given coin denominations `coins` and an integer `amount`, return the fewest number of coins needed to make up that amount. Return -1 if the amount cannot be made.\n**Example:**\n```Input: coins = [1, 2, 5], amount = 11\nOutput: 3```\n**Constraints:**\n- 0 <= amount <= 10^4\n- 0 <= coins.length <= 100",
+        "test_cases": [
+            {
+                "input": {"coins": [1, 2, 5], "amount": 11},
+                "output": 3
+            },
+            {
+                "input": {"coins": [2], "amount": 3},
+                "output": -1
+            },
+            {
+                "input": {"coins": [1], "amount": 0},
+                "output": 0
+            },
+            {
+                "input": {"coins": [], "amount": 7},
+                "output": -1
+            },
+            {
+                "input": {"coins": [1], "amount": 2},
+                "output": 2
+            },
+            {
+                "input": {"coins": [186, 419, 83, 408], "amount": 6249},
+                "output": 20
+            },
+            {
+                "input": {"coins": [2, 5, 10, 1], "amount": 27},
+                "output": 4
+            }
+        ]
+    },
+    {
+        "id": "CO_011",
+        "type": "coding",
+        "title": "House Robber",
+        "function_name": "rob",
+        "question": "Given an array `nums` where nums[i] is the amount of money in the ith house, return the maximum amount you can rob without robbing adjacent houses.\n**Example:**\n```Input: nums = [2, 7, 9, 3, 1]\nOutput: 12```\n**Constraints:**\n- 0 <= nums.length <= 10^5\n- 0 <= nums[i] <= 10^4",
+        "test_cases": [
+            {
+                "input": {"nums": [1, 2, 3, 1]},
+                "output": 4
+            },
+            {
+                "input": {"nums": [2, 7, 9, 3, 1]},
+                "output": 12
+            },
+            {
+                "input": {"nums": []},
+                "output": 0
+            },
+            {
+                "input": {"nums": [5]},
+                "output": 5
+            },
+            {
+                "input": {"nums": [2, 1, 1, 2]},
+                "output": 4
+            },
+            {
+                "input": {"nums": [0, 0, 0]},
+                "output": 0
+            },
+            {
+                "input": {"nums": [100, 1, 1, 100]},
+                "output": 200
+            },
+            {
+                "input": {"nums": [1, 3, 1, 3, 100]},
+                "output": 103
+            }
+        ]
+    },
+    {
+        "id": "CO_012",
+        "type": "coding",
+        "title": "Number of Islands",
+        "function_name": "numIslands",
+        "question": "Given a grid represented as a list of strings containing `1` for land and `0` for water, return the number of islands. Land is connected horizontally or vertically, not diagonally.\n**Example:**\n```Input: grid = [\"11000\", \"11000\", \"00100\", \"00011\"]\nOutput: 3```\n**Constraints:**\n- 0 <= grid.length <= 300\n- 0 <= grid[i].length <= 300",
+        "test_cases": [
+            {
+                "input": {"grid": ["11110", "11010", "11000", "00000"]},
+                "output": 1
+            },
+            {
+                "input": {"grid": ["11000", "11000", "00100", "00011"]},
+                "output": 3
+            },
+            {
+                "input": {"grid": []},
+                "output": 0
+            },
+            {
+                "input": {"grid": ["1"]},
+                "output": 1
+            },
+            {
+                "input": {"grid": ["0"]},
+                "output": 0
+            },
+            {
+                "input": {"grid": ["10", "01"]},
+                "output": 2
+            },
+            {
+                "input": {"grid": ["111", "111"]},
+                "output": 1
+            },
+            {
+                "input": {"grid": ["000", "000"]},
+                "output": 0
+            }
+        ]
+    },
+    {
+        "id": "CO_013",
+        "type": "coding",
+        "title": "Spiral Matrix",
+        "function_name": "spiralOrder",
+        "question": "Given an m by n matrix, return all elements of the matrix in clockwise spiral order.\n**Example:**\n```Input: matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]\nOutput: [1, 2, 3, 6, 9, 8, 7, 4, 5]```\n**Constraints:**\n- 0 <= matrix.length <= 100\n- 0 <= matrix[i].length <= 100",
+        "test_cases": [
+            {
+                "input": {"matrix": [[1, 2, 3], [4, 5, 6], [7, 8, 9]]},
+                "output": [1, 2, 3, 6, 9, 8, 7, 4, 5]
+            },
+            {
+                "input": {"matrix": []},
+                "output": []
+            },
+            {
+                "input": {"matrix": [[1]]},
+                "output": [1]
+            },
+            {
+                "input": {"matrix": [[1, 2, 3]]},
+                "output": [1, 2, 3]
+            },
+            {
+                "input": {"matrix": [[1], [2], [3]]},
+                "output": [1, 2, 3]
+            },
+            {
+                "input": {"matrix": [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]]},
+                "output": [1, 2, 3, 4, 8, 12, 11, 10, 9, 5, 6, 7]
+            }
+        ]
+    },
+    {
+        "id": "CO_014",
+        "type": "coding",
+        "title": "Set Matrix Zeroes",
+        "function_name": "setZeroes",
+        "question": "Given a matrix, if an element is 0, set its entire row and column to 0. Return the resulting matrix.\n**Example:**\n```Input: matrix = [[1, 1, 1], [1, 0, 1], [1, 1, 1]]\nOutput: [[1, 0, 1], [0, 0, 0], [1, 0, 1]]```\n**Constraints:**\n- 0 <= matrix.length <= 200\n- 0 <= matrix[i].length <= 200",
+        "test_cases": [
+            {
+                "input": {"matrix": [[1, 1, 1], [1, 0, 1], [1, 1, 1]]},
+                "output": [[1, 0, 1], [0, 0, 0], [1, 0, 1]]
+            },
+            {
+                "input": {"matrix": [[0, 1, 2, 0], [3, 4, 5, 2], [1, 3, 1, 5]]},
+                "output": [[0, 0, 0, 0], [0, 4, 5, 0], [0, 3, 1, 0]]
+            },
+            {
+                "input": {"matrix": []},
+                "output": []
+            },
+            {
+                "input": {"matrix": [[1]]},
+                "output": [[1]]
+            },
+            {
+                "input": {"matrix": [[0]]},
+                "output": [[0]]
+            },
+            {
+                "input": {"matrix": [[1, 2, 3], [4, 5, 6]]},
+                "output": [[1, 2, 3], [4, 5, 6]]
+            },
+            {
+                "input": {"matrix": [[1, 2, 0]]},
+                "output": [[0, 0, 0]]
+            }
+        ]
+    },
+    {
+        "id": "CO_015",
+        "type": "coding",
+        "title": "Subsets",
+        "function_name": "subsets",
+        "question": "Given an array of distinct integers `nums`, return all subsets. Each subset should be sorted ascending, and the output should be sorted first by subset length and then lexicographically.\n**Example:**\n```Input: nums = [1, 2]\nOutput: [[], [1], [2], [1, 2]]```\n**Constraints:**\n- 0 <= nums.length <= 10",
+        "test_cases": [
+            {
+                "input": {"nums": []},
+                "output": [[]]
+            },
+            {
+                "input": {"nums": [1]},
+                "output": [[], [1]]
+            },
+            {
+                "input": {"nums": [1, 2]},
+                "output": [[], [1], [2], [1, 2]]
+            },
+            {
+                "input": {"nums": [1, 2, 3]},
+                "output": [[], [1], [2], [3], [1, 2], [1, 3], [2, 3], [1, 2, 3]]
+            },
+            {
+                "input": {"nums": [-1, 1]},
+                "output": [[], [-1], [1], [-1, 1]]
+            },
+            {
+                "input": {"nums": [3, 1]},
+                "output": [[], [1], [3], [1, 3]]
+            }
+        ]
+    },
+    {
+        "id": "CO_016",
+        "type": "coding",
+        "title": "Permutations",
+        "function_name": "permute",
+        "question": "Given an array of distinct integers `nums`, return all possible permutations sorted lexicographically.\n**Example:**\n```Input: nums = [1, 2]\nOutput: [[1, 2], [2, 1]]```\n**Constraints:**\n- 0 <= nums.length <= 8",
+        "test_cases": [
+            {
+                "input": {"nums": []},
+                "output": [[]]
+            },
+            {
+                "input": {"nums": [1]},
+                "output": [[1]]
+            },
+            {
+                "input": {"nums": [1, 2]},
+                "output": [[1, 2], [2, 1]]
+            },
+            {
+                "input": {"nums": [1, 2, 3]},
+                "output": [[1, 2, 3], [1, 3, 2], [2, 1, 3], [2, 3, 1], [3, 1, 2], [3, 2, 1]]
+            },
+            {
+                "input": {"nums": [-1, 1]},
+                "output": [[-1, 1], [1, -1]]
+            },
+            {
+                "input": {"nums": [2, 1]},
+                "output": [[1, 2], [2, 1]]
+            }
+        ]
+    },
+    {
+        "id": "CO_017",
+        "type": "coding",
+        "title": "Generate Parentheses",
+        "function_name": "generateParenthesis",
+        "question": "Given `n` pairs of parentheses, return all combinations of well-formed parentheses sorted lexicographically. For n = 0, return an array containing the empty string.\n**Example:**\n```Input: n = 3\nOutput: [\"((()))\", \"(()())\", \"(())()\", \"()(())\", \"()()()\"]```\n**Constraints:**\n- 0 <= n <= 8",
+        "test_cases": [
+            {
+                "input": {"n": 0},
+                "output": [""]
+            },
+            {
+                "input": {"n": 1},
+                "output": ["()"]
+            },
+            {
+                "input": {"n": 2},
+                "output": ["(())", "()()"]
+            },
+            {
+                "input": {"n": 3},
+                "output": ["((()))", "(()())", "(())()", "()(())", "()()()"]
+            },
+            {
+                "input": {"n": 4},
+                "output": ["(((())))", "((()()))", "((())())", "((()))()", "(()(()))", "(()()())", "(()())()", "(())(())", "(())()()", "()((()))", "()(()())", "()(())()", "()()(())", "()()()()"]
+            }
+        ]
+    },
+    {
+        "id": "CO_018",
+        "type": "coding",
+        "title": "Combination Sum",
+        "function_name": "combinationSum",
+        "question": "Given distinct positive integers `candidates` and a target, return all unique combinations where chosen numbers sum to target. A number may be reused. Each combination should be sorted ascending, and the output should be lexicographically sorted.\n**Example:**\n```Input: candidates = [2, 3, 6, 7], target = 7\nOutput: [[2, 2, 3], [7]]```\n**Constraints:**\n- 0 <= candidates.length <= 30\n- 0 <= target <= 500",
+        "test_cases": [
+            {
+                "input": {"candidates": [2, 3, 6, 7], "target": 7},
+                "output": [[2, 2, 3], [7]]
+            },
+            {
+                "input": {"candidates": [2, 3, 5], "target": 8},
+                "output": [[2, 2, 2, 2], [2, 3, 3], [3, 5]]
+            },
+            {
+                "input": {"candidates": [2], "target": 1},
+                "output": []
+            },
+            {
+                "input": {"candidates": [1], "target": 1},
+                "output": [[1]]
+            },
+            {
+                "input": {"candidates": [], "target": 7},
+                "output": []
+            },
+            {
+                "input": {"candidates": [3, 4, 5], "target": 7},
+                "output": [[3, 4]]
+            },
+            {
+                "input": {"candidates": [2, 4, 6], "target": 8},
+                "output": [[2, 2, 2, 2], [2, 2, 4], [2, 6], [4, 4]]
+            }
+        ]
+    },
+    {
+        "id": "CO_019",
+        "type": "coding",
+        "title": "Decode Ways",
+        "function_name": "numDecodings",
+        "question": "Given a string `s` containing only digits, return the number of ways to decode it where A=1, B=2, ..., Z=26. An empty string has 0 decodings.\n**Example:**\n```Input: s = \"226\"\nOutput: 3```\n**Constraints:**\n- 0 <= s.length <= 100",
+        "test_cases": [
+            {
+                "input": {"s": "12"},
+                "output": 2
+            },
+            {
+                "input": {"s": "226"},
+                "output": 3
+            },
+            {
+                "input": {"s": "06"},
+                "output": 0
+            },
+            {
+                "input": {"s": ""},
+                "output": 0
+            },
+            {
+                "input": {"s": "0"},
+                "output": 0
+            },
+            {
+                "input": {"s": "10"},
+                "output": 1
+            },
+            {
+                "input": {"s": "2101"},
+                "output": 1
+            },
+            {
+                "input": {"s": "11106"},
+                "output": 2
+            },
+            {
+                "input": {"s": "27"},
+                "output": 1
+            },
+            {
+                "input": {"s": "100"},
+                "output": 0
+            }
+        ]
+    },
+    {
+        "id": "CO_020",
+        "type": "coding",
+        "title": "Implement Trie",
+        "function_name": "Trie",
+        "question": "Implement a Trie class with methods `insert(word)`, `search(word)`, and `startsWith(prefix)`. `search` returns true only for exact inserted words. `startsWith` returns true if any inserted word has the prefix; the empty prefix is always true.\n**Example:**\n```Input: operations = [Trie, insert(apple), search(apple), search(app), startsWith(app)]\nOutput: [null, null, true, false, true]```\n**Constraints:**\n- word contains lowercase English letters\n- prefix contains lowercase English letters or may be empty",
+        "test_cases": [
+            {
+                "input": {"operations": ["Trie", "insert", "search", "search", "startsWith", "insert", "search"], "arguments": [[], ["apple"], ["apple"], ["app"], ["app"], ["app"], ["app"]]},
+                "output": [null, null, true, false, true, null, true]
+            },
+            {
+                "input": {"operations": ["Trie", "search", "startsWith"], "arguments": [[], ["a"], ["a"]]},
+                "output": [null, false, false]
+            },
+            {
+                "input": {"operations": ["Trie", "insert", "insert", "search", "startsWith", "search"], "arguments": [[], ["cat"], ["car"], ["car"], ["ca"], ["can"]]},
+                "output": [null, null, null, true, true, false]
+            },
+            {
+                "input": {"operations": ["Trie", "insert", "search", "startsWith"], "arguments": [[], ["hello"], ["hell"], ["hell"]]},
+                "output": [null, null, false, true]
+            },
+            {
+                "input": {"operations": ["Trie", "startsWith"], "arguments": [[], [""]]},
+                "output": [null, true]
+            },
+            {
+                "input": {"operations": ["Trie", "insert", "search", "startsWith", "search"], "arguments": [[], ["aaaaaaaaaa"], ["aaaaaaaaaa"], ["aaaaa"], ["aaaa"]]},
+                "output": [null, null, true, true, false]
+            }
+        ]
+    }
+]

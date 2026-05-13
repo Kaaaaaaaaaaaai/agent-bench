@@ -1,0 +1,287 @@
+[
+    {
+        "id": "PL_001",
+        "type": "multiple_choice",
+        "question": "You have budget 10. Item A costs 6 and value 8; B costs 5 and value 6; C costs 4 and value 5. Which pair fits budget and has highest value?",
+        "choices": [
+            "A+B",
+            "A+C",
+            "B+C",
+            "A+B+C"
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "PL_002",
+        "type": "multiple_choice",
+        "question": "If a plan has a task on the critical path delayed by 2 days and no slack, what happens to the project finish date?",
+        "choices": [
+            "It moves 2 days later",
+            "It is unchanged",
+            "It moves 2 days earlier",
+            "It becomes impossible to estimate"
+        ],
+        "answer": [
+            "A"
+        ]
+    },
+    {
+        "id": "PL_003",
+        "type": "multiple_choice",
+        "question": "Which task should be scheduled first? Dependencies: D depends on B and C; B depends on A; C has no dependency.",
+        "choices": [
+            "D",
+            "B",
+            "A or C",
+            "Only B"
+        ],
+        "answer": [
+            "C"
+        ]
+    },
+    {
+        "id": "PL_004",
+        "type": "multiple_choice",
+        "question": "A plan exceeds CPU capacity only during hour 3. What is the most targeted fix?",
+        "choices": [
+            "Move or split one hour-3 CPU task",
+            "Cancel all tasks",
+            "Change every deadline",
+            "Ignore capacity"
+        ],
+        "answer": [
+            "A"
+        ]
+    },
+    {
+        "id": "PL_005",
+        "type": "multiple_choice",
+        "question": "Select all constraints violated by scheduling task B before task A when B depends on A.",
+        "choices": [
+            "Precedence constraint",
+            "Dependency constraint",
+            "Budget constraint necessarily",
+            "Resource constraint necessarily"
+        ],
+        "answer": [
+            "A",
+            "B"
+        ]
+    },
+    {
+        "id": "PL_006",
+        "type": "multiple_choice",
+        "question": "If Task X has 3 days of slack, a 1-day delay in X will usually:",
+        "choices": [
+            "Delay the project by 1 day",
+            "Not delay the project",
+            "Cancel the dependency graph",
+            "Double the budget"
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "PL_007",
+        "type": "multiple_choice",
+        "question": "You need to minimize maximum lateness. Which task order is a common rule for single-machine scheduling?",
+        "choices": [
+            "Earliest due date first",
+            "Alphabetical order",
+            "Longest name first",
+            "Random order only"
+        ],
+        "answer": [
+            "A"
+        ]
+    },
+    {
+        "id": "PL_008",
+        "type": "multiple_choice",
+        "question": "Which plan best handles an uncertain high-risk dependency?",
+        "choices": [
+            "Leave it until the last day",
+            "Start it early and add a fallback",
+            "Do unrelated work only",
+            "Remove all testing"
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "PL_009",
+        "type": "multiple_choice",
+        "question": "A schedule uses 3 workers at 10:00, but only 2 are available. What is the violation?",
+        "choices": [
+            "Resource capacity",
+            "Task dependency",
+            "Objective function",
+            "Naming convention"
+        ],
+        "answer": [
+            "A"
+        ]
+    },
+    {
+        "id": "PL_010",
+        "type": "multiple_choice",
+        "question": "Select all items that should be included in an automatically scoreable planning problem.",
+        "choices": [
+            "Explicit resources",
+            "Explicit durations",
+            "Subjective aesthetics only",
+            "Explicit dependencies"
+        ],
+        "answer": [
+            "A",
+            "B",
+            "D"
+        ]
+    },
+    {
+        "id": "PL_011",
+        "type": "multiple_choice",
+        "question": "Tasks A(1h), B(4h after A), C(2h after A), and D(1h after B and C). With unlimited workers, what is the minimum project duration?",
+        "choices": [
+            "4h",
+            "5h",
+            "6h",
+            "8h"
+        ],
+        "answer": [
+            "C"
+        ]
+    },
+    {
+        "id": "PL_012",
+        "type": "multiple_choice",
+        "question": "Two tasks need the same specialized machine: X takes 3h and Y takes 2h. They cannot overlap. What is the minimum machine time?",
+        "choices": [
+            "3h",
+            "5h",
+            "6h",
+            "1h"
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "PL_013",
+        "type": "multiple_choice",
+        "question": "Select all valid ways to shorten a project without removing required scope.",
+        "choices": [
+            "Shorten a task on the critical path",
+            "Run independent tasks in parallel",
+            "Delay a task that is already non-critical",
+            "Skip final validation without approval"
+        ],
+        "answer": [
+            "A",
+            "B"
+        ]
+    },
+    {
+        "id": "PL_014",
+        "type": "multiple_choice",
+        "question": "A task's earliest start is day 4 and latest start is day 7. How much start slack does it have?",
+        "choices": [
+            "0 days",
+            "1 day",
+            "2 days",
+            "3 days"
+        ],
+        "answer": [
+            "D"
+        ]
+    },
+    {
+        "id": "PL_015",
+        "type": "multiple_choice",
+        "question": "A fixed-date plan has more estimated work than available team capacity. What is the first planning issue to resolve?",
+        "choices": [
+            "Assume estimates are wrong",
+            "Trade off scope, capacity, or deadline",
+            "Assign all work to one person",
+            "Remove dependency tracking"
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "PL_016",
+        "type": "multiple_choice",
+        "question": "Task E depends on tasks A, B, C, and D. What determines the earliest start of E?",
+        "choices": [
+            "The earliest finish among A-D",
+            "The shortest prerequisite duration",
+            "The latest finish among A-D",
+            "The alphabetically first task"
+        ],
+        "answer": [
+            "C"
+        ]
+    },
+    {
+        "id": "PL_017",
+        "type": "multiple_choice",
+        "question": "Two high-priority tasks require the same specialist at the same time. What must the plan resolve?",
+        "choices": [
+            "Naming style",
+            "A completed dependency",
+            "Extra documentation only",
+            "Resource conflict"
+        ],
+        "answer": [
+            "D"
+        ]
+    },
+    {
+        "id": "PL_018",
+        "type": "multiple_choice",
+        "question": "A rollout goes to 5% of users, then 25%, then 100% only if metrics stay healthy. What strategy is this?",
+        "choices": [
+            "Big-bang release",
+            "Phased rollout",
+            "Scope deletion",
+            "Dependency inversion"
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "PL_019",
+        "type": "multiple_choice",
+        "question": "Select all signs that a schedule is infeasible.",
+        "choices": [
+            "Assigned work exceeds available worker-hours",
+            "Dependencies form a cycle",
+            "Every task has an owner",
+            "A milestone has a date"
+        ],
+        "answer": [
+            "A",
+            "B"
+        ]
+    },
+    {
+        "id": "PL_020",
+        "type": "multiple_choice",
+        "question": "A depends on B, B depends on C, and C depends on A. What issue exists?",
+        "choices": [
+            "Resource leveling",
+            "Scope buffer",
+            "Circular dependency",
+            "Successful decomposition"
+        ],
+        "answer": [
+            "C"
+        ]
+    }
+]

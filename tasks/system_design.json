@@ -1,0 +1,288 @@
+[
+    {
+        "id": "SD_001",
+        "type": "multiple_choice",
+        "question": "A service receives bursts faster than workers can process them. What helps smooth the load and apply backpressure?",
+        "choices": [
+            "Hard-coded credentials",
+            "Larger JSON keys",
+            "Removing metrics",
+            "A bounded queue"
+        ],
+        "answer": [
+            "D"
+        ]
+    },
+    {
+        "id": "SD_002",
+        "type": "multiple_choice",
+        "question": "Which storage is usually best for large user-uploaded binary files?",
+        "choices": [
+            "Inline rows in every relational table",
+            "Object storage",
+            "A feature flag service",
+            "A password hash table"
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "SD_003",
+        "type": "multiple_choice",
+        "question": "A webhook receiver may receive the same event more than once. What should the design include?",
+        "choices": [
+            "Randomly drop all retries",
+            "Disable logging",
+            "Deduplication by event ID",
+            "Store secrets in source code"
+        ],
+        "answer": [
+            "C"
+        ]
+    },
+    {
+        "id": "SD_004",
+        "type": "multiple_choice",
+        "question": "What is the purpose of a dead-letter queue?",
+        "choices": [
+            "Store messages that repeatedly fail processing",
+            "Serve static files globally",
+            "Encrypt passwords directly",
+            "Replace all databases"
+        ],
+        "answer": [
+            "A"
+        ]
+    },
+    {
+        "id": "SD_005",
+        "type": "multiple_choice",
+        "question": "Which disaster-recovery value describes the maximum acceptable data loss?",
+        "choices": [
+            "P99 latency",
+            "QPS",
+            "CPU utilization",
+            "Recovery point objective"
+        ],
+        "answer": [
+            "D"
+        ]
+    },
+    {
+        "id": "SD_006",
+        "type": "multiple_choice",
+        "question": "Which disaster-recovery value describes the maximum acceptable time to restore service?",
+        "choices": [
+            "Cache hit rate",
+            "Shard key",
+            "Recovery time objective",
+            "Request body size"
+        ],
+        "answer": [
+            "C"
+        ]
+    },
+    {
+        "id": "SD_007",
+        "type": "multiple_choice",
+        "question": "Select all benefits of database connection pooling.",
+        "choices": [
+            "Reusing existing connections",
+            "Limiting concurrent database connections",
+            "Reducing connection setup overhead",
+            "Guaranteeing perfect query results"
+        ],
+        "answer": [
+            "A",
+            "B",
+            "C"
+        ]
+    },
+    {
+        "id": "SD_008",
+        "type": "multiple_choice",
+        "question": "A multi-tenant system must prevent one tenant's traffic from exhausting shared resources. What helps most?",
+        "choices": [
+            "A single shared admin password",
+            "Per-tenant quotas and isolation",
+            "No monitoring",
+            "Longer table names"
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "SD_009",
+        "type": "multiple_choice",
+        "question": "Which pattern coordinates work across services using local transactions and compensating actions?",
+        "choices": [
+            "Saga pattern",
+            "Static asset hosting",
+            "Password salting only",
+            "Single-threaded logging"
+        ],
+        "answer": [
+            "A"
+        ]
+    },
+    {
+        "id": "SD_010",
+        "type": "multiple_choice",
+        "question": "Why make database schema changes backward compatible during a rolling deployment?",
+        "choices": [
+            "To remove all tests",
+            "To force downtime",
+            "To avoid storing data",
+            "So old and new application versions can run at the same time"
+        ],
+        "answer": [
+            "D"
+        ]
+    },
+    {
+        "id": "SD_011",
+        "type": "multiple_choice",
+        "question": "Select all data that should be protected with encryption in transit.",
+        "choices": [
+            "Passwords",
+            "Session tokens",
+            "Private user files",
+            "Only public CSS class names"
+        ],
+        "answer": [
+            "A",
+            "B",
+            "C"
+        ]
+    },
+    {
+        "id": "SD_012",
+        "type": "multiple_choice",
+        "question": "Which storage pattern is best for an append-only stream of domain events that may be replayed later?",
+        "choices": [
+            "A mutable cache only",
+            "A random temp file",
+            "Event log or event store",
+            "A static image CDN"
+        ],
+        "answer": [
+            "C"
+        ]
+    },
+    {
+        "id": "SD_013",
+        "type": "multiple_choice",
+        "question": "What is a hot partition in a distributed data store?",
+        "choices": [
+            "A backup stored offline",
+            "A shard or key range receiving disproportionate traffic",
+            "A table with no rows",
+            "An encrypted password field"
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "SD_014",
+        "type": "multiple_choice",
+        "question": "Which pattern isolates failures so a noncritical recommendation service does not exhaust checkout resources?",
+        "choices": [
+            "One global lock for all services",
+            "Removing retries everywhere",
+            "Sharing one connection with no limit",
+            "Bulkhead isolation"
+        ],
+        "answer": [
+            "D"
+        ]
+    },
+    {
+        "id": "SD_015",
+        "type": "multiple_choice",
+        "question": "A global app needs low-latency reads in multiple regions and can tolerate stale data. Which design is appropriate?",
+        "choices": [
+            "Geo-replicated read replicas",
+            "One server in a single region only",
+            "No caching or replication",
+            "Manual database exports by email"
+        ],
+        "answer": [
+            "A"
+        ]
+    },
+    {
+        "id": "SD_016",
+        "type": "multiple_choice",
+        "question": "Which database style is often suitable for flexible documents with variable fields and simple key-based access?",
+        "choices": [
+            "A graph traversal only",
+            "Document database",
+            "A metrics dashboard",
+            "A cron scheduler"
+        ],
+        "answer": [
+            "B"
+        ]
+    },
+    {
+        "id": "SD_017",
+        "type": "multiple_choice",
+        "question": "What is a common role of an API gateway?",
+        "choices": [
+            "Storing raw video files only",
+            "Replacing all service code",
+            "Centralizing routing, authentication, or request policies",
+            "Deleting observability data"
+        ],
+        "answer": [
+            "C"
+        ]
+    },
+    {
+        "id": "SD_018",
+        "type": "multiple_choice",
+        "question": "If queue processing is at-least-once, what must consumers tolerate?",
+        "choices": [
+            "No retries ever",
+            "No persisted state",
+            "Only synchronous calls",
+            "Duplicate message delivery"
+        ],
+        "answer": [
+            "D"
+        ]
+    },
+    {
+        "id": "SD_019",
+        "type": "multiple_choice",
+        "question": "Select all questions that matter when choosing between SQL and NoSQL storage.",
+        "choices": [
+            "What query patterns are required?",
+            "What consistency guarantees are needed?",
+            "How relational is the data?",
+            "What is the team mascot?"
+        ],
+        "answer": [
+            "A",
+            "B",
+            "C"
+        ]
+    },
+    {
+        "id": "SD_020",
+        "type": "multiple_choice",
+        "question": "Which pattern separates write models from read models when their scaling and query needs differ?",
+        "choices": [
+            "Password hashing",
+            "CQRS",
+            "Single static HTML file",
+            "Manual log deletion"
+        ],
+        "answer": [
+            "B"
+        ]
+    }
+]
