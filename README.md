@@ -5,7 +5,7 @@ Agent Bench is a Python 3.12+ benchmark runner for evaluating local or remote la
 ## Build
 
 ```bash
-docker build -t agent .
+docker build -t agent-bench .
 ```
 
 The runner container prepares the coding-evaluation image automatically in the attached Docker daemon on first use. Create persistent host directories for benchmark outputs and evaluator scratch files:
@@ -19,23 +19,23 @@ mkdir -p runs /tmp/agent-bench-sandboxes
 Run the offline mock provider:
 
 ```bash
-docker run --rm \
+docker run --rm -it \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /tmp/agent-bench-sandboxes:/tmp/agent-bench-sandboxes \
   -v "$PWD/runs:/opt/agent-bench/runs" \
-  agent \
+  agent-bench \
   bench run --provider mock --limit 10
 ```
 
 Run against vLLM:
 
 ```bash
-docker run --rm \
+docker run --rm -it \
   --add-host host.docker.internal:host-gateway \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /tmp/agent-bench-sandboxes:/tmp/agent-bench-sandboxes \
   -v "$PWD/runs:/opt/agent-bench/runs" \
-  agent \
+  agent-bench \
   bench run \
   --provider openai-compatible \
   --base-url http://host.docker.internal:8000/v1 \
@@ -45,12 +45,12 @@ docker run --rm \
 Run against Ollama's OpenAI-compatible endpoint:
 
 ```bash
-docker run --rm \
+docker run --rm -it \
   --add-host host.docker.internal:host-gateway \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /tmp/agent-bench-sandboxes:/tmp/agent-bench-sandboxes \
   -v "$PWD/runs:/opt/agent-bench/runs" \
-  agent \
+  agent-bench \
   bench run \
   --provider openai-compatible \
   --base-url http://host.docker.internal:11434/v1 \
@@ -60,12 +60,12 @@ docker run --rm \
 Run against Ollama's native API:
 
 ```bash
-docker run --rm \
+docker run --rm -it \
   --add-host host.docker.internal:host-gateway \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /tmp/agent-bench-sandboxes:/tmp/agent-bench-sandboxes \
   -v "$PWD/runs:/opt/agent-bench/runs" \
-  agent \
+  agent-bench \
   bench run \
   --provider ollama-native \
   --base-url http://host.docker.internal:11434 \
