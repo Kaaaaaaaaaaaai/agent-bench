@@ -5,7 +5,7 @@ Agent Bench is a Python 3.12+ benchmark runner for evaluating local or remote la
 ## Build
 
 ```bash
-docker build -t agent-bench .
+docker build -t agent .
 ```
 
 The runner container prepares the coding-evaluation image automatically in the attached Docker daemon on first use. Create persistent host directories for benchmark outputs and evaluator scratch files:
@@ -120,6 +120,8 @@ Text recall task shape:
 ```
 
 `text_recall` tasks are scored by whitespace-token F1 after normalizing line endings and ignoring only outer blank lines for both the ground truth and model answer. Missing expected tokens count as false negatives, and extra model tokens count as false positives. `reference_path` is resolved relative to the task file, must stay inside that task directory, and `{{REFERENCE_CODE}}` inside `question` is replaced with the full referenced file contents when the prompt is built. The bundled `tasks/code_recall.json` category follows the CodeNeedle-style pattern: load a large source file from `tasks/ref`, splice it into the model-facing question, then ask the model to reproduce the opening lines of a named function exactly.
+
+If a model returns an empty response for a task, the runner resends that task until it receives a non-empty response or reaches three empty responses for the same task. Only the final response for the task is written to `raw_responses.jsonl`; if all attempts were empty, that final empty response is recorded and graded.
 
 ## Outputs
 

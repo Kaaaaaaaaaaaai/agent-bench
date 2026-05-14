@@ -14,6 +14,9 @@ from agent_bench.tasks import load_tasks
 from agent_bench.verifiers import grade_task
 
 
+MAX_EMPTY_RESPONSES_PER_TASK = 3
+
+
 @dataclass(slots=True)
 class RunConfig:
     provider: str = "mock"
@@ -111,8 +114,18 @@ async def _process_task(
     responses: list[ModelResponse],
 ) -> GradeResult:
     task_started = time.perf_counter()
-    async with request_sem:
-        response = await client.complete(task)
+    empty_response_count = 0
+    while True:
+        async with request_sem:
+            response = await client.complete(task)
+
+        if not _is_empty_model_response(response):
+            break
+
+        empty_response_count += 1
+        if empty_response_count >= MAX_EMPTY_RESPONSES_PER_TASK:
+            break
+
     responses.append(response)
     async with raw_lock:
         write_jsonl_line(raw_handle, response.to_dict())
@@ -123,6 +136,10 @@ async def _process_task(
     async with graded_lock:
         write_jsonl_line(graded_handle, grade.to_dict())
     return grade
+
+
+def _is_empty_model_response(response: ModelResponse) -> bool:
+    return response.error is None and not response.raw_response.strip()
 
 
 def _prepare_output_paths(out: Path) -> tuple[Path, Path | None]:
