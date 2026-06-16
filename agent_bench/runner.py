@@ -1,4 +1,6 @@
 import asyncio
+import json
+import os
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -7,6 +9,7 @@ from typing import Any
 
 from agent_bench.aggregator import aggregate_results
 from agent_bench.clients import make_client
+from agent_bench.external import ExternalBenchmarkConfig, ExternalBenchmarkRunner
 from agent_bench.models import GradeResult, ModelResponse, Task
 from agent_bench.reports import update_latest, write_jsonl_line, write_result_artifacts
 from agent_bench.sandbox import make_sandbox
@@ -35,6 +38,7 @@ class RunConfig:
     json_mode: str = "auto"
     sandbox: str = "docker"
     sandbox_image: str = "agent-bench-python:3.12"
+    external_launcher_image: str = "agent-bench-external:python3.12"
 
 
 async def run_benchmark(config: RunConfig) -> dict[str, Any]:
@@ -54,6 +58,7 @@ async def run_benchmark(config: RunConfig) -> dict[str, Any]:
         json_mode=config.json_mode,
     )
     sandbox = make_sandbox(config.sandbox, config.sandbox_image)
+    external_runner = ExternalBenchmarkRunner()
     request_sem = asyncio.Semaphore(max(1, config.request_concurrency))
     eval_sem = asyncio.Semaphore(max(1, config.eval_concurrency))
     raw_lock = asyncio.Lock()
@@ -73,6 +78,9 @@ async def run_benchmark(config: RunConfig) -> dict[str, Any]:
                     task=task,
                     client=client,
                     sandbox=sandbox,
+                    external_runner=external_runner,
+                    config=config,
+                    output_dir=output_dir,
                     timeout=config.timeout,
                     request_sem=request_sem,
                     eval_sem=eval_sem,
@@ -104,6 +112,9 @@ async def _process_task(
     task: Task,
     client: Any,
     sandbox: Any,
+    external_runner: ExternalBenchmarkRunner,
+    config: RunConfig,
+    output_dir: Path,
     timeout: float,
     request_sem: asyncio.Semaphore,
     eval_sem: asyncio.Semaphore,
@@ -114,17 +125,20 @@ async def _process_task(
     responses: list[ModelResponse],
 ) -> GradeResult:
     task_started = time.perf_counter()
-    empty_response_count = 0
-    while True:
-        async with request_sem:
-            response = await client.complete(task)
+    if task.is_external_benchmark and config.provider != "mock":
+        response = await _run_external_benchmark(task, external_runner, config, output_dir)
+    else:
+        empty_response_count = 0
+        while True:
+            async with request_sem:
+                response = await client.complete(task)
 
-        if not _is_empty_model_response(response):
-            break
+            if not _is_empty_model_response(response):
+                break
 
-        empty_response_count += 1
-        if empty_response_count >= MAX_EMPTY_RESPONSES_PER_TASK:
-            break
+            empty_response_count += 1
+            if empty_response_count >= MAX_EMPTY_RESPONSES_PER_TASK:
+                break
 
     responses.append(response)
     async with raw_lock:
@@ -137,6 +151,46 @@ async def _process_task(
         write_jsonl_line(graded_handle, grade.to_dict())
     return grade
 
+
+
+async def _run_external_benchmark(
+    task: Task,
+    external_runner: ExternalBenchmarkRunner,
+    config: RunConfig,
+    output_dir: Path,
+) -> ModelResponse:
+    result = await external_runner.run(
+        task,
+        ExternalBenchmarkConfig(
+            provider=config.provider,
+            base_url=config.base_url or "",
+            model=config.model or "",
+            api_key_env=config.api_key_env or "",
+            output_dir=output_dir,
+            timeout=config.timeout,
+            limit=config.limit,
+            launcher_image=config.external_launcher_image,
+            source_root=Path(os.environ.get("AGENT_BENCH_SOURCE_ROOT", Path.cwd())),
+        ),
+    )
+    details = dict(result.details)
+    details["output_tail"] = result.output
+    return ModelResponse(
+        task_id=task.id,
+        model=config.model or config.provider,
+        raw_response=json.dumps(
+            {
+                "status": "completed" if result.error is None else "error",
+                "score": result.score,
+                "error": result.error,
+                "timed_out": result.timed_out,
+                "details": details,
+            },
+            ensure_ascii=False,
+        ),
+        latency_seconds=result.latency_seconds,
+        error=None,
+    )
 
 def _is_empty_model_response(response: ModelResponse) -> bool:
     return response.error is None and not response.raw_response.strip()
@@ -174,6 +228,7 @@ def _metadata(
         "json_mode": config.json_mode,
         "sandbox": config.sandbox,
         "sandbox_image": config.sandbox_image if config.sandbox == "docker" else "",
+        "external_launcher_image": config.external_launcher_image,
     }
 
 

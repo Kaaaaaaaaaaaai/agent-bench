@@ -1,9 +1,11 @@
 import asyncio
 import io
 import json
+from pathlib import Path
 
+from agent_bench.external import ExternalBenchmarkRunner
 from agent_bench.models import ModelResponse, Task
-from agent_bench.runner import _process_task
+from agent_bench.runner import RunConfig, _process_task
 
 
 class SequenceClient:
@@ -34,6 +36,9 @@ def test_process_task_retries_empty_responses_until_non_empty() -> None:
             task=task,
             client=client,
             sandbox=None,
+            external_runner=ExternalBenchmarkRunner(),
+            config=RunConfig(provider="mock"),
+            output_dir=Path("."),
             timeout=5.0,
             request_sem=asyncio.Semaphore(1),
             eval_sem=asyncio.Semaphore(1),
@@ -65,6 +70,9 @@ def test_process_task_stops_after_three_empty_responses() -> None:
             task=task,
             client=client,
             sandbox=None,
+            external_runner=ExternalBenchmarkRunner(),
+            config=RunConfig(provider="mock"),
+            output_dir=Path("."),
             timeout=5.0,
             request_sem=asyncio.Semaphore(1),
             eval_sem=asyncio.Semaphore(1),

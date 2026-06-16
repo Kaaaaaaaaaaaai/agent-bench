@@ -33,6 +33,7 @@ def load_tasks(
             if task.category in include_normalized
             or task.id in include_normalized
             or task.source in include_normalized
+            or task.benchmark.get("name") in include_normalized
         ]
 
     if limit is not None:
@@ -134,6 +135,20 @@ def _parse_task(
             reference_text=reference_text,
         )
 
+    if task_type == "external_benchmark":
+        benchmark = raw.get("benchmark")
+        if not isinstance(benchmark, dict):
+            raise TaskLoadError(f"{source}: {task_id} benchmark must be an object")
+        _validate_external_benchmark(benchmark, source, task_id)
+        return Task(
+            id=task_id,
+            category=category,
+            type=task_type,
+            question=question,
+            source=source,
+            benchmark=benchmark,
+        )
+
     raise TaskLoadError(f"{source}: {task_id} unsupported task type {task_type!r}")
 
 
@@ -152,3 +167,20 @@ def _load_reference_text(base_dir: Path, reference_path: str, source: str, task_
     if not candidate.is_file():
         raise TaskLoadError(f"{source}: {task_id} reference file does not exist: {reference_path}")
     return candidate.read_text(encoding="utf-8")
+
+
+def _validate_external_benchmark(benchmark: dict[str, Any], source: str, task_id: str) -> None:
+    for key in ("name", "homepage", "license", "credit", "docker"):
+        value = benchmark.get(key)
+        expected = dict if key == "docker" else str
+        if not isinstance(value, expected) or (isinstance(value, str) and not value.strip()):
+            raise TaskLoadError(f"{source}: {task_id} benchmark.{key} is required")
+    docker = benchmark["docker"]
+    for key in ("image", "command"):
+        value = docker.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise TaskLoadError(f"{source}: {task_id} benchmark.docker.{key} is required")
+    for key in ("setup", "environment", "volumes"):
+        value = docker.get(key, [])
+        if not isinstance(value, list) or not all(isinstance(item, str) and item.strip() for item in value):
+            raise TaskLoadError(f"{source}: {task_id} benchmark.docker.{key} must be a list of strings")

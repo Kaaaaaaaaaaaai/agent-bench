@@ -18,6 +18,7 @@ class Task:
     function_name: str | None = None
     test_cases: list[dict[str, Any]] = field(default_factory=list)
     comparison: str | None = None
+    benchmark: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_coding(self) -> bool:
@@ -30,6 +31,10 @@ class Task:
     @property
     def is_text_recall(self) -> bool:
         return self.type == "text_recall"
+
+    @property
+    def is_external_benchmark(self) -> bool:
+        return self.type == "external_benchmark"
 
 
 @dataclass(slots=True)

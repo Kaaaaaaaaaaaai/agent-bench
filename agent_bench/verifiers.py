@@ -51,6 +51,8 @@ async def grade_task(
         return await grade_coding(task, response, sandbox, timeout_seconds)
     if task.is_text_recall:
         return grade_text_recall(task, response)
+    if task.is_external_benchmark:
+        return grade_external_benchmark(task, response)
     return GradeResult(
         task_id=task.id,
         category=task.category,
@@ -279,3 +281,30 @@ def _recall_token_f1(expected: str, actual: str) -> tuple[float, int, int, int]:
     if denominator == 0:
         return 1.0, true_positives, false_positives, false_negatives
     return (2 * true_positives) / denominator, true_positives, false_positives, false_negatives
+
+
+
+def grade_external_benchmark(task: Task, response: ModelResponse) -> GradeResult:
+    payload, error = parse_model_json(response.raw_response)
+    if payload is None:
+        return _invalid_json_result(task, response, error)
+    score = payload.get("score", 0.0)
+    if not isinstance(score, (int, float)):
+        score = 0.0
+    normalized_score = max(0.0, min(1.0, float(score)))
+    benchmark_error = payload.get("error") if isinstance(payload.get("error"), str) else None
+    return GradeResult(
+        task_id=task.id,
+        category=task.category,
+        kind=task.type,
+        score=normalized_score,
+        max_score=1.0,
+        passed=normalized_score >= 1.0 and benchmark_error is None,
+        json_valid=True,
+        latency_seconds=response.latency_seconds,
+        **_response_measurements(response),
+        answer=payload.get("status"),
+        error=benchmark_error,
+        timed_out=bool(payload.get("timed_out", False)),
+        details=payload.get("details") if isinstance(payload.get("details"), dict) else {},
+    )

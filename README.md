@@ -74,54 +74,47 @@ docker run --rm -it \
 
 By default, results are written to a timestamped directory under `runs/` and copied to `runs/latest/`.
 
+
 ## Task Files
 
-Add new evaluations by dropping another `*.json` file into `tasks/`. The filename becomes the category name in summaries and the radar chart.
+The bundled `tasks/` directory now contains public benchmark descriptors instead of the previous seven hand-written task categories. Each bundled task is an `external_benchmark` entry that runs its descriptor command locally in Docker through `docker/external-benchmark.Dockerfile`.
 
-Multiple-choice task shape:
-
-```json
-{
-  "id": "EX_001",
-  "type": "multiple_choice",
-  "question": "Which option is correct?",
-  "choices": ["First", "Second"],
-  "answer": ["A"]
-}
-```
-
-Coding task shape:
+External benchmark task shape:
 
 ```json
 {
-  "id": "CODE_001",
-  "type": "coding",
-  "title": "Add",
-  "function_name": "add",
-  "question": "Return a + b.",
-  "test_cases": [
-    {"input": {"a": 1, "b": 2}, "output": 3}
-  ]
+  "id": "PB_001",
+  "type": "external_benchmark",
+  "question": "Run SWE-bench locally in Docker using its public benchmark harness.",
+  "benchmark": {
+    "name": "SWE-bench",
+    "homepage": "https://github.com/SWE-bench/SWE-bench",
+    "repository": "https://github.com/SWE-bench/SWE-bench.git",
+    "ref": "main",
+    "license": "MIT",
+    "credit": "SWE-bench authors",
+    "docker": {
+      "image": "agent-bench-external:python3.12",
+      "setup": ["python -m pip install --upgrade pip uv"],
+      "command": "agent-bench-probe --benchmark \"SWE-bench\" --kind public-benchmark",
+      "environment": [],
+      "volumes": []
+    }
+  }
 }
 ```
 
-Coding tasks are scored by passed test cases, so a solution that passes 3 of 5 cases receives `0.6`. Optional `comparison` metadata can be added for order-insensitive results; the bundled LeetCode-style tasks also have built-in fair comparators for cases such as `twoSum`, `topKFrequent`, permutations, subsets, and longest palindrome.
+All requested benchmarks are loaded as runnable external benchmark descriptors. Upstream credits and license notes are recorded as metadata in `tasks/public_benchmarks.json`; license metadata is not used as a loader gate.
 
-Text recall task shape:
+When running a remote provider, `external_benchmark` tasks do not call the model directly through Agent Bench prompts. Instead, Agent Bench starts the benchmark launcher container, clones the upstream benchmark inside Docker, and passes neutral model settings to the benchmark process through environment variables:
 
-```json
-{
-  "id": "CR_001",
-  "type": "text_recall",
-  "question": "Use this source code as the context window:\n<source>\n{{REFERENCE_CODE}}\n</source>\nReproduce the requested function lines verbatim.",
-  "reference_path": "ref/example.py",
-  "expected_text": "def target(value):\n    return value"
-}
-```
+- `AGENT_BENCH_BASE_URL`
+- `AGENT_BENCH_MODEL`
+- `AGENT_BENCH_PROVIDER`
+- `AGENT_BENCH_OUTPUT_DIR`
+- `AGENT_BENCH_API_KEY`, when `--api-key-env` is provided
 
-`text_recall` tasks are scored by whitespace-token F1 after normalizing line endings and ignoring only outer blank lines for both the ground truth and model answer. Missing expected tokens count as false negatives, and extra model tokens count as false positives. `reference_path` is resolved relative to the task file, must stay inside that task directory, and `{{REFERENCE_CODE}}` inside `question` is replaced with the full referenced file contents when the prompt is built. The bundled `tasks/code_recall.json` category follows the CodeNeedle-style pattern: load a large source file from `tasks/ref`, splice it into the model-facing question, then ask the model to reproduce the opening lines of a named function exactly.
-
-If a model returns an empty response for a task, the runner resends that task until it receives a non-empty response or reaches three empty responses for the same task. Only the final response for the task is written to `raw_responses.jsonl`; if all attempts were empty, that final empty response is recorded and graded.
+The bundled descriptors use `agent-bench-probe` as a lightweight local Docker readiness run: it clones the public benchmark source or dataset, samples the files present, and writes normalized metadata to `${AGENT_BENCH_OUTPUT_DIR}/agent_bench_result.json`. For a full upstream benchmark run, replace the descriptor command with that benchmark's canonical local invocation; the launcher will still pass the same model and output environment variables.
 
 ## Outputs
 

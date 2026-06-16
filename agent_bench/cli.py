@@ -26,6 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--json-mode", choices=["auto", "on", "off"], default="auto")
     run.add_argument("--sandbox", choices=["docker", "subprocess"], default="docker")
     run.add_argument("--sandbox-image", default="agent-bench-python:3.12")
+    run.add_argument("--external-launcher-image", default="agent-bench-external:python3.12")
 
     return parser
 
@@ -55,6 +56,7 @@ def main(argv: list[str] | None = None) -> int:
             json_mode=args.json_mode,
             sandbox=args.sandbox,
             sandbox_image=args.sandbox_image,
+            external_launcher_image=args.external_launcher_image,
         )
         summary = asyncio.run(run_benchmark(config))
         print(f"Tasks: {summary['passed_count']} / {summary['task_count']} passed")

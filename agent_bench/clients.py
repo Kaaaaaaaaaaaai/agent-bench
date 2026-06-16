@@ -223,6 +223,8 @@ class MockClient(ModelClient):
             payload = {"code": _mock_code_for_task(task), "confidence": 1.0}
         elif task.is_text_recall:
             payload = {"answer": task.expected_text or "", "confidence": 1.0}
+        elif task.is_external_benchmark:
+            payload = {"status": "mock-ready", "score": 1.0, "details": {"benchmark": task.benchmark.get("name")}}
         else:
             payload = {}
         return ModelResponse(

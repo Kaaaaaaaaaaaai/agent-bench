@@ -98,49 +98,94 @@ def test_load_tasks_supports_text_recall(tmp_path):
     assert tasks[0].reference_text == "def target(value):\n    return value\n"
 
 
-def test_bundled_task_categories_are_balanced_to_twenty_items():
-    counts: dict[str, int] = {}
-    for path in sorted(REPO_TASKS_DIR.glob("*.json")):
-        counts[path.stem] = len(json.loads(path.read_text(encoding="utf-8")))
 
-    assert counts == {
-        "analytical_reasoning": 20,
-        "code_recall": 20,
-        "coding": 20,
-        "mathematical_reasoning": 20,
-        "planning": 20,
-        "probability": 20,
-        "system_design": 20,
+
+def test_bundled_public_benchmarks_are_external_tasks_with_credits():
+    tasks = json.loads((REPO_TASKS_DIR / "public_benchmarks.json").read_text(encoding="utf-8"))
+
+    assert len(tasks) == 20
+    assert {task["type"] for task in tasks} == {"external_benchmark"}
+    assert all(task["benchmark"].get("license") for task in tasks)
+    assert all(task["benchmark"].get("credit") for task in tasks)
+    assert [task["id"] for task in tasks] == [f"PB_{index:03d}" for index in range(1, 21)]
+    assert {task["benchmark"]["name"] for task in tasks} == {
+        "SWE-bench",
+        "GDPval",
+        "PaperBench",
+        "SWE-Lancer",
+        "MLE-bench",
+        "SWE-bench Verified",
+        "AutomationBench",
+        "OSWorld",
+        "Humanity's Last Exam",
+        "BioMystery Bench",
+        "ExploitBench",
+        "codeneedle",
+        "StockBench",
+        "InvestorBench",
+        "QuantCode-Bench",
+        "FinMCP-Bench",
+        "FinToolBench",
+        "Finance Agent v2",
+        "FinanceMath",
+        "EDINET-Bench",
     }
 
 
-def test_bundled_task_ids_are_sequential_per_category():
-    prefixes = {
-        "analytical_reasoning": "AR",
-        "code_recall": "CR",
-        "coding": "CO",
-        "mathematical_reasoning": "MR",
-        "planning": "PL",
-        "probability": "PR",
-        "system_design": "SD",
-    }
+def test_load_tasks_supports_external_benchmark(tmp_path):
+    task_dir = tmp_path / "tasks"
+    task_dir.mkdir()
+    (task_dir / "benchmarks.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "PB_001",
+                    "type": "external_benchmark",
+                    "question": "Run benchmark",
+                    "benchmark": {
+                        "name": "ExampleBench",
+                        "homepage": "https://example.com",
+                        "repository": "https://example.com/repo.git",
+                        "license": "MIT",
+                        "credit": "Example authors",
+                        "docker": {"image": "example", "command": "echo ok"},
+                    },
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
 
-    for category, prefix in prefixes.items():
-        path = REPO_TASKS_DIR / f"{category}.json"
-        tasks = json.loads(path.read_text(encoding="utf-8"))
+    tasks = load_tasks(task_dir)
 
-        assert [task["id"] for task in tasks] == [
-            f"{prefix}_{index:03d}" for index in range(1, 21)
-        ]
+    assert len(tasks) == 1
+    assert tasks[0].is_external_benchmark is True
+    assert tasks[0].benchmark["name"] == "ExampleBench"
 
 
-def test_coding_config_arrays_are_compactly_formatted():
-    lines = (REPO_TASKS_DIR / "coding.json").read_text(encoding="utf-8").splitlines()
-    compact_array_keys = ("operations", "arguments", "output", "outputs")
+def test_load_tasks_keeps_non_mit_license_as_metadata(tmp_path):
+    task_dir = tmp_path / "tasks"
+    task_dir.mkdir()
+    (task_dir / "benchmarks.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "PB_001",
+                    "type": "external_benchmark",
+                    "question": "Run benchmark",
+                    "benchmark": {
+                        "name": "ExampleBench",
+                        "homepage": "https://example.com",
+                        "license": "Apache-2.0",
+                        "credit": "Example authors",
+                        "docker": {"image": "example", "command": "echo ok"},
+                    },
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
 
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith('"input": {'):
-            assert stripped.endswith(("},", "}"))
-        if any(stripped.startswith(f'"{key}": [') for key in compact_array_keys):
-            assert stripped.endswith(("],", "]"))
+    tasks = load_tasks(task_dir)
+
+    assert tasks[0].benchmark["license"] == "Apache-2.0"
