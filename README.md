@@ -5,7 +5,7 @@ Agent Bench is a Python 3.12+ benchmark runner for evaluating local or remote la
 ## Build
 
 ```bash
-docker build -t agent .
+docker build -t agent-bench .
 ```
 
 The runner container prepares the coding-evaluation image automatically in the attached Docker daemon on first use. Create persistent host directories for benchmark outputs and evaluator scratch files:
