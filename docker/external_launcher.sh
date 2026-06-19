@@ -7,6 +7,7 @@ set -euo pipefail
 
 mkdir -p "${AGENT_BENCH_OUTPUT_DIR}"
 repo_dir="/workspace/repo"
+export GIT_LFS_SKIP_SMUDGE="${AGENT_BENCH_GIT_LFS_SKIP_SMUDGE:-1}"
 
 if [[ ! -d "${repo_dir}/.git" ]]; then
   repository_ref="${AGENT_BENCH_REPOSITORY_REF:-main}"
@@ -18,7 +19,8 @@ if [[ ! -d "${repo_dir}/.git" ]]; then
 fi
 
 cd "${repo_dir}"
-if command -v git-lfs >/dev/null 2>&1; then
+if [[ "${AGENT_BENCH_GIT_LFS_PULL:-0}" == "1" ]] && command -v git-lfs >/dev/null 2>&1; then
+  unset GIT_LFS_SKIP_SMUDGE
   git lfs pull || true
 fi
 if [[ -n "${AGENT_BENCH_SUBDIR:-}" ]]; then

@@ -103,32 +103,56 @@ def test_load_tasks_supports_text_recall(tmp_path):
 def test_bundled_public_benchmarks_are_external_tasks_with_credits():
     tasks = json.loads((REPO_TASKS_DIR / "public_benchmarks.json").read_text(encoding="utf-8"))
 
-    assert len(tasks) == 20
+    assert len(tasks) == 32
     assert {task["type"] for task in tasks} == {"external_benchmark"}
     assert all(task["benchmark"].get("license") for task in tasks)
     assert all(task["benchmark"].get("credit") for task in tasks)
-    assert [task["id"] for task in tasks] == [f"PB_{index:03d}" for index in range(1, 21)]
+    assert all(task["benchmark"].get("group") for task in tasks)
+    assert [task["id"] for task in tasks] == [f"PB_{index:03d}" for index in range(1, 33)]
     assert {task["benchmark"]["name"] for task in tasks} == {
-        "SWE-bench",
-        "GDPval",
+        "SWE-Bench Verified",
+        "SWE-Bench Pro",
+        "Terminal Bench 2.1",
+        "SWE-Atlas-QnA",
+        "NL2Repo",
+        "SWE-Atlas-Test Writing",
+        "SWE-Efficiency",
+        "LiveSQLBench",
+        "CL-bench",
+        "VIBE-V2",
+        "SVG-Bench",
+        "PostTrainBench",
+        "KernelBench Hard",
         "PaperBench",
-        "SWE-Lancer",
-        "MLE-bench",
-        "SWE-bench Verified",
-        "AutomationBench",
-        "OSWorld",
-        "Humanity's Last Exam",
-        "BioMystery Bench",
-        "ExploitBench",
-        "codeneedle",
-        "StockBench",
-        "InvestorBench",
-        "QuantCode-Bench",
-        "FinMCP-Bench",
-        "FinToolBench",
-        "Finance Agent v2",
-        "FinanceMath",
-        "EDINET-Bench",
+        "BrowseComp",
+        "DRACO",
+        "GDPval rubrics",
+        "BankerToolBench",
+        "OfficeQA Pro",
+        "SpreadsheetBench-v1",
+        "YC-Bench",
+        "LOCA-Bench (256k)",
+        "MCP Atlas",
+        "Apex-Agents",
+        "Claw-Eval",
+        "OSWorld-Verified",
+        "OmniDocBench",
+        "MMMU-Pro",
+        "Video-MMMU",
+        "VideoMME (w/ sub)",
+        "IMO 2025",
+        "USAMO 2026",
+    }
+
+    loaded = load_tasks(REPO_TASKS_DIR)
+    assert len(loaded) == 32
+    assert "public_benchmarks" not in {task.category for task in loaded}
+    assert {task.category for task in loaded} == {
+        "Coding",
+        "Cowork",
+        "GUI",
+        "Multimodal",
+        "Reasoning",
     }
 
 
@@ -144,6 +168,7 @@ def test_load_tasks_supports_external_benchmark(tmp_path):
                     "question": "Run benchmark",
                     "benchmark": {
                         "name": "ExampleBench",
+                        "group": "Coding",
                         "homepage": "https://example.com",
                         "repository": "https://example.com/repo.git",
                         "license": "MIT",
@@ -160,6 +185,7 @@ def test_load_tasks_supports_external_benchmark(tmp_path):
 
     assert len(tasks) == 1
     assert tasks[0].is_external_benchmark is True
+    assert tasks[0].category == "Coding"
     assert tasks[0].benchmark["name"] == "ExampleBench"
 
 

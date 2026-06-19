@@ -293,9 +293,11 @@ def grade_external_benchmark(task: Task, response: ModelResponse) -> GradeResult
         score = 0.0
     normalized_score = max(0.0, min(1.0, float(score)))
     benchmark_error = payload.get("error") if isinstance(payload.get("error"), str) else None
+    details = payload.get("details") if isinstance(payload.get("details"), dict) else {}
+    group = details.get("group")
     return GradeResult(
         task_id=task.id,
-        category=task.category,
+        category=group if isinstance(group, str) and group.strip() else task.category,
         kind=task.type,
         score=normalized_score,
         max_score=1.0,
@@ -306,5 +308,5 @@ def grade_external_benchmark(task: Task, response: ModelResponse) -> GradeResult
         answer=payload.get("status"),
         error=benchmark_error,
         timed_out=bool(payload.get("timed_out", False)),
-        details=payload.get("details") if isinstance(payload.get("details"), dict) else {},
+        details=details,
     )

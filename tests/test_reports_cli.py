@@ -25,6 +25,17 @@ def test_render_summary_html_contains_radar_svg():
             "alpha": {"task_count": 1, "passed_count": 0, "score": 50.0},
             "beta": {"task_count": 1, "passed_count": 1, "score": 100.0},
         },
+        "benchmark_results": [
+            {
+                "group": "Coding",
+                "benchmark": "ExampleBench",
+                "score": 75.0,
+                "passed": False,
+                "homepage": "https://example.com",
+                "file_count_sampled": 5,
+                "model_eval": {"answer": "B", "expected": "A", "question": "Pick the best fix."},
+            }
+        ],
         "timing_by_category": {
             "alpha": {
                 "task_count": 1,
@@ -66,7 +77,16 @@ def test_render_summary_html_contains_radar_svg():
         ],
     )
 
-    assert "Category Radar" in html
+    assert "Average Score Radar" in html
+    assert "Benchmark Scores" in html
+    assert "Evaluation Methodology" not in html
+    assert "ExampleBench" in html
+    assert "<th>mock</th>" in html
+    assert "<th>Benchmark</th><th>mock</th><th>Items</th><th>Method</th>" in html
+    assert "<th>Method</th><th>Status</th>" not in html
+    assert "<th>Method</th><th>Answer</th>" not in html
+    assert "<th>Method</th><th>Expected</th>" not in html
+    assert "<th>Kind</th><th>Status</th>" not in html
     assert "Timing By Category" in html
     assert "Timing By Problem" in html
     assert "<th>Category</th><th>Tasks</th><th>Total Task Time</th>" in html
@@ -120,6 +140,37 @@ def test_cli_mock_smoke_writes_expected_artifacts(tmp_path):
     assert "timing_by_problem" in summary
 
 
+def test_cli_mock_smoke_runs_all_bundled_benchmarks(tmp_path):
+    out_dir = tmp_path / "runs" / "latest"
+
+    exit_code = main(
+        [
+            "run",
+            "--provider",
+            "mock",
+            "--tasks",
+            "tasks",
+            "--out",
+            str(out_dir),
+            "--sandbox",
+            "subprocess",
+        ]
+    )
+
+    assert exit_code == 0
+    summary = json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))
+    html = (out_dir / "summary.html").read_text(encoding="utf-8")
+    assert summary["task_count"] == 32
+    assert len(summary["benchmark_results"]) == 32
+    assert "public_benchmarks" not in html
+    assert "SWE-Bench Verified" in html
+    assert "Terminal Bench 2.1" in html
+    assert "MCP Atlas" in html
+    assert "VideoMME (w/ sub)" in html
+    assert "USAMO 2026" in html
+    assert "<th>Benchmark</th><th>mock-perfect</th><th>Items</th><th>Method</th>" in html
+
+
 def test_aggregate_results_groups_timing_by_category():
     summary = aggregate_results(
         [
@@ -168,3 +219,41 @@ def test_aggregate_results_groups_timing_by_category():
     assert summary["timing_by_category"]["alpha"]["total_task_duration_seconds"] == 0.7
     assert summary["timing_by_category"]["alpha"]["total_output_tokens"] == 12
     assert summary["timing_by_category"]["beta"]["task_count"] == 1
+    assert summary["benchmark_results"] == []
+
+
+def test_aggregate_results_emits_external_benchmark_rows():
+    summary = aggregate_results(
+        [
+            GradeResult(
+                task_id="PB_001",
+                category="Coding",
+                kind="external_benchmark",
+                score=0.75,
+                max_score=1.0,
+                passed=False,
+                json_valid=True,
+                latency_seconds=0.1,
+                details={
+                    "benchmark": "ExampleBench",
+                    "group": "Coding",
+                    "homepage": "https://example.com",
+                    "license": "MIT",
+                    "credit": "Example authors",
+                    "result": {
+                        "repository_ready": True,
+                        "file_count_sampled": 12,
+                        "model_eval": {"answer": "A", "expected": "B"},
+                    },
+                },
+            )
+        ],
+        {"run_duration_seconds": 1.0},
+    )
+
+    assert summary["category_counts"] == {
+        "Coding": {"task_count": 1, "passed_count": 0, "score": 75.0}
+    }
+    assert summary["benchmark_results"][0]["benchmark"] == "ExampleBench"
+    assert summary["benchmark_results"][0]["score"] == 75.0
+    assert summary["benchmark_results"][0]["model_eval"] == {"answer": "A", "expected": "B"}

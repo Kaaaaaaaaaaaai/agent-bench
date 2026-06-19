@@ -1,9 +1,12 @@
 import asyncio
+import hashlib
 import json
 import os
 import shutil
 import subprocess
+import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -12,6 +15,9 @@ from agent_bench.models import Task
 
 
 DEFAULT_EXTERNAL_IMAGE = "agent-bench-external:python3.12"
+CONTAINER_OUTPUT_DIR = "/outputs"
+IMAGE_FINGERPRINT_LABEL = "agent-bench.external-fingerprint"
+_IMAGE_BUILD_LOCK = threading.Lock()
 
 
 @dataclass(slots=True)
@@ -69,16 +75,16 @@ class ExternalBenchmarkRunner:
                 error=image_error,
             )
 
+        container_name = f"agent-bench-{task.id.lower()}-{uuid.uuid4().hex[:12]}"
         command = [
             config.docker_bin,
             "run",
-            "--rm",
+            "--name",
+            container_name,
             "--network",
             "host",
             "-v",
             "/var/run/docker.sock:/var/run/docker.sock",
-            "-v",
-            f"{task_output_dir.resolve()}:/outputs",
         ]
         for volume in docker.get("volumes", []):
             command.extend(["-v", volume])
@@ -95,25 +101,33 @@ class ExternalBenchmarkRunner:
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
+            _remove_container(config, container_name)
             return ExternalBenchmarkResult(
                 score=0.0,
                 passed=False,
                 latency_seconds=time.perf_counter() - started,
-                output=(exc.stdout or "") + (exc.stderr or ""),
+                output=_timeout_output(exc),
                 error=f"External benchmark timed out after {config.timeout:.1f}s",
                 timed_out=True,
                 details={"output_dir": str(task_output_dir)},
             )
 
+        copy_error = _copy_container_outputs(config, container_name, task_output_dir)
+        _remove_container(config, container_name)
         result_file = task_output_dir / "agent_bench_result.json"
         payload = _load_result_payload(result_file)
         output = (completed.stdout or "") + (completed.stderr or "")
+        if copy_error:
+            output = f"{output}{copy_error}\n"
         score = _coerce_score(payload.get("score"), completed.returncode == 0)
         error = payload.get("error") if isinstance(payload.get("error"), str) else None
+        if copy_error and not error:
+            error = copy_error
         if completed.returncode != 0 and not error:
             error = f"External benchmark exited with code {completed.returncode}"
         details = {
             "benchmark": benchmark["name"],
+            "group": benchmark.get("group", task.category),
             "homepage": benchmark["homepage"],
             "license": benchmark["license"],
             "credit": benchmark["credit"],
@@ -133,19 +147,51 @@ class ExternalBenchmarkRunner:
 
 def _ensure_launcher_image(config: ExternalBenchmarkConfig, image: str | None = None) -> str | None:
     image = image or config.launcher_image
+    if _image_is_current(config, image):
+        return None
+    with _IMAGE_BUILD_LOCK:
+        if _image_is_current(config, image):
+            return None
+        return _build_launcher_image(config, image)
+
+
+def _image_is_current(config: ExternalBenchmarkConfig, image: str) -> bool:
     inspect = subprocess.run(
         [config.docker_bin, "image", "inspect", image],
         text=True,
         capture_output=True,
         check=False,
     )
-    if inspect.returncode == 0:
-        return None
+    if inspect.returncode != 0:
+        return False
+    if image != config.launcher_image:
+        return True
+    try:
+        image_config = json.loads(inspect.stdout)[0]
+        labels = image_config.get("Config", {}).get("Labels", {})
+    except (IndexError, json.JSONDecodeError, TypeError):
+        return False
+    if not isinstance(labels, dict):
+        return False
+    return labels.get(IMAGE_FINGERPRINT_LABEL) == _launcher_image_fingerprint(config)
+
+
+def _build_launcher_image(config: ExternalBenchmarkConfig, image: str) -> str | None:
     dockerfile = config.source_root / "docker" / "external-benchmark.Dockerfile"
     if not dockerfile.is_file():
         return f"External benchmark Dockerfile was not found at {dockerfile}"
     build = subprocess.run(
-        [config.docker_bin, "build", "-f", str(dockerfile), "-t", image, str(config.source_root)],
+        [
+            config.docker_bin,
+            "build",
+            "-f",
+            str(dockerfile),
+            "-t",
+            image,
+            "--label",
+            f"{IMAGE_FINGERPRINT_LABEL}={_launcher_image_fingerprint(config)}",
+            str(config.source_root),
+        ],
         text=True,
         capture_output=True,
         check=False,
@@ -155,10 +201,60 @@ def _ensure_launcher_image(config: ExternalBenchmarkConfig, image: str | None = 
     return None
 
 
+def _launcher_image_fingerprint(config: ExternalBenchmarkConfig) -> str:
+    digest = hashlib.sha256()
+    for relative in (
+        "docker/external-benchmark.Dockerfile",
+        "docker/external_launcher.sh",
+        "docker/benchmark_probe.py",
+    ):
+        path = config.source_root / relative
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        if path.is_file():
+            digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _copy_container_outputs(config: ExternalBenchmarkConfig, container_name: str, output_dir: Path) -> str | None:
+    copy = subprocess.run(
+        [config.docker_bin, "cp", f"{container_name}:{CONTAINER_OUTPUT_DIR}/.", str(output_dir)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if copy.returncode == 0:
+        return None
+    return (copy.stderr or copy.stdout or "Unable to copy external benchmark outputs").strip()
+
+
+def _timeout_output(exc: subprocess.TimeoutExpired) -> str:
+    return f"{_to_text(exc.stdout)}{_to_text(exc.stderr)}"
+
+
+def _to_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def _remove_container(config: ExternalBenchmarkConfig, container_name: str) -> None:
+    subprocess.run(
+        [config.docker_bin, "rm", "-f", container_name],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
 def _docker_env(task: Task, benchmark: dict[str, Any], docker: dict[str, Any], config: ExternalBenchmarkConfig) -> dict[str, str]:
     env = {
         "AGENT_BENCH_TASK_ID": task.id,
         "AGENT_BENCH_BENCHMARK_NAME": benchmark["name"],
+        "AGENT_BENCH_BENCHMARK_GROUP": benchmark.get("group", task.category),
         "AGENT_BENCH_REPOSITORY": benchmark.get("repository", benchmark["homepage"]),
         "AGENT_BENCH_REPOSITORY_REF": benchmark.get("ref", "main"),
         "AGENT_BENCH_SUBDIR": benchmark.get("subdir", ""),
@@ -168,7 +264,7 @@ def _docker_env(task: Task, benchmark: dict[str, Any], docker: dict[str, Any], c
         "AGENT_BENCH_PROVIDER": config.provider,
         "AGENT_BENCH_BASE_URL": config.base_url,
         "AGENT_BENCH_MODEL": config.model,
-        "AGENT_BENCH_OUTPUT_DIR": "/outputs",
+        "AGENT_BENCH_OUTPUT_DIR": CONTAINER_OUTPUT_DIR,
     }
     if config.api_key_env:
         env["AGENT_BENCH_API_KEY_ENV"] = config.api_key_env

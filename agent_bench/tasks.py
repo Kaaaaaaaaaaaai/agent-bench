@@ -140,9 +140,11 @@ def _parse_task(
         if not isinstance(benchmark, dict):
             raise TaskLoadError(f"{source}: {task_id} benchmark must be an object")
         _validate_external_benchmark(benchmark, source, task_id)
+        benchmark_group = benchmark.get("group")
+        task_category = benchmark_group if isinstance(benchmark_group, str) and benchmark_group.strip() else category
         return Task(
             id=task_id,
-            category=category,
+            category=task_category,
             type=task_type,
             question=question,
             source=source,

@@ -13,15 +13,18 @@ def test_external_runner_uses_descriptor_docker_image(monkeypatch, tmp_path):
         commands.append(command)
         if command[:3] == ["docker", "image", "inspect"]:
             return CompletedProcess(command, 0, "", "")
-        if command[:3] == ["docker", "run", "--rm"]:
-            output_mount = next(item for item in command if item.endswith(":/outputs"))
-            output_dir = Path(output_mount.removesuffix(":/outputs"))
+        if command[:3] == ["docker", "run", "--name"]:
+            return CompletedProcess(command, 0, "ready", "")
+        if command[:2] == ["docker", "cp"]:
+            output_dir = Path(command[3])
             output_dir.mkdir(parents=True, exist_ok=True)
             (output_dir / "agent_bench_result.json").write_text(
                 json.dumps({"score": 1.0, "ok": True}) + "\n",
                 encoding="utf-8",
             )
-            return CompletedProcess(command, 0, "ready", "")
+            return CompletedProcess(command, 0, "", "")
+        if command[:3] == ["docker", "rm", "-f"]:
+            return CompletedProcess(command, 0, "", "")
         raise AssertionError(f"unexpected command: {command}")
 
     monkeypatch.setattr("agent_bench.external.shutil.which", lambda name: "/usr/bin/docker")
@@ -62,3 +65,6 @@ def test_external_runner_uses_descriptor_docker_image(monkeypatch, tmp_path):
     assert commands[0] == ["docker", "image", "inspect", "example-benchmark:local"]
     assert commands[1][-1] == "example-benchmark:local"
     assert "AGENT_BENCH_DOCKER_IMAGE=example-benchmark:local" in commands[1]
+    assert not any(item.endswith(":/outputs") for item in commands[1])
+    assert commands[2][:2] == ["docker", "cp"]
+    assert commands[3][:3] == ["docker", "rm", "-f"]

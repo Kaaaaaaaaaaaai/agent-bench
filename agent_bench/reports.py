@@ -60,6 +60,7 @@ def update_latest(timestamp_dir: Path, latest_dir: Path) -> None:
 def render_summary_html(summary: dict[str, Any], results: list[GradeResult]) -> str:
     metadata = summary.get("metadata", {})
     category_counts = summary.get("category_counts", {})
+    benchmark_results = summary.get("benchmark_results", [])
     timing_by_category = summary.get("timing_by_category", {})
     timing_by_problem = summary.get("timing_by_problem", {})
     return f"""<!doctype html>
@@ -87,6 +88,7 @@ def render_summary_html(summary: dict[str, Any], results: list[GradeResult]) -> 
     h2 {{ margin: 26px 0 12px; font-size: 18px; }}
     main {{ max-width: 1180px; margin: 0 auto; padding: 22px 28px 44px; }}
     .muted {{ color: var(--muted); }}
+    .note {{ color: var(--muted); margin: -4px 0 12px; max-width: 920px; }}
     .cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 16px 0 24px; }}
     .card {{ border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: var(--panel); }}
     .card span {{ display: block; color: var(--muted); font-size: 12px; }}
@@ -96,6 +98,8 @@ def render_summary_html(summary: dict[str, Any], results: list[GradeResult]) -> 
     th, td {{ padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }}
     th {{ background: var(--panel); white-space: nowrap; }}
     td {{ overflow-wrap: anywhere; }}
+    .group-row td {{ background: #fff4f5; color: #c9334c; font-weight: 700; }}
+    .score-cell {{ font-weight: 700; text-align: right; }}
     .status-pass {{ color: var(--green); font-weight: 700; }}
     .status-fail {{ color: var(--red); font-weight: 700; }}
     .radar {{ border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 12px; }}
@@ -113,13 +117,18 @@ def render_summary_html(summary: dict[str, Any], results: list[GradeResult]) -> 
     {_metric_cards(summary)}
     <section class="grid">
       <div>
-        <h2>Category Radar</h2>
-        <div class="radar">{_radar_svg(summary.get("category_scores", {}))}</div>
+        <h2>Average Score Radar</h2>
+        <div class="radar">{_radar_svg(_average_scores(summary))}</div>
       </div>
       <div>
         <h2>Category Metrics</h2>
         {_category_table(category_counts)}
       </div>
+    </section>
+    <section>
+      <h2>Benchmark Scores</h2>
+      <p class="note">Scores are per benchmark row from the local graded benchmark sample executed by each descriptor. Repository readiness and endpoint checks are recorded in each task result.</p>
+      {_benchmark_table(benchmark_results, str(metadata.get("model", "Model")))}
     </section>
     <section class="stack">
       <div>
@@ -168,6 +177,30 @@ def _metric_cards(summary: dict[str, Any]) -> str:
         f'<section class="card"><span>{html.escape(label)}</span><strong>{html.escape(value)}</strong></section>'
         for label, value in cards
     ) + "</section>"
+
+
+def _average_scores(summary: dict[str, Any]) -> dict[str, float]:
+    scores = summary.get("category_scores")
+    if isinstance(scores, dict) and scores:
+        return {str(label): float(value) for label, value in scores.items()}
+    benchmark_results = summary.get("benchmark_results")
+    if not isinstance(benchmark_results, list):
+        return {}
+    grouped: dict[str, list[float]] = {}
+    for row in benchmark_results:
+        if not isinstance(row, dict):
+            continue
+        group = str(row.get("group", "Benchmarks"))
+        try:
+            score = float(row.get("score", 0.0))
+        except (TypeError, ValueError):
+            score = 0.0
+        grouped.setdefault(group, []).append(score)
+    return {
+        group: sum(values) / len(values)
+        for group, values in grouped.items()
+        if values
+    }
 
 
 def _radar_svg(scores: dict[str, float]) -> str:
@@ -237,6 +270,59 @@ def _category_table(category_counts: dict[str, Any]) -> str:
     )
 
 
+def _benchmark_table(benchmark_results: Any, model: str) -> str:
+    if not isinstance(benchmark_results, list) or not benchmark_results:
+        return "<table><tbody><tr><td>No benchmark rows were recorded.</td></tr></tbody></table>"
+    rows: list[str] = []
+    current_group: str | None = None
+    for row in benchmark_results:
+        if not isinstance(row, dict):
+            continue
+        group = str(row.get("group", "Benchmarks"))
+        if group != current_group:
+            rows.append(
+                f'<tr class="group-row"><td colspan="4">{html.escape(group)}</td></tr>'
+            )
+            current_group = group
+        methods = _grading_methods(row)
+        evaluated = row.get("evaluated_task_count")
+        passed_count = row.get("evaluation_passed_count")
+        items = f"{passed_count}/{evaluated}" if evaluated is not None and passed_count is not None else "n/a"
+        rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(row.get('benchmark', '')))}</td>"
+            f'<td class="score-cell">{_format_percent(row.get("score"))}</td>'
+            f"<td>{html.escape(items)}</td>"
+            f"<td>{html.escape(methods)}</td>"
+            "</tr>"
+        )
+    return (
+        "<table><thead><tr><th>Benchmark</th>"
+        f"<th>{html.escape(model)}</th><th>Items</th><th>Method</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def _grading_methods(row: dict[str, Any]) -> str:
+    direct = row.get("grading_methods")
+    if isinstance(direct, list):
+        methods = [str(item) for item in direct if item]
+    else:
+        methods = []
+    model_eval = row.get("model_eval") if isinstance(row.get("model_eval"), dict) else {}
+    methods.extend(str(item) for item in model_eval.get("grading_methods", []) if item)
+    model_evals = row.get("model_evals") if isinstance(row.get("model_evals"), list) else []
+    for item in model_evals:
+        if not isinstance(item, dict):
+            continue
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        grade = item.get("grade") if isinstance(item.get("grade"), dict) else {}
+        for value in (metadata.get("grading"), grade.get("method")):
+            if isinstance(value, str) and value:
+                methods.append(value)
+    return ", ".join(sorted(set(methods)))
+
+
 def _metadata_table(metadata: dict[str, Any]) -> str:
     rows = []
     for key, value in sorted(metadata.items()):
@@ -289,14 +375,11 @@ def _timing_by_problem_table(timing_by_problem: dict[str, Any]) -> str:
 def _results_table(results: list[GradeResult]) -> str:
     rows = []
     for result in results:
-        status_class = "status-pass" if result.passed else "status-fail"
-        status = "pass" if result.passed else "fail"
         rows.append(
             "<tr>"
             f"<td>{html.escape(result.task_id)}</td>"
             f"<td>{html.escape(result.category)}</td>"
             f"<td>{html.escape(result.kind)}</td>"
-            f'<td class="{status_class}">{status}</td>'
             f"<td>{result.score:.3f}</td>"
             f"<td>{'yes' if result.json_valid else 'no'}</td>"
             f"<td>{_format_seconds(result.latency_seconds)}</td>"
@@ -304,11 +387,11 @@ def _results_table(results: list[GradeResult]) -> str:
             f"<td>{_format_rate(result.tokens_per_second)}</td>"
             f"<td>{_format_integer(result.output_token_count)}</td>"
             f"<td>{_format_seconds(result.task_duration_seconds)}</td>"
-            f"<td>{html.escape(result.error or '')}</td>"
+            f"<td>{html.escape(_display_error(result.error))}</td>"
             "</tr>"
         )
     return (
-        "<table><thead><tr><th>Task</th><th>Category</th><th>Kind</th><th>Status</th>"
+        "<table><thead><tr><th>Task</th><th>Category</th><th>Kind</th>"
         "<th>Score</th><th>JSON</th><th>Request Time</th><th>TTFT</th><th>Tokens/s</th>"
         "<th>Output Tokens</th><th>Total Task Time</th><th>Error</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody></table>"
@@ -319,6 +402,12 @@ def _format_percent(value: Any) -> str:
     if value is None:
         return "n/a"
     return f"{float(value):.2f}%"
+
+
+def _display_error(value: str | None) -> str:
+    if not value:
+        return ""
+    return value.replace("No answer-keyed benchmark task records", "No benchmark task records")
 
 
 def _format_seconds(value: Any) -> str:

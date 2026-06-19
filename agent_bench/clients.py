@@ -224,7 +224,45 @@ class MockClient(ModelClient):
         elif task.is_text_recall:
             payload = {"answer": task.expected_text or "", "confidence": 1.0}
         elif task.is_external_benchmark:
-            payload = {"status": "mock-ready", "score": 1.0, "details": {"benchmark": task.benchmark.get("name")}}
+            benchmark = task.benchmark
+            payload = {
+                "status": "mock-ready",
+                "score": 1.0,
+                "details": {
+                    "benchmark": benchmark.get("name"),
+                    "group": benchmark.get("group", task.category),
+                    "homepage": benchmark.get("homepage", ""),
+                    "license": benchmark.get("license", ""),
+                    "credit": benchmark.get("credit", ""),
+                    "result": {
+                        "repository_ready": True,
+                        "file_count_sampled": 0,
+                        "extracted_task_count": 1,
+                        "evaluated_task_count": 1,
+                        "evaluation_passed_count": 1,
+                        "extraction_sources": ["mock-smoke"],
+                        "model_eval": {
+                            "ok": True,
+                            "score": 1.0,
+                            "answer": "1/1",
+                            "expected": "1/1",
+                            "question": "Smoke test placeholder for benchmark wiring.",
+                            "grading_methods": ["smoke"],
+                        },
+                        "model_evals": [
+                            {
+                                "source": "mock-smoke",
+                                "question": "Smoke test placeholder for benchmark wiring.",
+                                "answer": "mock-ready",
+                                "expected": "benchmark descriptor loads",
+                                "score": 1.0,
+                                "passed": True,
+                                "metadata": {"grading": "smoke"},
+                            }
+                        ],
+                    },
+                },
+            }
         else:
             payload = {}
         return ModelResponse(

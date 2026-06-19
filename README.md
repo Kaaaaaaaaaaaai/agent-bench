@@ -1,6 +1,6 @@
 # Agent Bench
 
-Agent Bench is a Python 3.12+ benchmark runner for evaluating local or remote language models against JSON task files. It supports OpenAI-compatible servers such as vLLM and Ollama's OpenAI endpoint, plus Ollama's native chat API.
+Agent Bench is a Python 3.12+ benchmark runner for evaluating local or remote language models against JSON task files and cloned public benchmark sources. It supports OpenAI-compatible servers such as vLLM and Ollama's OpenAI endpoint, plus Ollama's native chat API.
 
 ## Build
 
@@ -77,7 +77,7 @@ By default, results are written to a timestamped directory under `runs/` and cop
 
 ## Task Files
 
-The bundled `tasks/` directory now contains public benchmark descriptors instead of the previous seven hand-written task categories. Each bundled task is an `external_benchmark` entry that runs its descriptor command locally in Docker through `docker/external-benchmark.Dockerfile`.
+The bundled `tasks/` directory contains the screenshot-style benchmark rows as external benchmark descriptors. Each bundled task is an `external_benchmark` entry that runs its descriptor command locally in Docker through `docker/external-benchmark.Dockerfile` when the descriptor points at a public cloneable source.
 
 External benchmark task shape:
 
@@ -88,8 +88,9 @@ External benchmark task shape:
   "question": "Run SWE-bench locally in Docker using its public benchmark harness.",
   "benchmark": {
     "name": "SWE-bench",
-    "homepage": "https://github.com/SWE-bench/SWE-bench",
-    "repository": "https://github.com/SWE-bench/SWE-bench.git",
+    "group": "Coding",
+    "homepage": "https://huggingface.co/datasets/princeton-nlp/SWE-bench",
+    "repository": "https://huggingface.co/datasets/princeton-nlp/SWE-bench",
     "ref": "main",
     "license": "MIT",
     "credit": "SWE-bench authors",
@@ -104,9 +105,9 @@ External benchmark task shape:
 }
 ```
 
-All requested benchmarks are loaded as runnable external benchmark descriptors. Upstream credits and license notes are recorded as metadata in `tasks/public_benchmarks.json`; license metadata is not used as a loader gate.
+The default descriptor file now covers 32 benchmark rows across `Coding`, `Cowork`, `GUI`, `Multimodal`, and `Reasoning`, including SWE-Bench Verified, Terminal Bench 2.1, BrowseComp, MCP Atlas, OSWorld-Verified, OmniDocBench, VideoMME, IMO 2025, and USAMO 2026. Upstream credits and license notes are recorded as metadata in `tasks/public_benchmarks.json`; license metadata is not used as a loader gate. Some leaderboard rows do not currently expose a public cloneable task repository, so those descriptors are present for reporting/smoke coverage and should be replaced with a cloneable source as soon as the benchmark publisher releases one.
 
-When running a remote provider, `external_benchmark` tasks do not call the model directly through Agent Bench prompts. Instead, Agent Bench starts the benchmark launcher container, clones the upstream benchmark inside Docker, and passes neutral model settings to the benchmark process through environment variables:
+When running a remote provider, Agent Bench starts the benchmark launcher container, clones the upstream benchmark source or dataset inside Docker, extracts real benchmark task records, calls the configured model endpoint for each sampled task, and grades the model's answer. The launcher receives neutral model settings through environment variables:
 
 - `AGENT_BENCH_BASE_URL`
 - `AGENT_BENCH_MODEL`
@@ -114,7 +115,13 @@ When running a remote provider, `external_benchmark` tasks do not call the model
 - `AGENT_BENCH_OUTPUT_DIR`
 - `AGENT_BENCH_API_KEY`, when `--api-key-env` is provided
 
-The bundled descriptors use `agent-bench-probe` as a lightweight local Docker readiness run: it clones the public benchmark source or dataset, samples the files present, and writes normalized metadata to `${AGENT_BENCH_OUTPUT_DIR}/agent_bench_result.json`. For a full upstream benchmark run, replace the descriptor command with that benchmark's canonical local invocation; the launcher will still pass the same model and output environment variables.
+The bundled descriptors use `agent-bench-probe` to normalize different public benchmark formats into a common sample-and-grade flow. It supports JSON, JSONL, CSV, Parquet, selected Python task dictionaries, prompt/description text files, Hugging Face datasets, and benchmark-specific adapters for repositories that expose tasks through code or market data rather than a single task file. Extracted records are graded with one of three methods:
+
+- `exact`: deterministic answer, patch, label, or multiple-choice matching.
+- `rubric`: a published rubric or benchmark prompt is used for model-based grading.
+- `task_compliance`: the benchmark exposes a real task prompt without a standalone answer key, so a grading call scores whether the response satisfies the task requirements.
+
+Each descriptor records the extracted source paths, item counts, grading method, and normalized score in `${AGENT_BENCH_OUTPUT_DIR}/agent_bench_result.json`.
 
 ## Outputs
 
@@ -126,7 +133,16 @@ Each run writes:
 - `summary.json`
 - `summary.html`
 
-The HTML report is fully static and includes metric cards, category summaries, detailed task rows, an inline SVG radar chart, and timing tables for categories plus individual problems.
+The HTML report is fully static and includes metric cards, an average-score radar chart, grouped benchmark scores, category summaries, detailed task rows, and timing tables for categories plus individual problems.
+
+The `Benchmark Scores` table is grouped by benchmark group such as `Coding`, `Cowork`, `Finance`, `GUI`, and `Reasoning`. It includes only:
+
+- benchmark name
+- model score
+- passed/evaluated item count
+- grading method
+
+The report intentionally does not include `Status`, `Answer`, `Expected`, or `Evaluation Methodology` columns/sections in `summary.html`. Detailed diagnostics remain available in `summary.json`, `graded_results.jsonl`, and `results.csv`.
 
 Remote providers are queried with streaming responses so the runner can record:
 
