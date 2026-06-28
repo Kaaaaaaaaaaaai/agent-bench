@@ -186,3 +186,8 @@ def _validate_external_benchmark(benchmark: dict[str, Any], source: str, task_id
         value = docker.get(key, [])
         if not isinstance(value, list) or not all(isinstance(item, str) and item.strip() for item in value):
             raise TaskLoadError(f"{source}: {task_id} benchmark.docker.{key} must be a list of strings")
+    capabilities = benchmark.get("capabilities", [])
+    if not isinstance(capabilities, list) or not all(
+        isinstance(item, str) and item.strip() for item in capabilities
+    ):
+        raise TaskLoadError(f"{source}: {task_id} benchmark.capabilities must be a list of strings")

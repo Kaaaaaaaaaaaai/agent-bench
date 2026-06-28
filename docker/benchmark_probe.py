@@ -63,6 +63,16 @@ RUBRIC_KEYS = ("rubric", "criteria", "grading", "evaluation_criteria")
 SKIP_DIRS = {".git", "__pycache__", ".venv", "venv", "node_modules", ".mypy_cache", ".pytest_cache"}
 MAX_FIELD_CHARS = 6000
 MAX_RECORDS_PER_FILE = 500
+JUDGE_REQUIRED_KEYS = {"score", "passed", "reason"}
+HARNESS_SUPPORTED_CAPABILITIES = {"chat_answer", "external_data_required"}
+HTTP_FALLBACK_STATUS_CODES = {400, 404, 422}
+
+
+class ChatCompletionHTTPError(Exception):
+    def __init__(self, code: int, body: str) -> None:
+        super().__init__(body or f"HTTP {code}")
+        self.code = code
+        self.body = body
 
 
 @dataclass(slots=True)
@@ -97,47 +107,168 @@ def main() -> int:
     ]
     output_dir = Path(os.environ.get("AGENT_BENCH_OUTPUT_DIR", "/outputs"))
     output_dir.mkdir(parents=True, exist_ok=True)
+    required_capabilities = _required_capabilities(args.benchmark)
+    unsupported_capabilities = sorted(required_capabilities - HARNESS_SUPPORTED_CAPABILITIES)
+    if unsupported_capabilities:
+        payload = _base_result_payload(
+            args=args,
+            files=files,
+            markers=markers,
+            sample_limit=_sample_limit(),
+            required_capabilities=sorted(required_capabilities),
+            unsupported_capabilities=unsupported_capabilities,
+        )
+        payload.update(
+            {
+                "score": 0.0,
+                "raw_score": 0.0,
+                "valid_score": 0.0,
+                "status": "skipped_unsupported_capability",
+                "error": (
+                    "Benchmark requires unsupported capability/capabilities: "
+                    + ", ".join(unsupported_capabilities)
+                ),
+                "extracted_task_count": 0,
+                "evaluated_task_count": 0,
+                "valid_evaluated_task_count": 0,
+                "evaluation_passed_count": 0,
+                "skipped_task_count": 1,
+                "fallback_task_count": 0,
+                "extraction_errors": [],
+                "extraction_sources": [],
+                "model_evals": [],
+                "model_eval": {},
+                "status_counts": {"skipped_unsupported_capability": 1},
+            }
+        )
+        _write_result(output_dir, payload)
+        return 0
     sample_limit = _sample_limit()
     items, extraction_errors = extract_benchmark_items(cwd, sample_limit)
+    if not items:
+        fallback = readiness_fallback_item(cwd, args.benchmark)
+        if fallback is not None:
+            items.append(fallback)
+            extraction_errors.append(
+                "Used repository-readiness fallback because no machine-readable benchmark rows were found"
+            )
     evaluations = run_model_evaluations(args.benchmark, items)
     evaluated_count = len(evaluations)
-    score = _average_score(evaluations)
+    valid_evaluations = _valid_evaluations(evaluations)
+    raw_score = _average_score(evaluations)
+    score = _average_score(valid_evaluations)
     error_message = ""
     if not items:
         error_message = "No benchmark task records were found in the cloned repository"
     elif not evaluations and _is_remote_provider():
         error_message = "No model evaluations completed"
 
-    payload = {
-        "score": score,
+    payload = _base_result_payload(
+        args=args,
+        files=files,
+        markers=markers,
+        sample_limit=sample_limit,
+        required_capabilities=sorted(required_capabilities),
+        unsupported_capabilities=[],
+    )
+    payload.update(
+        {
+            "score": score,
+            "raw_score": raw_score,
+            "valid_score": score,
+            "status": "completed" if not error_message else "failed_harness_setup",
+            "extracted_task_count": len(items),
+            "evaluated_task_count": evaluated_count,
+            "valid_evaluated_task_count": len(valid_evaluations),
+            "evaluation_passed_count": sum(1 for item in evaluations if item.get("passed")),
+            "skipped_task_count": sum(
+                1 for item in evaluations if str(item.get("status", "")).startswith("skipped_")
+            ),
+            "judge_parse_failure_count": sum(1 for item in evaluations if item.get("status") == "failed_judge_parse"),
+            "judge_parse_repaired_count": sum(1 for item in evaluations if item.get("judge_parse_repaired")),
+            "fallback_task_count": sum(1 for item in items if item.metadata.get("fallback")),
+            "extraction_errors": extraction_errors[:20],
+            "extraction_sources": sorted({item.source for item in items}),
+            "model_evals": evaluations,
+            "model_eval": summarize_evaluations(evaluations),
+            "status_counts": _status_counts(evaluations),
+        }
+    )
+    if error_message:
+        payload["error"] = error_message
+
+    _write_result(output_dir, payload)
+    return 0 if evaluated_count > 0 else 2
+
+
+def _base_result_payload(
+    *,
+    args: argparse.Namespace,
+    files: list[str],
+    markers: list[str],
+    sample_limit: int,
+    required_capabilities: list[str],
+    unsupported_capabilities: list[str],
+) -> dict[str, Any]:
+    return {
         "benchmark": args.benchmark,
         "group": os.environ.get("AGENT_BENCH_BENCHMARK_GROUP") or "Benchmarks",
         "kind": args.kind,
         "repository": os.environ.get("AGENT_BENCH_REPOSITORY", ""),
         "repository_ref": os.environ.get("AGENT_BENCH_REPOSITORY_REF", ""),
         "subdir": os.environ.get("AGENT_BENCH_SUBDIR", ""),
+        "homepage": os.environ.get("AGENT_BENCH_BENCHMARK_HOMEPAGE", ""),
+        "license": os.environ.get("AGENT_BENCH_BENCHMARK_LICENSE", ""),
+        "credit": os.environ.get("AGENT_BENCH_BENCHMARK_CREDIT", ""),
+        "citation": os.environ.get("AGENT_BENCH_BENCHMARK_CITATION", ""),
+        "dataset_id": os.environ.get("AGENT_BENCH_DATASET_ID", ""),
         "model": os.environ.get("AGENT_BENCH_MODEL", ""),
         "repository_ready": bool(files),
         "file_count_sampled": len(files),
         "markers": markers,
         "sample_files": files,
         "sample_limit": sample_limit,
-        "extracted_task_count": len(items),
-        "evaluated_task_count": evaluated_count,
-        "evaluation_passed_count": sum(1 for item in evaluations if item.get("passed")),
-        "extraction_errors": extraction_errors[:20],
-        "extraction_sources": sorted({item.source for item in items}),
-        "model_evals": evaluations,
-        "model_eval": summarize_evaluations(evaluations),
+        "required_capabilities": required_capabilities,
+        "supported_capabilities": sorted(HARNESS_SUPPORTED_CAPABILITIES),
+        "unsupported_capabilities": unsupported_capabilities,
     }
-    if error_message:
-        payload["error"] = error_message
 
+
+def _write_result(output_dir: Path, payload: dict[str, Any]) -> None:
     (output_dir / "agent_bench_result.json").write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    return 0 if evaluated_count > 0 else 2
+
+
+def _required_capabilities(benchmark: str) -> set[str]:
+    configured = _capabilities_from_env()
+    if configured:
+        return configured
+    normalized = normalize_text(benchmark).replace("-", " ")
+    capability_map = {
+        "swe bench": {"repo_patch"},
+        "swe bench verified": {"repo_patch"},
+        "swe lancer": {"repo_patch"},
+        "gdpval": {"file_artifact", "external_data_required"},
+        "paperbench": {"file_artifact"},
+        "mle bench": {"file_artifact", "external_data_required"},
+        "automationbench": {"tool_call", "external_data_required"},
+        "osworld": {"browser_or_gui"},
+        "exploitbench": {"tool_call"},
+        "finmcp bench": {"tool_call", "external_data_required"},
+        "fintoolbench": {"tool_call", "external_data_required"},
+        "finance agent v2": {"tool_call", "external_data_required"},
+    }
+    for key, capabilities in capability_map.items():
+        if normalized == key:
+            return set(capabilities)
+    return {"chat_answer"}
+
+
+def _capabilities_from_env() -> set[str]:
+    raw = os.environ.get("AGENT_BENCH_REQUIRED_CAPABILITIES", "")
+    return {item.strip() for item in raw.split(",") if item.strip()}
 
 
 def extract_benchmark_items(root: Path, limit: int) -> tuple[list[BenchmarkItem], list[str]]:
@@ -159,6 +290,48 @@ def extract_benchmark_items(root: Path, limit: int) -> tuple[list[BenchmarkItem]
             continue
         items.extend(new_items)
     return items, errors
+
+
+def readiness_fallback_item(root: Path, benchmark: str) -> BenchmarkItem | None:
+    excerpt_path = _first_existing_text(
+        root,
+        (
+            "README.md",
+            "README.rst",
+            "benchmark_plan.md",
+            "docs/README.md",
+        ),
+    )
+    if excerpt_path is None:
+        return None
+    text = excerpt_path.read_text(encoding="utf-8", errors="replace").strip()
+    if len(text) < 80:
+        return None
+    question = (
+        f"{benchmark} public benchmark local-readiness task.\n"
+        "The lightweight Docker adapter did not find a standalone answer-key file in this clone. "
+        "Using the public benchmark excerpt below, summarize the benchmark task format, local execution "
+        "requirements, and what a valid agent submission is expected to produce.\n\n"
+        f"Source: {excerpt_path.relative_to(root)}\n\n"
+        f"{truncate(text, 4200)}"
+    )
+    return BenchmarkItem(
+        question=truncate(question),
+        expected=(
+            "Candidate answer should accurately summarize the public benchmark task format, local "
+            "execution requirements, and expected agent deliverable from the provided source excerpt."
+        ),
+        source=f"{excerpt_path.relative_to(root)}:readiness-fallback",
+        metadata={"grading": "task_compliance", "fallback": True, "expected_key": "readiness_summary"},
+    )
+
+
+def _first_existing_text(root: Path, relative_paths: tuple[str, ...]) -> Path | None:
+    for relative_path in relative_paths:
+        path = root / relative_path
+        if path.is_file():
+            return path
+    return None
 
 
 def _candidate_files(root: Path) -> list[Path]:
@@ -259,18 +432,53 @@ def _path_relevance(path: Path) -> int:
 
 
 def extract_huggingface_items(limit: int) -> tuple[list[BenchmarkItem], list[str]]:
-    repository = os.environ.get("AGENT_BENCH_REPOSITORY", "")
-    marker = "huggingface.co/datasets/"
-    if marker not in repository:
-        return [], []
-    dataset_id = repository.split(marker, 1)[1].strip("/")
-    if not dataset_id:
+    dataset_ids = _huggingface_dataset_ids()
+    if not dataset_ids:
         return [], []
     try:
         from datasets import load_dataset
     except ImportError as exc:
-        return [], [f"{dataset_id}: datasets package is required for Hugging Face streaming ({exc})"]
+        return [], [f"Hugging Face streaming requires the datasets package ({exc})"]
 
+    items: list[BenchmarkItem] = []
+    errors: list[str] = []
+    for dataset_id in dataset_ids:
+        if len(items) >= limit:
+            break
+        extracted, dataset_errors = _extract_huggingface_dataset_items(
+            load_dataset,
+            dataset_id,
+            limit - len(items),
+        )
+        items.extend(extracted)
+        errors.extend(dataset_errors)
+    return items, errors
+
+
+def _huggingface_dataset_ids() -> list[str]:
+    candidates: list[str] = []
+    explicit = os.environ.get("AGENT_BENCH_DATASET_ID", "").strip()
+    if explicit:
+        candidates.append(explicit)
+    repository = os.environ.get("AGENT_BENCH_REPOSITORY", "")
+    marker = "huggingface.co/datasets/"
+    if marker in repository:
+        dataset_id = repository.split(marker, 1)[1].strip("/")
+        if dataset_id:
+            candidates.append(dataset_id)
+    unique: list[str] = []
+    for candidate in candidates:
+        dataset_id = candidate.split("?", 1)[0].split("#", 1)[0].strip("/")
+        if dataset_id and dataset_id not in unique:
+            unique.append(dataset_id)
+    return unique
+
+
+def _extract_huggingface_dataset_items(
+    load_dataset: Any,
+    dataset_id: str,
+    limit: int,
+) -> tuple[list[BenchmarkItem], list[str]]:
     items: list[BenchmarkItem] = []
     errors: list[str] = []
     for split in ("test", "validation", "dev", "train"):
@@ -281,13 +489,49 @@ def extract_huggingface_items(limit: int) -> tuple[list[BenchmarkItem], list[str
         except Exception as exc:
             errors.append(f"{dataset_id}/{split}: {exc}")
             continue
-        for index, row in enumerate(dataset):
-            if len(items) >= limit or index >= MAX_RECORDS_PER_FILE:
+        items.extend(
+            _items_from_huggingface_iterable(
+                dataset,
+                f"huggingface:{dataset_id}/{split}",
+                limit - len(items),
+            )
+        )
+    if items:
+        return items, errors
+    try:
+        dataset_dict = load_dataset(dataset_id, streaming=True)
+    except Exception as exc:
+        errors.append(f"{dataset_id}: {exc}")
+        return items, errors
+    if hasattr(dataset_dict, "items"):
+        for split, dataset in dataset_dict.items():
+            if len(items) >= limit:
                 break
-            item = item_from_record(row, f"huggingface:{dataset_id}/{split}:{index + 1}")
-            if item is not None:
-                items.append(item)
+            items.extend(
+                _items_from_huggingface_iterable(
+                    dataset,
+                    f"huggingface:{dataset_id}/{split}",
+                    limit - len(items),
+                )
+            )
+    else:
+        items.extend(_items_from_huggingface_iterable(dataset_dict, f"huggingface:{dataset_id}", limit))
     return items, errors
+
+
+def _items_from_huggingface_iterable(
+    dataset: Any,
+    source_prefix: str,
+    limit: int,
+) -> list[BenchmarkItem]:
+    items: list[BenchmarkItem] = []
+    for index, row in enumerate(dataset):
+        if len(items) >= limit or index >= MAX_RECORDS_PER_FILE:
+            break
+        item = item_from_record(row, f"{source_prefix}:{index + 1}")
+        if item is not None:
+            items.append(item)
+    return items
 
 
 def extract_specialized_items(root: Path, limit: int) -> tuple[list[BenchmarkItem], list[str]]:
@@ -779,51 +1023,62 @@ def run_model_on_item(benchmark: str, item: BenchmarkItem) -> dict[str, Any]:
         response_instruction = 'Return JSON exactly like {"answer":"A","confidence":0.0}.'
     else:
         response_instruction = 'Return JSON exactly like {"answer":"your final answer","confidence":0.0}.'
-    body = json.dumps(
-        {
-            "model": model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "Answer this benchmark task. Do not include hidden reasoning or scratch work. "
-                        "Return only a compact JSON object."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        "/no_think\n"
-                        f"Benchmark: {benchmark}\n"
-                        f"Question/task from benchmark data:\n{item.question}"
-                        f"{choice_text}\n"
-                        f"{response_instruction}"
-                    ),
-                },
-            ],
-            "temperature": 0,
-            "max_tokens": _max_answer_tokens(item),
-            "stream": False,
-        }
-    ).encode("utf-8")
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Answer this benchmark task. Do not include hidden reasoning or scratch work. "
+                    "Return only a compact JSON object."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "/no_think\n"
+                    f"Benchmark: {benchmark}\n"
+                    f"Question/task from benchmark data:\n{item.question}"
+                    f"{choice_text}\n"
+                    f"{response_instruction}"
+                ),
+            },
+        ],
+        "temperature": 0,
+        "top_p": 1,
+        "max_tokens": _max_answer_tokens(item),
+        "stream": False,
+        "response_format": {"type": "json_object"},
+    }
     headers = {"Content-Type": "application/json"}
     api_key = os.environ.get("AGENT_BENCH_API_KEY", "")
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    probe = request.Request(f"{base_url}/chat/completions", data=body, headers=headers, method="POST")
     try:
-        with request.urlopen(probe, timeout=120) as response:
-            response_body = response.read().decode("utf-8", errors="replace")
-    except error.HTTPError as exc:
-        response_body = exc.read().decode("utf-8", errors="replace")
-        return evaluation_payload(item, "", 0.0, response_body[-2000:] or str(exc), status_code=exc.code)
+        response_body = post_chat_completion(base_url, payload, headers)
+    except ChatCompletionHTTPError as exc:
+        return evaluation_payload(
+            item,
+            "",
+            0.0,
+            exc.body[-2000:] or str(exc),
+            status="failed_harness_setup",
+            status_code=exc.code,
+        )
     except Exception as exc:
-        return evaluation_payload(item, "", 0.0, str(exc))
+        return evaluation_payload(item, "", 0.0, str(exc), status="failed_harness_setup")
 
     try:
         parsed = json.loads(response_body)
     except json.JSONDecodeError:
-        return evaluation_payload(item, "", 0.0, "model response was not JSON", response=response_body[-2000:])
+        return evaluation_payload(
+            item,
+            "",
+            0.0,
+            "model response was not JSON",
+            status="failed_harness_setup",
+            response=response_body[-2000:],
+        )
 
     content = extract_openai_content(parsed)
     answer = extract_answer(content)
@@ -843,6 +1098,8 @@ def run_model_on_item(benchmark: str, item: BenchmarkItem) -> dict[str, Any]:
         content_sample=content[:500],
         usage=parsed.get("usage") if isinstance(parsed.get("usage"), dict) else {},
         grade=grade,
+        status=grade.get("status") if isinstance(grade.get("status"), str) else None,
+        judge_parse_repaired=bool(grade.get("judge_parse_repaired")),
     )
 
 
@@ -868,62 +1125,92 @@ def judge_answer(benchmark: str, item: BenchmarkItem, answer: str, method: str) 
     model = os.environ.get("AGENT_BENCH_MODEL", "")
     rubric = item.expected
     if method == "task_compliance":
-        rubric = "Grade whether the candidate answer directly satisfies the benchmark task prompt. Award partial credit only for concrete, correct, task-relevant work."
-    body = json.dumps(
-        {
-            "model": model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are grading a benchmark response. Do not include hidden reasoning or scratch work. "
-                        "Return only compact JSON with "
-                        '{"score":0.0,"passed":false,"reason":"short reason"}. '
-                        "The score must be between 0 and 1."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        "/no_think\n"
-                        f"Benchmark: {benchmark}\n"
-                        f"Grading method: {method}\n\n"
-                        f"Task prompt:\n{item.question}\n\n"
-                        f"Rubric or expected behavior:\n{rubric}\n\n"
-                        f"Candidate answer:\n{answer}\n"
-                    ),
-                },
-            ],
-            "temperature": 0,
-            "max_tokens": 300,
-            "stream": False,
-        }
-    ).encode("utf-8")
+        rubric = (
+            "Grade whether the candidate answer directly satisfies the benchmark task prompt. "
+            "Award partial credit only for concrete, correct, task-relevant work."
+        )
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are grading a benchmark response. Do not include hidden reasoning or scratch work. "
+                    "Return only compact JSON with "
+                    '{"score":0.0,"passed":false,"reason":"short reason"}. '
+                    "The score must be between 0 and 1."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "/no_think\n"
+                    f"Benchmark: {benchmark}\n"
+                    f"Grading method: {method}\n\n"
+                    f"Task prompt:\n{item.question}\n\n"
+                    f"Rubric or expected behavior:\n{rubric}\n\n"
+                    f"Candidate answer:\n{answer}\n"
+                ),
+            },
+        ],
+        "temperature": 0,
+        "top_p": 1,
+        "max_tokens": 300,
+        "stream": False,
+        "response_format": {"type": "json_object"},
+    }
     headers = {"Content-Type": "application/json"}
     api_key = os.environ.get("AGENT_BENCH_API_KEY", "")
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    probe = request.Request(f"{base_url}/chat/completions", data=body, headers=headers, method="POST")
     try:
-        with request.urlopen(probe, timeout=120) as response:
-            response_body = response.read().decode("utf-8", errors="replace")
+        response_body = post_chat_completion(base_url, payload, headers)
+    except ChatCompletionHTTPError as exc:
+        return 0.0, {
+            "method": method,
+            "score": 0.0,
+            "status": "failed_harness_setup",
+            "reason": f"judge request failed: HTTP {exc.code}: {exc.body[-500:]}",
+        }
     except Exception as exc:
-        return 0.0, {"method": method, "score": 0.0, "reason": f"judge request failed: {exc}"}
+        return 0.0, {
+            "method": method,
+            "score": 0.0,
+            "status": "failed_harness_setup",
+            "reason": f"judge request failed: {exc}",
+        }
     try:
         parsed = json.loads(response_body)
     except json.JSONDecodeError:
-        return 0.0, {"method": method, "score": 0.0, "reason": "judge response was not JSON"}
+        return 0.0, {
+            "method": method,
+            "score": 0.0,
+            "status": "failed_harness_setup",
+            "reason": "judge response was not JSON",
+        }
     content = extract_openai_content(parsed)
-    grade = parse_json_object(content)
-    if not isinstance(grade, dict):
-        return 0.0, {"method": method, "score": 0.0, "reason": "judge content was not a JSON object", "judge_sample": content[:300]}
+    try:
+        grade, repaired = parse_judge_json_with_repair(content)
+    except ValueError:
+        return 0.0, {
+            "method": method,
+            "score": 0.0,
+            "status": "failed_judge_parse",
+            "reason": "judge content was not a JSON object",
+            "judge_raw_text": content,
+            "judge_sample": content[:300],
+        }
     score = coerce_unit_score(grade.get("score"))
     passed = bool(grade.get("passed")) if "passed" in grade else score >= 1.0
     return score, {
         "method": method,
         "score": score,
         "passed": passed,
+        "status": "passed" if passed else "failed_model_answer",
         "reason": str(grade.get("reason", ""))[:500],
+        "judge_raw_text": content,
+        "judge_parsed_json": grade,
+        "judge_parse_repaired": repaired,
         "judge_sample": content[:500],
         "usage": parsed.get("usage") if isinstance(parsed.get("usage"), dict) else {},
     }
@@ -943,6 +1230,35 @@ def extract_openai_content(parsed: Any) -> str:
     return text if isinstance(text, str) else ""
 
 
+def post_chat_completion(base_url: str, payload: dict[str, Any], headers: dict[str, str]) -> str:
+    variants = _chat_completion_payload_variants(payload)
+    last_error: ChatCompletionHTTPError | None = None
+    for index, variant in enumerate(variants):
+        body = json.dumps(variant).encode("utf-8")
+        probe = request.Request(f"{base_url}/chat/completions", data=body, headers=headers, method="POST")
+        try:
+            with request.urlopen(probe, timeout=_model_request_timeout()) as response:
+                return response.read().decode("utf-8", errors="replace")
+        except error.HTTPError as exc:
+            response_body = exc.read().decode("utf-8", errors="replace")
+            last_error = ChatCompletionHTTPError(exc.code, response_body)
+            if exc.code in HTTP_FALLBACK_STATUS_CODES and index < len(variants) - 1:
+                continue
+            raise last_error from exc
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("no chat completion payload variants were available")
+
+
+def _chat_completion_payload_variants(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    variants = [payload]
+    if "response_format" in payload:
+        without_response_format = dict(payload)
+        without_response_format.pop("response_format", None)
+        variants.append(without_response_format)
+    return variants
+
+
 def evaluation_payload(
     item: BenchmarkItem,
     answer: str,
@@ -950,6 +1266,9 @@ def evaluation_payload(
     error_message: str,
     **extra: Any,
 ) -> dict[str, Any]:
+    status = extra.pop("status", None)
+    if not isinstance(status, str) or not status:
+        status = "passed" if score >= 1.0 else "failed_model_answer"
     payload = {
         "source": item.source,
         "question": item.question,
@@ -958,7 +1277,8 @@ def evaluation_payload(
         "choices": item.choices,
         "metadata": item.metadata,
         "score": score,
-        "passed": score >= 1.0,
+        "passed": score >= 1.0 and status == "passed",
+        "status": status,
         "error": error_message,
     }
     payload.update(extra)
@@ -968,6 +1288,7 @@ def evaluation_payload(
 def summarize_evaluations(evaluations: list[dict[str, Any]]) -> dict[str, Any]:
     if not evaluations:
         return {}
+    valid = _valid_evaluations(evaluations)
     passed = sum(1 for item in evaluations if item.get("passed"))
     total = len(evaluations)
     first = evaluations[0]
@@ -981,15 +1302,41 @@ def summarize_evaluations(evaluations: list[dict[str, Any]]) -> dict[str, Any]:
     )
     return {
         "ok": passed == total,
-        "score": _average_score(evaluations),
+        "score": _average_score(valid),
+        "raw_score": _average_score(evaluations),
+        "valid_task_count": len(valid),
         "answer": f"{passed}/{total}",
         "expected": f"{total}/{total}",
         "question": first.get("question", ""),
         "content_sample": first.get("content_sample", ""),
         "grading_methods": grading_methods,
+        "status_counts": _status_counts(evaluations),
+        "judge_parse_failure_count": sum(1 for item in evaluations if item.get("status") == "failed_judge_parse"),
+        "judge_parse_repaired_count": sum(1 for item in evaluations if item.get("judge_parse_repaired")),
         "usage": first.get("usage", {}),
         "error": "" if passed == total else f"{passed}/{total} benchmark records passed",
     }
+
+
+def _valid_evaluations(evaluations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    invalid_statuses = {
+        "failed_harness_setup",
+        "failed_judge_parse",
+        "skipped_missing_assets",
+        "skipped_unsupported_capability",
+        "timed_out",
+    }
+    return [item for item in evaluations if item.get("status") not in invalid_statuses]
+
+
+def _status_counts(evaluations: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in evaluations:
+        status = item.get("status")
+        if not isinstance(status, str) or not status:
+            status = "passed" if item.get("passed") else "failed_model_answer"
+        counts[status] = counts.get(status, 0) + 1
+    return dict(sorted(counts.items()))
 
 
 def score_answer(answer: str, expected: str, choices: dict[str, str]) -> float:
@@ -1053,19 +1400,84 @@ def extract_answer(content: str) -> str:
 
 
 def parse_json_object(text: str) -> object | None:
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"\s*```$", "", text)
+    text = _strip_json_wrappers(strip_thinking_blocks(text).strip())
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
-        if not match:
-            return None
+        for candidate in extract_json_objects(text):
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+        return None
+
+
+def parse_judge_json(text: str) -> dict[str, Any]:
+    parsed, _ = parse_judge_json_with_repair(text)
+    return parsed
+
+
+def parse_judge_json_with_repair(text: str) -> tuple[dict[str, Any], bool]:
+    cleaned = _strip_json_wrappers(strip_thinking_blocks(text).strip()).strip()
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, dict) and JUDGE_REQUIRED_KEYS <= parsed.keys():
+        return parsed, cleaned != text.strip()
+
+    for candidate in extract_json_objects(cleaned):
         try:
-            return json.loads(match.group(0))
+            recovered = json.loads(candidate)
         except json.JSONDecodeError:
-            return None
+            continue
+        if isinstance(recovered, dict) and JUDGE_REQUIRED_KEYS <= recovered.keys():
+            return recovered, True
+
+    raise ValueError("judge content was not a JSON object")
+
+
+def strip_thinking_blocks(text: str) -> str:
+    without_blocks = re.sub(r"<think\b[^>]*>.*?</think>", "", text, flags=re.IGNORECASE | re.DOTALL)
+    return re.sub(r"</think>", "", without_blocks, flags=re.IGNORECASE)
+
+
+def extract_json_objects(text: str) -> list[str]:
+    objects: list[str] = []
+    start: int | None = None
+    depth = 0
+    in_string = False
+    escaped = False
+    for index, char in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+            continue
+        if char == "{":
+            if depth == 0:
+                start = index
+            depth += 1
+            continue
+        if char == "}" and depth:
+            depth -= 1
+            if depth == 0 and start is not None:
+                objects.append(text[start : index + 1])
+                start = None
+    return objects
+
+
+def _strip_json_wrappers(text: str) -> str:
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text)
+    return text
 
 
 def normalize_text(value: str) -> str:
@@ -1085,6 +1497,14 @@ def _sample_limit() -> int:
         return max(1, min(20, int(raw)))
     except ValueError:
         return 3
+
+
+def _model_request_timeout() -> float:
+    raw = os.environ.get("AGENT_BENCH_MODEL_REQUEST_TIMEOUT", "600")
+    try:
+        return max(1.0, float(raw))
+    except ValueError:
+        return 600.0
 
 
 def _average_score(evaluations: list[dict[str, Any]]) -> float:

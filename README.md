@@ -39,7 +39,8 @@ docker run --rm -it \
   bench run \
   --provider openai-compatible \
   --base-url http://host.docker.internal:8000/v1 \
-  --model <model>
+  --model <model> \
+  --request-concurrency 2
 ```
 
 Run against Ollama's OpenAI-compatible endpoint:
@@ -74,10 +75,21 @@ docker run --rm -it \
 
 By default, results are written to a timestamped directory under `runs/` and copied to `runs/latest/`.
 
+## Timeouts For Local Models
+
+The bundled rows are whole benchmark descriptors, not single quiz questions. For remote providers, each `external_benchmark` row runs a Docker launcher that may clone a repository, extract benchmark records, call the configured model several times, and run judge calls. The default external benchmark timeout is therefore 21,600 seconds (6 hours) per benchmark row.
+
+The normal `--timeout` option still controls non-external single-task requests and defaults to 60 seconds. External benchmark rows use:
+
+- `--external-timeout`: wall-clock timeout for each benchmark Docker container; default `21600`.
+- `--model-request-timeout`: timeout for each model or judge request made inside the benchmark probe; default `600`.
+
+For a single local model server, start with `--request-concurrency 1` or `--request-concurrency 2`. Higher values can reduce elapsed wall time only when the local serving stack has enough GPU/CPU capacity for concurrent benchmark rows.
+
 
 ## Task Files
 
-The bundled `tasks/` directory contains the screenshot-style benchmark rows as external benchmark descriptors. Each bundled task is an `external_benchmark` entry that runs its descriptor command locally in Docker through `docker/external-benchmark.Dockerfile` when the descriptor points at a public cloneable source.
+The bundled `tasks/` directory contains public benchmark descriptors only. Each bundled task is an `external_benchmark` entry that runs its descriptor command locally in Docker through `docker/external-benchmark.Dockerfile`.
 
 External benchmark task shape:
 
@@ -89,14 +101,16 @@ External benchmark task shape:
   "benchmark": {
     "name": "SWE-bench",
     "group": "Coding",
-    "homepage": "https://huggingface.co/datasets/princeton-nlp/SWE-bench",
-    "repository": "https://huggingface.co/datasets/princeton-nlp/SWE-bench",
+    "homepage": "https://github.com/SWE-bench/SWE-bench",
+    "repository": "https://github.com/SWE-bench/SWE-bench.git",
+    "dataset_id": "princeton-nlp/SWE-bench",
     "ref": "main",
     "license": "MIT",
     "credit": "SWE-bench authors",
+    "citation": "https://github.com/SWE-bench/SWE-bench#citation--license",
     "docker": {
       "image": "agent-bench-external:python3.12",
-      "setup": ["python -m pip install --upgrade pip uv"],
+      "setup": [],
       "command": "agent-bench-probe --benchmark \"SWE-bench\" --kind public-benchmark",
       "environment": [],
       "volumes": []
@@ -105,7 +119,7 @@ External benchmark task shape:
 }
 ```
 
-The default descriptor file now covers 32 benchmark rows across `Coding`, `Cowork`, `GUI`, `Multimodal`, and `Reasoning`, including SWE-Bench Verified, Terminal Bench 2.1, BrowseComp, MCP Atlas, OSWorld-Verified, OmniDocBench, VideoMME, IMO 2025, and USAMO 2026. Upstream credits and license notes are recorded as metadata in `tasks/public_benchmarks.json`; license metadata is not used as a loader gate. Some leaderboard rows do not currently expose a public cloneable task repository, so those descriptors are present for reporting/smoke coverage and should be replaced with a cloneable source as soon as the benchmark publisher releases one.
+The default descriptor file covers the 20 requested public benchmarks: SWE-bench, GDPval, PaperBench, SWE-Lancer, MLE-bench, SWE-bench Verified, AutomationBench, OSWorld, Humanity's Last Exam, BioMystery Bench, ExploitBench, codeneedle, StockBench, InvestorBench, QuantCode-Bench, FinMCP-Bench, FinToolBench, Finance Agent v2, FinanceMath, and EDINET-Bench. Upstream credits, license notes, and citation URLs are recorded in `tasks/public_benchmarks.json` and summarized in `tasks/README.md`; license metadata is not used as a loader gate.
 
 When running a remote provider, Agent Bench starts the benchmark launcher container, clones the upstream benchmark source or dataset inside Docker, extracts real benchmark task records, calls the configured model endpoint for each sampled task, and grades the model's answer. The launcher receives neutral model settings through environment variables:
 
@@ -115,7 +129,7 @@ When running a remote provider, Agent Bench starts the benchmark launcher contai
 - `AGENT_BENCH_OUTPUT_DIR`
 - `AGENT_BENCH_API_KEY`, when `--api-key-env` is provided
 
-The bundled descriptors use `agent-bench-probe` to normalize different public benchmark formats into a common sample-and-grade flow. It supports JSON, JSONL, CSV, Parquet, selected Python task dictionaries, prompt/description text files, Hugging Face datasets, and benchmark-specific adapters for repositories that expose tasks through code or market data rather than a single task file. Extracted records are graded with one of three methods:
+The bundled descriptors use `agent-bench-probe` to normalize different public benchmark formats into a common sample-and-grade flow. It supports JSON, JSONL, CSV, Parquet, selected Python task dictionaries, prompt/description text files, Hugging Face datasets, and benchmark-specific adapters for repositories that expose tasks through code or market data rather than a single task file. If a public repository exposes only harness documentation or requires gated services for the full leaderboard run, the probe records a marked repository-readiness fallback task. Extracted records are graded with one of three methods:
 
 - `exact`: deterministic answer, patch, label, or multiple-choice matching.
 - `rubric`: a published rubric or benchmark prompt is used for model-based grading.
@@ -133,9 +147,9 @@ Each run writes:
 - `summary.json`
 - `summary.html`
 
-The HTML report is fully static and includes metric cards, an average-score radar chart, grouped benchmark scores, category summaries, detailed task rows, and timing tables for categories plus individual problems.
+The HTML report is fully static and includes metric cards, an average-score radar chart, grouped benchmark scores, benchmark citations, category summaries, detailed task rows, and timing tables for categories plus individual problems.
 
-The `Benchmark Scores` table is grouped by benchmark group such as `Coding`, `Cowork`, `Finance`, `GUI`, and `Reasoning`. It includes only:
+The `Benchmark Scores` table is grouped by benchmark group such as `Coding`, `Finance`, `GUI`, `Research`, `Security`, `Work`, and `Reasoning`. It includes only:
 
 - benchmark name
 - model score

@@ -40,6 +40,7 @@ class ExternalBenchmarkConfig:
     output_dir: Path
     timeout: float
     limit: int | None = None
+    model_request_timeout: float = 600.0
     docker_bin: str = "docker"
     launcher_image: str = DEFAULT_EXTERNAL_IMAGE
     source_root: Path = Path(".")
@@ -131,6 +132,7 @@ class ExternalBenchmarkRunner:
             "homepage": benchmark["homepage"],
             "license": benchmark["license"],
             "credit": benchmark["credit"],
+            "citation": benchmark.get("citation", benchmark["homepage"]),
             "docker_image": launcher_image,
             "output_dir": str(task_output_dir),
             "result": payload,
@@ -258,12 +260,19 @@ def _docker_env(task: Task, benchmark: dict[str, Any], docker: dict[str, Any], c
         "AGENT_BENCH_REPOSITORY": benchmark.get("repository", benchmark["homepage"]),
         "AGENT_BENCH_REPOSITORY_REF": benchmark.get("ref", "main"),
         "AGENT_BENCH_SUBDIR": benchmark.get("subdir", ""),
+        "AGENT_BENCH_DATASET_ID": benchmark.get("dataset_id", ""),
+        "AGENT_BENCH_BENCHMARK_HOMEPAGE": benchmark["homepage"],
+        "AGENT_BENCH_BENCHMARK_LICENSE": benchmark["license"],
+        "AGENT_BENCH_BENCHMARK_CREDIT": benchmark["credit"],
+        "AGENT_BENCH_BENCHMARK_CITATION": benchmark.get("citation", benchmark["homepage"]),
+        "AGENT_BENCH_REQUIRED_CAPABILITIES": ",".join(_benchmark_capabilities(benchmark)),
         "AGENT_BENCH_DOCKER_IMAGE": docker.get("image", config.launcher_image),
         "AGENT_BENCH_SETUP": "\n".join(docker.get("setup", [])),
         "AGENT_BENCH_COMMAND": docker["command"],
         "AGENT_BENCH_PROVIDER": config.provider,
         "AGENT_BENCH_BASE_URL": config.base_url,
         "AGENT_BENCH_MODEL": config.model,
+        "AGENT_BENCH_MODEL_REQUEST_TIMEOUT": str(config.model_request_timeout),
         "AGENT_BENCH_OUTPUT_DIR": CONTAINER_OUTPUT_DIR,
     }
     if config.api_key_env:
@@ -275,6 +284,13 @@ def _docker_env(task: Task, benchmark: dict[str, Any], docker: dict[str, Any], c
         key, _, value = item.partition("=")
         env[key] = value
     return env
+
+
+def _benchmark_capabilities(benchmark: dict[str, Any]) -> list[str]:
+    capabilities = benchmark.get("capabilities", [])
+    if not isinstance(capabilities, list):
+        return []
+    return [item.strip() for item in capabilities if isinstance(item, str) and item.strip()]
 
 
 def _load_result_payload(path: Path) -> dict[str, Any]:

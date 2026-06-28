@@ -2,20 +2,23 @@
   {
     "id": "PB_001",
     "type": "external_benchmark",
-    "question": "Run SWE-Bench Verified locally using its public benchmark dataset.",
+    "question": "Run SWE-bench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
-      "name": "SWE-Bench Verified",
+      "name": "SWE-bench",
       "group": "Coding",
-      "homepage": "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified",
-      "repository": "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified",
+      "capabilities": ["repo_patch"],
+      "homepage": "https://github.com/SWE-bench/SWE-bench",
+      "repository": "https://github.com/SWE-bench/SWE-bench.git",
+      "dataset_id": "princeton-nlp/SWE-bench",
       "ref": "main",
       "subdir": "",
-      "license": "Unspecified",
-      "credit": "Princeton NLP and OpenAI SWE-Bench Verified authors",
+      "license": "MIT",
+      "credit": "SWE-bench authors",
+      "citation": "https://github.com/SWE-bench/SWE-bench#citation--license",
       "docker": {
         "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"SWE-Bench Verified\" --kind public-benchmark",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"SWE-bench\" --kind public-benchmark",
         "environment": [],
         "volumes": []
       }
@@ -24,20 +27,23 @@
   {
     "id": "PB_002",
     "type": "external_benchmark",
-    "question": "Run SWE-Bench Pro locally using its public benchmark release when available.",
+    "question": "Run GDPval locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
-      "name": "SWE-Bench Pro",
-      "group": "Coding",
-      "homepage": "https://arxiv.org/abs/2509.16941",
-      "repository": "https://arxiv.org/abs/2509.16941",
+      "name": "GDPval",
+      "group": "Work",
+      "capabilities": ["file_artifact", "external_data_required"],
+      "homepage": "https://huggingface.co/datasets/openai/gdpval",
+      "repository": "https://huggingface.co/datasets/openai/gdpval",
+      "dataset_id": "openai/gdpval",
       "ref": "main",
       "subdir": "",
-      "license": "Unspecified",
-      "credit": "SWE-Bench Pro authors",
+      "license": "Unspecified on dataset card",
+      "credit": "OpenAI GDPval authors",
+      "citation": "https://huggingface.co/datasets/openai/gdpval",
       "docker": {
         "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"SWE-Bench Pro\" --kind public-benchmark",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"GDPval\" --kind public-benchmark",
         "environment": [],
         "volumes": []
       }
@@ -46,20 +52,22 @@
   {
     "id": "PB_003",
     "type": "external_benchmark",
-    "question": "Run Terminal Bench 2.1 locally using its public benchmark harness.",
+    "question": "Run PaperBench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
-      "name": "Terminal Bench 2.1",
-      "group": "Coding",
-      "homepage": "https://www.tbench.ai/",
-      "repository": "https://github.com/laude-institute/terminal-bench.git",
+      "name": "PaperBench",
+      "group": "Research",
+      "capabilities": ["file_artifact"],
+      "homepage": "https://github.com/openai/frontier-evals/tree/main/project/paperbench",
+      "repository": "https://github.com/openai/frontier-evals.git",
       "ref": "main",
-      "subdir": "",
-      "license": "Apache-2.0",
-      "credit": "Terminal-Bench authors",
+      "subdir": "project/paperbench",
+      "license": "MIT",
+      "credit": "OpenAI Frontier Evals PaperBench authors",
+      "citation": "https://github.com/openai/frontier-evals/tree/main/project/paperbench",
       "docker": {
         "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"Terminal Bench 2.1\" --kind public-benchmark",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"PaperBench\" --kind public-benchmark",
         "environment": [],
         "volumes": []
       }
@@ -68,20 +76,22 @@
   {
     "id": "PB_004",
     "type": "external_benchmark",
-    "question": "Run SWE-Atlas-QnA locally using its benchmark release when available.",
+    "question": "Run SWE-Lancer locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
-      "name": "SWE-Atlas-QnA",
+      "name": "SWE-Lancer",
       "group": "Coding",
-      "homepage": "https://arxiv.org/",
-      "repository": "https://arxiv.org/",
+      "capabilities": ["repo_patch"],
+      "homepage": "https://github.com/openai/frontier-evals/tree/main/project/swelancer",
+      "repository": "https://github.com/openai/frontier-evals.git",
       "ref": "main",
-      "subdir": "",
-      "license": "Unspecified",
-      "credit": "SWE-Atlas authors",
+      "subdir": "project/swelancer",
+      "license": "MIT",
+      "credit": "OpenAI Frontier Evals SWE-Lancer authors",
+      "citation": "https://github.com/openai/frontier-evals/tree/main/project/swelancer",
       "docker": {
         "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"SWE-Atlas-QnA\" --kind public-benchmark",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"SWE-Lancer\" --kind public-benchmark",
         "environment": [],
         "volumes": []
       }
@@ -90,20 +100,22 @@
   {
     "id": "PB_005",
     "type": "external_benchmark",
-    "question": "Run NL2Repo locally using its public benchmark release when available.",
+    "question": "Run MLE-bench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
-      "name": "NL2Repo",
-      "group": "Coding",
-      "homepage": "https://arxiv.org/abs/2512.12730",
-      "repository": "https://arxiv.org/abs/2512.12730",
+      "name": "MLE-bench",
+      "group": "Machine Learning",
+      "capabilities": ["file_artifact", "external_data_required"],
+      "homepage": "https://github.com/openai/mle-bench",
+      "repository": "https://github.com/openai/mle-bench.git",
       "ref": "main",
       "subdir": "",
-      "license": "Unspecified",
-      "credit": "NL2Repo-Bench authors",
+      "license": "MIT",
+      "credit": "OpenAI MLE-bench authors",
+      "citation": "https://github.com/openai/mle-bench",
       "docker": {
         "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"NL2Repo\" --kind public-benchmark",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"MLE-bench\" --kind public-benchmark",
         "environment": [],
         "volumes": []
       }
@@ -112,20 +124,23 @@
   {
     "id": "PB_006",
     "type": "external_benchmark",
-    "question": "Run SWE-Atlas-Test Writing locally using its benchmark release when available.",
+    "question": "Run SWE-bench Verified locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
-      "name": "SWE-Atlas-Test Writing",
+      "name": "SWE-bench Verified",
       "group": "Coding",
-      "homepage": "https://arxiv.org/",
-      "repository": "https://arxiv.org/",
+      "capabilities": ["repo_patch"],
+      "homepage": "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified",
+      "repository": "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified",
+      "dataset_id": "princeton-nlp/SWE-bench_Verified",
       "ref": "main",
       "subdir": "",
-      "license": "Unspecified",
-      "credit": "SWE-Atlas authors",
+      "license": "MIT",
+      "credit": "Princeton NLP and OpenAI SWE-bench Verified authors",
+      "citation": "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified",
       "docker": {
         "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"SWE-Atlas-Test Writing\" --kind public-benchmark",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"SWE-bench Verified\" --kind public-benchmark",
         "environment": [],
         "volumes": []
       }
@@ -134,20 +149,22 @@
   {
     "id": "PB_007",
     "type": "external_benchmark",
-    "question": "Run SWE-Efficiency locally using its public benchmark release.",
+    "question": "Run AutomationBench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
-      "name": "SWE-Efficiency",
-      "group": "Coding",
-      "homepage": "https://arxiv.org/abs/2511.06090",
-      "repository": "https://arxiv.org/abs/2511.06090",
+      "name": "AutomationBench",
+      "group": "Work",
+      "capabilities": ["tool_call", "external_data_required"],
+      "homepage": "https://github.com/zapier/AutomationBench",
+      "repository": "https://github.com/zapier/AutomationBench.git",
       "ref": "main",
       "subdir": "",
-      "license": "Unspecified",
-      "credit": "SWE-fficiency authors",
+      "license": "See upstream license",
+      "credit": "Zapier AutomationBench authors",
+      "citation": "https://github.com/zapier/AutomationBench",
       "docker": {
         "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"SWE-Efficiency\" --kind public-benchmark",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"AutomationBench\" --kind public-benchmark",
         "environment": [],
         "volumes": []
       }
@@ -156,20 +173,22 @@
   {
     "id": "PB_008",
     "type": "external_benchmark",
-    "question": "Run LiveSQLBench locally using its benchmark release when available.",
+    "question": "Run OSWorld locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
-      "name": "LiveSQLBench",
-      "group": "Coding",
-      "homepage": "https://arxiv.org/",
-      "repository": "https://arxiv.org/",
+      "name": "OSWorld",
+      "group": "GUI",
+      "capabilities": ["browser_or_gui"],
+      "homepage": "https://github.com/xlang-ai/OSWorld",
+      "repository": "https://github.com/xlang-ai/OSWorld.git",
       "ref": "main",
       "subdir": "",
-      "license": "Unspecified",
-      "credit": "LiveSQLBench authors",
+      "license": "Apache-2.0",
+      "credit": "OSWorld authors / XLANG NLP Lab",
+      "citation": "https://github.com/xlang-ai/OSWorld",
       "docker": {
         "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"LiveSQLBench\" --kind public-benchmark",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"OSWorld\" --kind public-benchmark",
         "environment": [],
         "volumes": []
       }
@@ -178,20 +197,23 @@
   {
     "id": "PB_009",
     "type": "external_benchmark",
-    "question": "Run CL-bench locally using its benchmark release when available.",
+    "question": "Run Humanity's Last Exam locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
-      "name": "CL-bench",
-      "group": "Coding",
-      "homepage": "https://arxiv.org/",
-      "repository": "https://arxiv.org/",
+      "name": "Humanity's Last Exam",
+      "group": "Reasoning",
+      "capabilities": ["chat_answer", "external_data_required"],
+      "homepage": "https://github.com/centerforaisafety/hle",
+      "repository": "https://github.com/centerforaisafety/hle.git",
+      "dataset_id": "cais/hle",
       "ref": "main",
       "subdir": "",
-      "license": "Unspecified",
-      "credit": "CL-bench authors",
+      "license": "MIT",
+      "credit": "Center for AI Safety Humanity's Last Exam authors",
+      "citation": "https://github.com/centerforaisafety/hle",
       "docker": {
         "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"CL-bench\" --kind public-benchmark",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"Humanity's Last Exam\" --kind public-benchmark",
         "environment": [],
         "volumes": []
       }
@@ -200,21 +222,24 @@
   {
     "id": "PB_010",
     "type": "external_benchmark",
-    "question": "Run VIBE-V2 locally using its public benchmark release.",
+    "question": "Run BioMystery Bench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
-      "name": "VIBE-V2",
-      "group": "Coding",
-      "homepage": "https://github.com/reka-ai/reka-vibe-eval",
-      "repository": "https://github.com/reka-ai/reka-vibe-eval.git",
+      "name": "BioMystery Bench",
+      "group": "Biosecurity",
+      "capabilities": ["chat_answer", "external_data_required"],
+      "homepage": "https://huggingface.co/datasets/Anthropic/BioMysteryBench-preview",
+      "repository": "https://huggingface.co/datasets/Anthropic/BioMysteryBench-preview",
+      "dataset_id": "Anthropic/BioMysteryBench-preview",
       "ref": "main",
       "subdir": "",
-      "license": "MIT",
-      "credit": "Vibe-Eval authors",
+      "license": "CC-BY-4.0 with upstream terms",
+      "credit": "Anthropic BioMysteryBench authors",
+      "citation": "https://huggingface.co/datasets/Anthropic/BioMysteryBench-preview",
       "docker": {
         "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"VIBE-V2\" --kind public-benchmark",
-        "environment": [],
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"BioMystery Bench\" --kind public-benchmark",
+        "environment": ["AGENT_BENCH_GIT_LFS_SKIP_SMUDGE=0", "AGENT_BENCH_GIT_LFS_PULL=1"],
         "volumes": []
       }
     }
@@ -222,20 +247,22 @@
   {
     "id": "PB_011",
     "type": "external_benchmark",
-    "question": "Run SVG-Bench locally using its public benchmark release.",
+    "question": "Run ExploitBench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
-      "name": "SVG-Bench",
-      "group": "Coding",
-      "homepage": "https://huggingface.co/datasets/ServiceNow/VectorGym",
-      "repository": "https://huggingface.co/datasets/ServiceNow/VectorGym",
+      "name": "ExploitBench",
+      "group": "Security",
+      "capabilities": ["tool_call"],
+      "homepage": "https://github.com/exploitbench/exploitbench",
+      "repository": "https://github.com/exploitbench/exploitbench.git",
       "ref": "main",
       "subdir": "",
-      "license": "Unspecified",
-      "credit": "VectorGym and SVG benchmark authors",
+      "license": "MIT",
+      "credit": "ExploitBench authors",
+      "citation": "https://github.com/exploitbench/exploitbench",
       "docker": {
         "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"SVG-Bench\" --kind public-benchmark",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"ExploitBench\" --kind public-benchmark",
         "environment": [],
         "volumes": []
       }
@@ -244,20 +271,22 @@
   {
     "id": "PB_012",
     "type": "external_benchmark",
-    "question": "Run PostTrainBench locally using its public benchmark release.",
+    "question": "Run codeneedle locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
-      "name": "PostTrainBench",
-      "group": "Coding",
-      "homepage": "https://posttrainbench.com/",
-      "repository": "https://posttrainbench.com/",
+      "name": "codeneedle",
+      "group": "Long Context",
+      "capabilities": ["chat_answer"],
+      "homepage": "https://github.com/alexziskind1/codeneedle",
+      "repository": "https://github.com/alexziskind1/codeneedle.git",
       "ref": "main",
       "subdir": "",
       "license": "Unspecified",
-      "credit": "PostTrainBench authors",
+      "credit": "codeneedle authors",
+      "citation": "https://github.com/alexziskind1/codeneedle",
       "docker": {
         "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"PostTrainBench\" --kind public-benchmark",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"codeneedle\" --kind public-benchmark",
         "environment": [],
         "volumes": []
       }
@@ -266,20 +295,22 @@
   {
     "id": "PB_013",
     "type": "external_benchmark",
-    "question": "Run KernelBench Hard locally using its public benchmark harness.",
+    "question": "Run StockBench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
-      "name": "KernelBench Hard",
-      "group": "Coding",
-      "homepage": "https://github.com/ScalingIntelligence/KernelBench",
-      "repository": "https://github.com/ScalingIntelligence/KernelBench.git",
+      "name": "StockBench",
+      "group": "Finance",
+      "capabilities": ["chat_answer", "external_data_required"],
+      "homepage": "https://github.com/ChenYXxxx/stockbench",
+      "repository": "https://github.com/ChenYXxxx/stockbench.git",
       "ref": "main",
       "subdir": "",
-      "license": "MIT",
-      "credit": "KernelBench authors",
+      "license": "Apache-2.0",
+      "credit": "StockBench authors",
+      "citation": "https://github.com/ChenYXxxx/stockbench",
       "docker": {
         "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"KernelBench Hard\" --kind public-benchmark",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"StockBench\" --kind public-benchmark",
         "environment": [],
         "volumes": []
       }
@@ -288,20 +319,22 @@
   {
     "id": "PB_014",
     "type": "external_benchmark",
-    "question": "Run PaperBench locally using its public benchmark harness.",
+    "question": "Run InvestorBench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
-      "name": "PaperBench",
-      "group": "Coding",
-      "homepage": "https://github.com/openai/frontier-evals/tree/main/project/paperbench",
-      "repository": "https://github.com/openai/frontier-evals.git",
+      "name": "InvestorBench",
+      "group": "Finance",
+      "capabilities": ["chat_answer", "external_data_required"],
+      "homepage": "https://github.com/felis33/INVESTOR-BENCH",
+      "repository": "https://github.com/felis33/INVESTOR-BENCH.git",
       "ref": "main",
-      "subdir": "project/paperbench",
+      "subdir": "",
       "license": "MIT",
-      "credit": "OpenAI Frontier Evals PaperBench authors",
+      "credit": "InvestorBench authors",
+      "citation": "https://github.com/felis33/INVESTOR-BENCH",
       "docker": {
         "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"PaperBench\" --kind public-benchmark",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"InvestorBench\" --kind public-benchmark",
         "environment": [],
         "volumes": []
       }
@@ -310,20 +343,22 @@
   {
     "id": "PB_015",
     "type": "external_benchmark",
-    "question": "Run BrowseComp locally using its public benchmark harness.",
+    "question": "Run QuantCode-Bench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
-      "name": "BrowseComp",
-      "group": "Cowork",
-      "homepage": "https://github.com/openai/simple-evals",
-      "repository": "https://github.com/openai/simple-evals.git",
+      "name": "QuantCode-Bench",
+      "group": "Finance",
+      "capabilities": ["repo_patch"],
+      "homepage": "https://github.com/LimexAILab/QuantCode-Bench",
+      "repository": "https://github.com/LimexAILab/QuantCode-Bench.git",
       "ref": "main",
       "subdir": "",
       "license": "MIT",
-      "credit": "OpenAI BrowseComp authors",
+      "credit": "Limex AI Lab QuantCode-Bench authors",
+      "citation": "https://github.com/LimexAILab/QuantCode-Bench",
       "docker": {
         "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"BrowseComp\" --kind public-benchmark",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"QuantCode-Bench\" --kind public-benchmark",
         "environment": [],
         "volumes": []
       }
@@ -332,20 +367,23 @@
   {
     "id": "PB_016",
     "type": "external_benchmark",
-    "question": "Run DRACO locally using its benchmark release when available.",
+    "question": "Run FinMCP-Bench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
-      "name": "DRACO",
-      "group": "Cowork",
-      "homepage": "https://arxiv.org/",
-      "repository": "https://arxiv.org/",
+      "name": "FinMCP-Bench",
+      "group": "Finance",
+      "capabilities": ["tool_call", "external_data_required"],
+      "homepage": "https://huggingface.co/datasets/DianJin/FinMCP-Bench",
+      "repository": "https://huggingface.co/datasets/DianJin/FinMCP-Bench",
+      "dataset_id": "DianJin/FinMCP-Bench",
       "ref": "main",
       "subdir": "",
-      "license": "Unspecified",
-      "credit": "DRACO authors",
+      "license": "CC-BY-NC-SA-4.0",
+      "credit": "DianJin FinMCP-Bench authors",
+      "citation": "https://huggingface.co/datasets/DianJin/FinMCP-Bench",
       "docker": {
         "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"DRACO\" --kind public-benchmark",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"FinMCP-Bench\" --kind public-benchmark",
         "environment": [],
         "volumes": []
       }
@@ -354,20 +392,22 @@
   {
     "id": "PB_017",
     "type": "external_benchmark",
-    "question": "Run GDPval rubrics locally using its public benchmark dataset.",
+    "question": "Run FinToolBench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
-      "name": "GDPval rubrics",
-      "group": "Cowork",
-      "homepage": "https://huggingface.co/datasets/openai/gdpval",
-      "repository": "https://huggingface.co/datasets/openai/gdpval",
+      "name": "FinToolBench",
+      "group": "Finance",
+      "capabilities": ["tool_call", "external_data_required"],
+      "homepage": "https://github.com/Double-wk/FinToolBench",
+      "repository": "https://github.com/Double-wk/FinToolBench.git",
       "ref": "main",
       "subdir": "",
       "license": "Unspecified",
-      "credit": "OpenAI GDPval authors",
+      "credit": "FinToolBench authors",
+      "citation": "https://github.com/Double-wk/FinToolBench",
       "docker": {
         "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"GDPval rubrics\" --kind public-benchmark",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"FinToolBench\" --kind public-benchmark",
         "environment": [],
         "volumes": []
       }
@@ -376,20 +416,22 @@
   {
     "id": "PB_018",
     "type": "external_benchmark",
-    "question": "Run BankerToolBench locally using its public benchmark release.",
+    "question": "Run Finance Agent v2 locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
-      "name": "BankerToolBench",
-      "group": "Cowork",
-      "homepage": "https://arxiv.org/abs/2604.11304",
-      "repository": "https://arxiv.org/abs/2604.11304",
+      "name": "Finance Agent v2",
+      "group": "Finance",
+      "capabilities": ["tool_call", "external_data_required"],
+      "homepage": "https://github.com/vals-ai/finance-agent-v2",
+      "repository": "https://github.com/vals-ai/finance-agent-v2.git",
       "ref": "main",
       "subdir": "",
-      "license": "Unspecified",
-      "credit": "BankerToolBench authors",
+      "license": "MIT",
+      "credit": "Vals AI Finance Agent Benchmark authors",
+      "citation": "https://github.com/vals-ai/finance-agent-v2",
       "docker": {
         "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"BankerToolBench\" --kind public-benchmark",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"Finance Agent v2\" --kind public-benchmark",
         "environment": [],
         "volumes": []
       }
@@ -398,20 +440,22 @@
   {
     "id": "PB_019",
     "type": "external_benchmark",
-    "question": "Run OfficeQA Pro locally using its public benchmark release.",
+    "question": "Run FinanceMath locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
-      "name": "OfficeQA Pro",
-      "group": "Cowork",
-      "homepage": "https://arxiv.org/abs/2603.08655",
-      "repository": "https://arxiv.org/abs/2603.08655",
+      "name": "FinanceMath",
+      "group": "Finance",
+      "capabilities": ["chat_answer"],
+      "homepage": "https://github.com/yale-nlp/FinanceMath",
+      "repository": "https://github.com/yale-nlp/FinanceMath.git",
       "ref": "main",
       "subdir": "",
       "license": "Unspecified",
-      "credit": "OfficeQA Pro authors",
+      "credit": "Yale NLP FinanceMath authors",
+      "citation": "https://github.com/yale-nlp/FinanceMath",
       "docker": {
         "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"OfficeQA Pro\" --kind public-benchmark",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"FinanceMath\" --kind public-benchmark",
         "environment": [],
         "volumes": []
       }
@@ -420,284 +464,22 @@
   {
     "id": "PB_020",
     "type": "external_benchmark",
-    "question": "Run SpreadsheetBench-v1 locally using its public benchmark release.",
+    "question": "Run EDINET-Bench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
-      "name": "SpreadsheetBench-v1",
-      "group": "Cowork",
-      "homepage": "https://arxiv.org/abs/2406.14991",
-      "repository": "https://arxiv.org/abs/2406.14991",
-      "ref": "main",
-      "subdir": "",
-      "license": "Unspecified",
-      "credit": "SpreadsheetBench authors",
-      "docker": {
-        "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"SpreadsheetBench-v1\" --kind public-benchmark",
-        "environment": [],
-        "volumes": []
-      }
-    }
-  },
-  {
-    "id": "PB_021",
-    "type": "external_benchmark",
-    "question": "Run YC-Bench locally using its public benchmark release.",
-    "benchmark": {
-      "name": "YC-Bench",
-      "group": "Cowork",
-      "homepage": "https://arxiv.org/abs/2604.01212",
-      "repository": "https://arxiv.org/abs/2604.01212",
-      "ref": "main",
-      "subdir": "",
-      "license": "Unspecified",
-      "credit": "YC-Bench authors",
-      "docker": {
-        "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"YC-Bench\" --kind public-benchmark",
-        "environment": [],
-        "volumes": []
-      }
-    }
-  },
-  {
-    "id": "PB_022",
-    "type": "external_benchmark",
-    "question": "Run LOCA-Bench (256k) locally using its benchmark release when available.",
-    "benchmark": {
-      "name": "LOCA-Bench (256k)",
-      "group": "Cowork",
-      "homepage": "https://arxiv.org/",
-      "repository": "https://arxiv.org/",
-      "ref": "main",
-      "subdir": "",
-      "license": "Unspecified",
-      "credit": "LOCA-Bench authors",
-      "docker": {
-        "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"LOCA-Bench (256k)\" --kind public-benchmark",
-        "environment": [],
-        "volumes": []
-      }
-    }
-  },
-  {
-    "id": "PB_023",
-    "type": "external_benchmark",
-    "question": "Run MCP Atlas locally using its public benchmark release.",
-    "benchmark": {
-      "name": "MCP Atlas",
-      "group": "Cowork",
-      "homepage": "https://arxiv.org/abs/2602.00933",
-      "repository": "https://arxiv.org/abs/2602.00933",
-      "ref": "main",
-      "subdir": "",
-      "license": "Unspecified",
-      "credit": "MCP-Atlas authors",
-      "docker": {
-        "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"MCP Atlas\" --kind public-benchmark",
-        "environment": [],
-        "volumes": []
-      }
-    }
-  },
-  {
-    "id": "PB_024",
-    "type": "external_benchmark",
-    "question": "Run Apex-Agents locally using its public benchmark release.",
-    "benchmark": {
-      "name": "Apex-Agents",
-      "group": "Cowork",
-      "homepage": "https://arxiv.org/abs/2601.14242",
-      "repository": "https://arxiv.org/abs/2601.14242",
-      "ref": "main",
-      "subdir": "",
-      "license": "Unspecified",
-      "credit": "APEX-Agents authors",
-      "docker": {
-        "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"Apex-Agents\" --kind public-benchmark",
-        "environment": [],
-        "volumes": []
-      }
-    }
-  },
-  {
-    "id": "PB_025",
-    "type": "external_benchmark",
-    "question": "Run Claw-Eval locally using its public benchmark release.",
-    "benchmark": {
-      "name": "Claw-Eval",
-      "group": "Cowork",
-      "homepage": "https://arxiv.org/abs/2604.06132",
-      "repository": "https://arxiv.org/abs/2604.06132",
-      "ref": "main",
-      "subdir": "",
-      "license": "Unspecified",
-      "credit": "Claw-Eval authors",
-      "docker": {
-        "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"Claw-Eval\" --kind public-benchmark",
-        "environment": [],
-        "volumes": []
-      }
-    }
-  },
-  {
-    "id": "PB_026",
-    "type": "external_benchmark",
-    "question": "Run OSWorld-Verified locally using its public benchmark harness.",
-    "benchmark": {
-      "name": "OSWorld-Verified",
-      "group": "GUI",
-      "homepage": "https://github.com/xlang-ai/OSWorld",
-      "repository": "https://github.com/xlang-ai/OSWorld.git",
+      "name": "EDINET-Bench",
+      "group": "Finance",
+      "capabilities": ["chat_answer", "external_data_required"],
+      "homepage": "https://github.com/SakanaAI/EDINET-Bench",
+      "repository": "https://github.com/SakanaAI/EDINET-Bench.git",
       "ref": "main",
       "subdir": "",
       "license": "Apache-2.0",
-      "credit": "OSWorld authors / XLANG NLP Lab",
+      "credit": "Sakana AI EDINET-Bench authors",
+      "citation": "https://github.com/SakanaAI/EDINET-Bench",
       "docker": {
         "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"OSWorld-Verified\" --kind public-benchmark",
-        "environment": [],
-        "volumes": []
-      }
-    }
-  },
-  {
-    "id": "PB_027",
-    "type": "external_benchmark",
-    "question": "Run OmniDocBench locally using its public benchmark harness.",
-    "benchmark": {
-      "name": "OmniDocBench",
-      "group": "Multimodal",
-      "homepage": "https://github.com/opendatalab/OmniDocBench",
-      "repository": "https://github.com/opendatalab/OmniDocBench.git",
-      "ref": "main",
-      "subdir": "",
-      "license": "Apache-2.0",
-      "credit": "OmniDocBench authors",
-      "docker": {
-        "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"OmniDocBench\" --kind public-benchmark",
-        "environment": [],
-        "volumes": []
-      }
-    }
-  },
-  {
-    "id": "PB_028",
-    "type": "external_benchmark",
-    "question": "Run MMMU-Pro locally using its public benchmark dataset.",
-    "benchmark": {
-      "name": "MMMU-Pro",
-      "group": "Multimodal",
-      "homepage": "https://huggingface.co/datasets/MMMU/MMMU_Pro",
-      "repository": "https://huggingface.co/datasets/MMMU/MMMU_Pro",
-      "ref": "main",
-      "subdir": "",
-      "license": "Unspecified",
-      "credit": "MMMU-Pro authors",
-      "docker": {
-        "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"MMMU-Pro\" --kind public-benchmark",
-        "environment": [],
-        "volumes": []
-      }
-    }
-  },
-  {
-    "id": "PB_029",
-    "type": "external_benchmark",
-    "question": "Run Video-MMMU locally using its public benchmark harness.",
-    "benchmark": {
-      "name": "Video-MMMU",
-      "group": "Multimodal",
-      "homepage": "https://github.com/FanqingM/Video-MMMU",
-      "repository": "https://github.com/FanqingM/Video-MMMU.git",
-      "ref": "main",
-      "subdir": "",
-      "license": "Unspecified",
-      "credit": "Video-MMMU authors",
-      "docker": {
-        "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"Video-MMMU\" --kind public-benchmark",
-        "environment": [],
-        "volumes": []
-      }
-    }
-  },
-  {
-    "id": "PB_030",
-    "type": "external_benchmark",
-    "question": "Run VideoMME (w/ sub) locally using its public benchmark harness.",
-    "benchmark": {
-      "name": "VideoMME (w/ sub)",
-      "group": "Multimodal",
-      "homepage": "https://github.com/BradyFU/Video-MME",
-      "repository": "https://github.com/BradyFU/Video-MME.git",
-      "ref": "main",
-      "subdir": "",
-      "license": "Apache-2.0",
-      "credit": "VideoMME authors",
-      "docker": {
-        "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"VideoMME (w/ sub)\" --kind public-benchmark",
-        "environment": [],
-        "volumes": []
-      }
-    }
-  },
-  {
-    "id": "PB_031",
-    "type": "external_benchmark",
-    "question": "Run IMO 2025 locally using competition problems and proof grading.",
-    "benchmark": {
-      "name": "IMO 2025",
-      "group": "Reasoning",
-      "homepage": "https://www.imo-official.org/year_info.aspx?year=2025",
-      "repository": "https://www.imo-official.org/year_info.aspx?year=2025",
-      "ref": "main",
-      "subdir": "",
-      "license": "Competition terms",
-      "credit": "International Mathematical Olympiad",
-      "docker": {
-        "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"IMO 2025\" --kind public-benchmark",
-        "environment": [],
-        "volumes": []
-      }
-    }
-  },
-  {
-    "id": "PB_032",
-    "type": "external_benchmark",
-    "question": "Run USAMO 2026 locally using competition problems and proof grading.",
-    "benchmark": {
-      "name": "USAMO 2026",
-      "group": "Reasoning",
-      "homepage": "https://maa.org/math-competitions/usamo/",
-      "repository": "https://maa.org/math-competitions/usamo/",
-      "ref": "main",
-      "subdir": "",
-      "license": "Competition terms",
-      "credit": "Mathematical Association of America",
-      "docker": {
-        "image": "agent-bench-external:python3.12",
-        "setup": ["python -m pip install --upgrade pip uv"],
-        "command": "agent-bench-probe --benchmark \"USAMO 2026\" --kind public-benchmark",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"EDINET-Bench\" --kind public-benchmark",
         "environment": [],
         "volumes": []
       }

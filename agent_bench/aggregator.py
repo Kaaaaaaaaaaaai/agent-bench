@@ -6,11 +6,15 @@ from agent_bench.models import GradeResult
 
 def aggregate_results(results: list[GradeResult], metadata: dict[str, Any]) -> dict[str, Any]:
     task_count = len(results)
-    total_score = sum(result.score for result in results)
+    valid_results = [result for result in results if _is_valid_result(result)]
+    valid_task_count = len(valid_results)
+    total_score = sum(result.score for result in valid_results)
+    raw_total_score = sum(result.score for result in results)
     passed_count = sum(1 for result in results if result.passed)
     json_valid_count = sum(1 for result in results if result.json_valid)
     timeout_count = sum(1 for result in results if result.timed_out)
     error_count = sum(1 for result in results if result.error)
+    status_counts = _status_counts(results)
     latency_values = [result.latency_seconds for result in results]
     ttft_values = [
         result.time_to_first_token_seconds
@@ -36,7 +40,10 @@ def aggregate_results(results: list[GradeResult], metadata: dict[str, Any]) -> d
         by_category[result.category].append(result)
 
     category_scores = {
-        category: _percent(sum(item.score for item in items), len(items))
+        category: _percent(
+            sum(item.score for item in _valid_items(items)),
+            len(_valid_items(items)),
+        )
         for category, items in sorted(by_category.items())
     }
     category_counts = {
@@ -57,9 +64,16 @@ def aggregate_results(results: list[GradeResult], metadata: dict[str, Any]) -> d
         "benchmark_version": "agent-bench-v0.1",
         "metadata": metadata,
         "task_count": task_count,
+        "valid_task_count": valid_task_count,
         "passed_count": passed_count,
-        "total_score": _percent(total_score, task_count),
+        "total_score": _percent(total_score, valid_task_count),
+        "score_valid_tasks_only": _percent(total_score, valid_task_count),
+        "raw_score": _percent(raw_total_score, task_count),
         "pass_rate": _percent(passed_count, task_count),
+        "status_counts": status_counts,
+        "skipped_count": sum(count for status, count in status_counts.items() if status.startswith("skipped_")),
+        "setup_failed_count": status_counts.get("failed_harness_setup", 0),
+        "judge_parse_failed_count": status_counts.get("failed_judge_parse", 0),
         "json_validity_rate": _percent(json_valid_count, task_count),
         "timeout_rate": _percent(timeout_count, task_count),
         "error_rate": _percent(error_count, task_count),
@@ -90,6 +104,37 @@ def _average(values: list[float]) -> float | None:
     if not values:
         return None
     return sum(values) / len(values)
+
+
+def _valid_items(items: list[GradeResult]) -> list[GradeResult]:
+    return [item for item in items if _is_valid_result(item)]
+
+
+def _is_valid_result(result: GradeResult) -> bool:
+    return _result_status(result) not in {
+        "failed_harness_setup",
+        "failed_judge_parse",
+        "skipped_missing_assets",
+        "skipped_unsupported_capability",
+        "timed_out",
+    }
+
+
+def _status_counts(results: list[GradeResult]) -> dict[str, int]:
+    counts: dict[str, int] = defaultdict(int)
+    for result in results:
+        counts[_result_status(result)] += 1
+    return dict(sorted(counts.items()))
+
+
+def _result_status(result: GradeResult) -> str:
+    if result.status:
+        return result.status
+    if result.timed_out:
+        return "timed_out"
+    if result.passed:
+        return "passed"
+    return "failed_model_answer"
 
 
 def _timing_by_category(results: list[GradeResult]) -> dict[str, dict[str, float | int | None]]:
@@ -177,10 +222,12 @@ def _benchmark_results(results: list[GradeResult]) -> list[dict[str, Any]]:
                 "benchmark": benchmark,
                 "score": round(result.score * 100.0, 4),
                 "passed": result.passed,
+                "status": _result_status(result),
                 "error": result.error,
                 "homepage": details.get("homepage", ""),
                 "license": details.get("license", ""),
                 "credit": details.get("credit", ""),
+                "citation": details.get("citation", details.get("homepage", "")),
                 "model_eval": model_eval,
                 "model_evals": model_evals,
                 "grading_methods": grading_methods,
@@ -188,7 +235,14 @@ def _benchmark_results(results: list[GradeResult]) -> list[dict[str, Any]]:
                 "file_count_sampled": benchmark_payload.get("file_count_sampled"),
                 "extracted_task_count": benchmark_payload.get("extracted_task_count"),
                 "evaluated_task_count": benchmark_payload.get("evaluated_task_count"),
+                "valid_evaluated_task_count": benchmark_payload.get("valid_evaluated_task_count"),
                 "evaluation_passed_count": benchmark_payload.get("evaluation_passed_count"),
+                "skipped_task_count": benchmark_payload.get("skipped_task_count"),
+                "judge_parse_failure_count": benchmark_payload.get("judge_parse_failure_count"),
+                "judge_parse_repaired_count": benchmark_payload.get("judge_parse_repaired_count"),
+                "status_counts": benchmark_payload.get("status_counts", {}),
+                "required_capabilities": benchmark_payload.get("required_capabilities", []),
+                "unsupported_capabilities": benchmark_payload.get("unsupported_capabilities", []),
                 "extraction_sources": benchmark_payload.get("extraction_sources", []),
             }
         )

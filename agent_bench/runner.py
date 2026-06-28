@@ -18,6 +18,9 @@ from agent_bench.verifiers import grade_task
 
 
 MAX_EMPTY_RESPONSES_PER_TASK = 3
+DEFAULT_TASK_TIMEOUT_SECONDS = 60.0
+DEFAULT_EXTERNAL_TIMEOUT_SECONDS = 6 * 60 * 60.0
+DEFAULT_MODEL_REQUEST_TIMEOUT_SECONDS = 10 * 60.0
 
 
 @dataclass(slots=True)
@@ -30,7 +33,9 @@ class RunConfig:
     out: Path = Path("runs/latest")
     request_concurrency: int = 8
     eval_concurrency: int = 4
-    timeout: float = 60.0
+    timeout: float = DEFAULT_TASK_TIMEOUT_SECONDS
+    external_timeout: float = DEFAULT_EXTERNAL_TIMEOUT_SECONDS
+    model_request_timeout: float = DEFAULT_MODEL_REQUEST_TIMEOUT_SECONDS
     limit: int | None = None
     include: set[str] | None = None
     temperature: float = 0.0
@@ -167,8 +172,9 @@ async def _run_external_benchmark(
             model=config.model or "",
             api_key_env=config.api_key_env or "",
             output_dir=output_dir,
-            timeout=config.timeout,
+            timeout=config.external_timeout,
             limit=config.limit,
+            model_request_timeout=config.model_request_timeout,
             launcher_image=config.external_launcher_image,
             source_root=Path(os.environ.get("AGENT_BENCH_SOURCE_ROOT", Path.cwd())),
         ),
@@ -223,6 +229,8 @@ def _metadata(
         "request_concurrency": config.request_concurrency,
         "eval_concurrency": config.eval_concurrency,
         "timeout": config.timeout,
+        "external_timeout": config.external_timeout,
+        "model_request_timeout": config.model_request_timeout,
         "temperature": config.temperature,
         "max_tokens": config.max_tokens,
         "json_mode": config.json_mode,

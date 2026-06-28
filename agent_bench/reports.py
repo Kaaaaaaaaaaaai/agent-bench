@@ -25,6 +25,7 @@ RESULT_FIELDS = [
     "confidence",
     "answer",
     "error",
+    "status",
 ]
 
 
@@ -130,6 +131,10 @@ def render_summary_html(summary: dict[str, Any], results: list[GradeResult]) -> 
       <p class="note">Scores are per benchmark row from the local graded benchmark sample executed by each descriptor. Repository readiness and endpoint checks are recorded in each task result.</p>
       {_benchmark_table(benchmark_results, str(metadata.get("model", "Model")))}
     </section>
+    <section>
+      <h2>Benchmark Citations</h2>
+      {_citation_table(benchmark_results)}
+    </section>
     <section class="stack">
       <div>
         <h2>Timing By Category</h2>
@@ -162,6 +167,11 @@ def _write_results_csv(path: Path, results: list[GradeResult]) -> None:
 def _metric_cards(summary: dict[str, Any]) -> str:
     cards = [
         ("Total Score", _format_percent(summary.get("total_score"))),
+        ("Raw Score", _format_percent(summary.get("raw_score"))),
+        ("Valid Tasks", _format_integer(summary.get("valid_task_count"))),
+        ("Skipped", _format_integer(summary.get("skipped_count"))),
+        ("Setup Failed", _format_integer(summary.get("setup_failed_count"))),
+        ("Judge Parse Failed", _format_integer(summary.get("judge_parse_failed_count"))),
         ("Pass Rate", _format_percent(summary.get("pass_rate"))),
         ("Coding Pass", _format_percent(summary.get("coding_pass_rate"))),
         ("JSON Validity", _format_percent(summary.get("json_validity_rate"))),
@@ -321,6 +331,34 @@ def _grading_methods(row: dict[str, Any]) -> str:
             if isinstance(value, str) and value:
                 methods.append(value)
     return ", ".join(sorted(set(methods)))
+
+
+def _citation_table(benchmark_results: Any) -> str:
+    if not isinstance(benchmark_results, list) or not benchmark_results:
+        return "<table><tbody><tr><td>No benchmark citations were recorded.</td></tr></tbody></table>"
+    rows = []
+    for row in benchmark_results:
+        if not isinstance(row, dict):
+            continue
+        source = str(row.get("citation") or row.get("homepage") or "")
+        source_cell = html.escape(source)
+        if source.startswith(("http://", "https://")):
+            href = html.escape(source, quote=True)
+            source_cell = f'<a href="{href}">{html.escape(source)}</a>'
+        rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(row.get('group', 'Benchmarks')))}</td>"
+            f"<td>{html.escape(str(row.get('benchmark', '')))}</td>"
+            f"<td>{source_cell}</td>"
+            f"<td>{html.escape(str(row.get('license', '')))}</td>"
+            f"<td>{html.escape(str(row.get('credit', '')))}</td>"
+            "</tr>"
+        )
+    return (
+        "<table><thead><tr><th>Group</th><th>Benchmark</th><th>Source</th>"
+        "<th>License</th><th>Credit</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
 
 
 def _metadata_table(metadata: dict[str, Any]) -> str:

@@ -71,6 +71,7 @@ class GradeResult:
     confidence: float | None = None
     error: str | None = None
     timed_out: bool = False
+    status: str = ""
     details: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:

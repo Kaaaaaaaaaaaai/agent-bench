@@ -2,7 +2,13 @@ import argparse
 import asyncio
 from pathlib import Path
 
-from agent_bench.runner import RunConfig, run_benchmark
+from agent_bench.runner import (
+    DEFAULT_EXTERNAL_TIMEOUT_SECONDS,
+    DEFAULT_MODEL_REQUEST_TIMEOUT_SECONDS,
+    DEFAULT_TASK_TIMEOUT_SECONDS,
+    RunConfig,
+    run_benchmark,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -18,7 +24,24 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--out", default="runs/latest")
     run.add_argument("--request-concurrency", type=int, default=8)
     run.add_argument("--eval-concurrency", type=int, default=4)
-    run.add_argument("--timeout", type=float, default=60.0)
+    run.add_argument(
+        "--timeout",
+        type=float,
+        default=DEFAULT_TASK_TIMEOUT_SECONDS,
+        help="Per-task timeout for non-external tasks, in seconds",
+    )
+    run.add_argument(
+        "--external-timeout",
+        type=float,
+        default=DEFAULT_EXTERNAL_TIMEOUT_SECONDS,
+        help="Wall-clock timeout for each Docker-backed external benchmark row, in seconds",
+    )
+    run.add_argument(
+        "--model-request-timeout",
+        type=float,
+        default=DEFAULT_MODEL_REQUEST_TIMEOUT_SECONDS,
+        help="Timeout for each model or judge request made inside an external benchmark, in seconds",
+    )
     run.add_argument("--limit", type=int, default=None)
     run.add_argument("--include", default=None, help="Comma-separated category, source file, or task IDs")
     run.add_argument("--temperature", type=float, default=0.0)
@@ -49,6 +72,8 @@ def main(argv: list[str] | None = None) -> int:
             request_concurrency=args.request_concurrency,
             eval_concurrency=args.eval_concurrency,
             timeout=args.timeout,
+            external_timeout=args.external_timeout,
+            model_request_timeout=args.model_request_timeout,
             limit=args.limit,
             include=include,
             temperature=args.temperature,
@@ -61,6 +86,14 @@ def main(argv: list[str] | None = None) -> int:
         summary = asyncio.run(run_benchmark(config))
         print(f"Tasks: {summary['passed_count']} / {summary['task_count']} passed")
         print(f"Total score: {summary['total_score']:.2f}%")
+        if summary.get("raw_score") != summary.get("total_score") or summary.get("skipped_count"):
+            print(f"Raw score: {summary['raw_score']:.2f}%")
+            print(
+                "Skipped/setup/parse: "
+                f"{summary.get('skipped_count', 0)} skipped, "
+                f"{summary.get('setup_failed_count', 0)} setup failed, "
+                f"{summary.get('judge_parse_failed_count', 0)} judge parse failed"
+            )
         print(f"Run time: {summary['total_run_duration_seconds']:.3f}s")
         if summary["average_time_to_first_token_seconds"] is not None:
             print(f"Avg TTFT: {summary['average_time_to_first_token_seconds']:.3f}s")

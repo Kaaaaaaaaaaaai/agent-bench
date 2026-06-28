@@ -41,6 +41,7 @@ def test_external_runner_uses_descriptor_docker_image(monkeypatch, tmp_path):
             "homepage": "https://example.com",
             "license": "MIT",
             "credit": "Example authors",
+            "capabilities": ["repo_patch", "chat_answer"],
             "docker": {
                 "image": "example-benchmark:local",
                 "command": "agent-bench-probe --benchmark ExampleBench",
@@ -65,6 +66,8 @@ def test_external_runner_uses_descriptor_docker_image(monkeypatch, tmp_path):
     assert commands[0] == ["docker", "image", "inspect", "example-benchmark:local"]
     assert commands[1][-1] == "example-benchmark:local"
     assert "AGENT_BENCH_DOCKER_IMAGE=example-benchmark:local" in commands[1]
+    assert "AGENT_BENCH_REQUIRED_CAPABILITIES=repo_patch,chat_answer" in commands[1]
+    assert "AGENT_BENCH_MODEL_REQUEST_TIMEOUT=600.0" in commands[1]
     assert not any(item.endswith(":/outputs") for item in commands[1])
     assert commands[2][:2] == ["docker", "cp"]
     assert commands[3][:3] == ["docker", "rm", "-f"]

@@ -234,6 +234,7 @@ class MockClient(ModelClient):
                     "homepage": benchmark.get("homepage", ""),
                     "license": benchmark.get("license", ""),
                     "credit": benchmark.get("credit", ""),
+                    "citation": benchmark.get("citation", benchmark.get("homepage", "")),
                     "result": {
                         "repository_ready": True,
                         "file_count_sampled": 0,

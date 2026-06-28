@@ -44,6 +44,7 @@ async def grade_task(
             latency_seconds=response.latency_seconds,
             **_response_measurements(response),
             error=response.error,
+            status="failed_harness_setup",
         )
     if task.is_multiple_choice:
         return grade_multiple_choice(task, response)
@@ -64,6 +65,7 @@ async def grade_task(
         latency_seconds=response.latency_seconds,
         **_response_measurements(response),
         error=f"Unsupported task type: {task.type}",
+        status="failed_harness_setup",
     )
 
 
@@ -199,6 +201,7 @@ async def grade_coding(
         confidence=confidence,
         error=sandbox_result.error,
         timed_out=sandbox_result.timed_out,
+        status="timed_out" if sandbox_result.timed_out else "",
         details={
             "passed_cases": sandbox_result.passed_cases,
             "total_cases": total,
@@ -219,6 +222,7 @@ def _invalid_json_result(task: Task, response: ModelResponse, error: str | None)
         latency_seconds=response.latency_seconds,
         **_response_measurements(response),
         error=error,
+        status="failed_model_answer",
     )
 
 
@@ -295,6 +299,10 @@ def grade_external_benchmark(task: Task, response: ModelResponse) -> GradeResult
     benchmark_error = payload.get("error") if isinstance(payload.get("error"), str) else None
     details = payload.get("details") if isinstance(payload.get("details"), dict) else {}
     group = details.get("group")
+    status = payload.get("status") if isinstance(payload.get("status"), str) else ""
+    if not status:
+        result_payload = details.get("result") if isinstance(details.get("result"), dict) else {}
+        status = result_payload.get("status") if isinstance(result_payload.get("status"), str) else ""
     return GradeResult(
         task_id=task.id,
         category=group if isinstance(group, str) and group.strip() else task.category,
@@ -308,5 +316,6 @@ def grade_external_benchmark(task: Task, response: ModelResponse) -> GradeResult
         answer=payload.get("status"),
         error=benchmark_error,
         timed_out=bool(payload.get("timed_out", False)),
+        status=status,
         details=details,
     )

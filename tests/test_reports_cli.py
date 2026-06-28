@@ -32,6 +32,9 @@ def test_render_summary_html_contains_radar_svg():
                 "score": 75.0,
                 "passed": False,
                 "homepage": "https://example.com",
+                "citation": "https://example.com/citation",
+                "license": "MIT",
+                "credit": "Example authors",
                 "file_count_sampled": 5,
                 "model_eval": {"answer": "B", "expected": "A", "question": "Pick the best fix."},
             }
@@ -79,10 +82,13 @@ def test_render_summary_html_contains_radar_svg():
 
     assert "Average Score Radar" in html
     assert "Benchmark Scores" in html
+    assert "Benchmark Citations" in html
     assert "Evaluation Methodology" not in html
     assert "ExampleBench" in html
+    assert "https://example.com/citation" in html
     assert "<th>mock</th>" in html
     assert "<th>Benchmark</th><th>mock</th><th>Items</th><th>Method</th>" in html
+    assert "<th>Group</th><th>Benchmark</th><th>Source</th><th>License</th><th>Credit</th>" in html
     assert "<th>Method</th><th>Status</th>" not in html
     assert "<th>Method</th><th>Answer</th>" not in html
     assert "<th>Method</th><th>Expected</th>" not in html
@@ -160,14 +166,15 @@ def test_cli_mock_smoke_runs_all_bundled_benchmarks(tmp_path):
     assert exit_code == 0
     summary = json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))
     html = (out_dir / "summary.html").read_text(encoding="utf-8")
-    assert summary["task_count"] == 32
-    assert len(summary["benchmark_results"]) == 32
+    assert summary["task_count"] == 20
+    assert len(summary["benchmark_results"]) == 20
     assert "public_benchmarks" not in html
-    assert "SWE-Bench Verified" in html
-    assert "Terminal Bench 2.1" in html
-    assert "MCP Atlas" in html
-    assert "VideoMME (w/ sub)" in html
-    assert "USAMO 2026" in html
+    assert "SWE-bench" in html
+    assert "GDPval" in html
+    assert "Humanity&#x27;s Last Exam" in html
+    assert "BioMystery Bench" in html
+    assert "EDINET-Bench" in html
+    assert "Benchmark Citations" in html
     assert "<th>Benchmark</th><th>mock-perfect</th><th>Items</th><th>Method</th>" in html
 
 
@@ -240,6 +247,7 @@ def test_aggregate_results_emits_external_benchmark_rows():
                     "homepage": "https://example.com",
                     "license": "MIT",
                     "credit": "Example authors",
+                    "citation": "https://example.com/cite",
                     "result": {
                         "repository_ready": True,
                         "file_count_sampled": 12,
@@ -256,4 +264,39 @@ def test_aggregate_results_emits_external_benchmark_rows():
     }
     assert summary["benchmark_results"][0]["benchmark"] == "ExampleBench"
     assert summary["benchmark_results"][0]["score"] == 75.0
+    assert summary["benchmark_results"][0]["citation"] == "https://example.com/cite"
     assert summary["benchmark_results"][0]["model_eval"] == {"answer": "A", "expected": "B"}
+
+
+def test_aggregate_results_separates_skipped_from_valid_scores():
+    summary = aggregate_results(
+        [
+            GradeResult(
+                task_id="valid",
+                category="alpha",
+                kind="multiple_choice",
+                score=1.0,
+                max_score=1.0,
+                passed=True,
+                json_valid=True,
+                latency_seconds=0.1,
+            ),
+            GradeResult(
+                task_id="skipped",
+                category="alpha",
+                kind="external_benchmark",
+                score=0.0,
+                max_score=1.0,
+                passed=False,
+                json_valid=True,
+                latency_seconds=0.1,
+                status="skipped_unsupported_capability",
+            ),
+        ],
+        {"run_duration_seconds": 1.0},
+    )
+
+    assert summary["raw_score"] == 50.0
+    assert summary["total_score"] == 100.0
+    assert summary["valid_task_count"] == 1
+    assert summary["skipped_count"] == 1
