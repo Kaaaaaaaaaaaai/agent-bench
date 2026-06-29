@@ -82,7 +82,8 @@ The bundled rows are whole benchmark descriptors, not single quiz questions. For
 The normal `--timeout` option still controls non-external single-task requests and defaults to 60 seconds. External benchmark rows use:
 
 - `--external-timeout`: wall-clock timeout for each benchmark Docker container; default `21600`.
-- `--model-request-timeout`: timeout for each model or judge request made inside the benchmark probe; default `600`.
+- `--model-request-timeout`: timeout for each model or judge request made inside the benchmark probe; default `1800`.
+- `--max-tokens`: generation budget for normal tasks and each agent-loop model turn inside external benchmarks; default `16384`.
 
 For a single local model server, start with `--request-concurrency 1` or `--request-concurrency 2`. Higher values can reduce elapsed wall time only when the local serving stack has enough GPU/CPU capacity for concurrent benchmark rows.
 
@@ -119,7 +120,7 @@ External benchmark task shape:
 }
 ```
 
-The default descriptor file covers the 20 requested public benchmarks: SWE-bench, GDPval, PaperBench, SWE-Lancer, MLE-bench, SWE-bench Verified, AutomationBench, OSWorld, Humanity's Last Exam, BioMystery Bench, ExploitBench, codeneedle, StockBench, InvestorBench, QuantCode-Bench, FinMCP-Bench, FinToolBench, Finance Agent v2, FinanceMath, and EDINET-Bench. Upstream credits, license notes, and citation URLs are recorded in `tasks/public_benchmarks.json` and summarized in `tasks/README.md`; license metadata is not used as a loader gate.
+The default descriptor file covers 19 public benchmarks: SWE-bench, GDPval, PaperBench, SWE-Lancer, MLE-bench, SWE-bench Verified, AutomationBench, OSWorld, BioMystery Bench, ExploitBench, codeneedle, StockBench, InvestorBench, QuantCode-Bench, FinMCP-Bench, FinToolBench, Finance Agent v2, FinanceMath, and EDINET-Bench. Upstream credits, license notes, and citation URLs are recorded in `tasks/public_benchmarks.json` and summarized in `tasks/README.md`; license metadata is not used as a loader gate.
 
 When running a remote provider, Agent Bench starts the benchmark launcher container, clones the upstream benchmark source or dataset inside Docker, extracts real benchmark task records, calls the configured model endpoint for each sampled task, and grades the model's answer. The launcher receives neutral model settings through environment variables:
 
@@ -129,13 +130,24 @@ When running a remote provider, Agent Bench starts the benchmark launcher contai
 - `AGENT_BENCH_OUTPUT_DIR`
 - `AGENT_BENCH_API_KEY`, when `--api-key-env` is provided
 
-The bundled descriptors use `agent-bench-probe` to normalize different public benchmark formats into a common sample-and-grade flow. It supports JSON, JSONL, CSV, Parquet, selected Python task dictionaries, prompt/description text files, Hugging Face datasets, and benchmark-specific adapters for repositories that expose tasks through code or market data rather than a single task file. If a public repository exposes only harness documentation or requires gated services for the full leaderboard run, the probe records a marked repository-readiness fallback task. Extracted records are graded with one of three methods:
+The bundled descriptors use `agent-bench-probe` to normalize public benchmark formats through an explicit adapter contract:
+
+- `prepare_task(task) -> TaskWorkspace`
+- `available_tools(task) -> ToolSchema[]`
+- `run_agent_loop(task, workspace, tools) -> AgentRun`
+- `collect_outputs(run) -> OutputBundle`
+- `grade(task, outputs) -> GradeResult`
+
+Capabilities are reported only when an adapter can provide the required workspace, tools, output collection, and grader. Generic file/search tools are auxiliary and do not count as native `tool_call` support. OSWorld remains `skipped_unsupported_capability` until a real GUI/browser adapter exists. Repo-patch rows require a mandatory checkout/patch/diff/test canary, target repository metadata, and an official patch/test grader; exact reference-diff matching is recorded only as diagnostic metadata and is not used as the primary grade. File-artifact rows run a read/write/list/collect canary and use isolated per-item workspaces populated only with declared task inputs. Missing assets are marked `failed_missing_assets`. BioMystery scoring is disabled until answer rubrics and gold labels are available only on the grader side.
+
+Extracted chat-answer records are graded with deterministic methods when possible and LLM judging only when no deterministic grader exists:
 
 - `exact`: deterministic answer, patch, label, or multiple-choice matching.
+- `numeric`: deterministic numeric matching with unit normalization for FinanceMath-style records.
 - `rubric`: a published rubric or benchmark prompt is used for model-based grading.
 - `task_compliance`: the benchmark exposes a real task prompt without a standalone answer key, so a grading call scores whether the response satisfies the task requirements.
 
-Each descriptor records the extracted source paths, item counts, grading method, and normalized score in `${AGENT_BENCH_OUTPUT_DIR}/agent_bench_result.json`.
+Each descriptor records the adapter, capability contract, extracted source paths, item counts, grading method, strict statuses, and normalized score in `${AGENT_BENCH_OUTPUT_DIR}/agent_bench_result.json`.
 
 ## Outputs
 
@@ -147,7 +159,13 @@ Each run writes:
 - `summary.json`
 - `summary.html`
 
-The HTML report is fully static and includes metric cards, an average-score radar chart, grouped benchmark scores, benchmark citations, category summaries, detailed task rows, and timing tables for categories plus individual problems.
+The HTML report is fully static and includes metric cards, an average-score radar chart, grouped benchmark scores, category summaries, status distributions, detailed task rows, and benchmark citations.
+
+Scores are reported three ways:
+
+- `raw_score_all_tasks`: includes every configured task for audit.
+- `score_valid_tasks_only`: excludes coverage-gap, setup, dataset-extraction, grader-invalid, and timed-out task rows.
+- `model_score_valid_tasks_only`: includes only valid rows where the adapter fully provided the required benchmark capabilities.
 
 The `Benchmark Scores` table is grouped by benchmark group such as `Coding`, `Finance`, `GUI`, `Research`, `Security`, `Work`, and `Reasoning`. It includes only:
 
@@ -156,16 +174,16 @@ The `Benchmark Scores` table is grouped by benchmark group such as `Coding`, `Fi
 - passed/evaluated item count
 - grading method
 
-The report intentionally does not include `Status`, `Answer`, `Expected`, or `Evaluation Methodology` columns/sections in `summary.html`. Detailed diagnostics remain available in `summary.json`, `graded_results.jsonl`, and `results.csv`.
+The `Task Results` table uses benchmark names rather than internal task IDs where benchmark metadata is available. Detailed diagnostics, including strict statuses, capability contracts, raw judge text, parsed judge JSON, and judge usage, remain available in `summary.json`, `graded_results.jsonl`, and `results.csv`.
 
 Remote providers are queried with streaming responses so the runner can record:
 
 - time to first token (TTFT)
 - output tokens per second when the provider exposes output token counts
 - benchmark wall-clock run time
-- accumulated per-task end-to-end time, summarized by category and by problem
+- accumulated per-task end-to-end time
 
-Those values are written into `raw_responses.jsonl`, `graded_results.jsonl`, `results.csv`, `summary.json`, and `summary.html`. Providers that do not return output-token usage still report TTFT and timing data, while tokens-per-second remains `n/a`.
+Those values are written into `raw_responses.jsonl`, `graded_results.jsonl`, `results.csv`, and the top-level summary metrics where applicable. Providers that do not return output-token usage still report TTFT and timing data, while tokens-per-second remains `n/a`.
 
 ## Docker Sandboxing
 

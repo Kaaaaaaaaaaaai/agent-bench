@@ -13,3 +13,7 @@ wheels/
 
 # result files
 runs/
+agent-bench-assets/
+agent_bench_outputs/
+agent_bench_task_inputs/
+assets/

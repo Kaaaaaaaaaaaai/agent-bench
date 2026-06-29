@@ -1,14 +1,24 @@
 #!/usr/bin/env python3
 import argparse
 import ast
+import base64
 import csv
+import hashlib
 import json
 import os
 import re
+import shlex
+import signal
+import socket
+import subprocess
+import shutil
+import zipfile
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib import error, request
+import xml.etree.ElementTree as ET
 
 
 QUESTION_KEYS = (
@@ -57,15 +67,93 @@ ANSWER_KEYS = (
     "final_response",
     "patch",
     "gold_patch",
+    "python_solution",
 )
 CHOICE_KEYS = ("choices", "options", "candidates", "multiple_choice_targets")
-RUBRIC_KEYS = ("rubric", "criteria", "grading", "evaluation_criteria")
+RUBRIC_KEYS = ("rubric", "criteria", "grading", "evaluation_criteria", "answer_rubric")
 SKIP_DIRS = {".git", "__pycache__", ".venv", "venv", "node_modules", ".mypy_cache", ".pytest_cache"}
 MAX_FIELD_CHARS = 6000
 MAX_RECORDS_PER_FILE = 500
 JUDGE_REQUIRED_KEYS = {"score", "passed", "reason"}
-HARNESS_SUPPORTED_CAPABILITIES = {"chat_answer", "external_data_required"}
+STRICT_STATUSES = {
+    "passed",
+    "failed_model_answer",
+    "failed_model_format",
+    "failed_model_tool_use",
+    "failed_harness_setup",
+    "failed_dataset_extraction",
+    "failed_missing_assets",
+    "failed_unsupported_capability",
+    "skipped_unsupported_capability",
+    "failed_grader",
+    "failed_token_budget",
+    "timed_out",
+}
+INVALID_EVALUATION_STATUSES = {
+    "failed_harness_setup",
+    "failed_dataset_extraction",
+    "failed_missing_assets",
+    "failed_unsupported_capability",
+    "skipped_unsupported_capability",
+    "failed_grader",
+    "failed_token_budget",
+    "timed_out",
+}
+STATUS_ALIASES = {
+    "failed_unsupported_capability": "skipped_unsupported_capability",
+    "failed_judge_parse": "failed_grader",
+    "skipped_missing_assets": "failed_missing_assets",
+}
 HTTP_FALLBACK_STATUS_CODES = {400, 404, 422}
+MAX_AGENT_TURNS = 8
+DEFAULT_AGENT_MAX_TOKENS = 16384
+TOOL_RESULT_CHARS = 6000
+MAX_REPEATED_IDENTICAL_TOOL_CALLS = 3
+DEFAULT_MAX_TOTAL_TOOL_CALLS = 40
+MAX_CONSECUTIVE_FAILED_TOOL_CALLS = 5
+REPO_PATCH_GRADER_ENV = "AGENT_BENCH_REPO_PATCH_GRADER"
+TARGET_REPO_ROOT_ENV = "AGENT_BENCH_TARGET_REPO_ROOT"
+DEFAULT_ASSET_ROOT = "/tmp/agent-bench-assets"
+BINARY_SUFFIXES = {
+    ".7z",
+    ".bin",
+    ".bz2",
+    ".dmg",
+    ".gif",
+    ".gz",
+    ".idx",
+    ".jpeg",
+    ".jpg",
+    ".npy",
+    ".npz",
+    ".pack",
+    ".parquet",
+    ".pdf",
+    ".png",
+    ".pkl",
+    ".pyc",
+    ".rev",
+    ".tar",
+    ".tgz",
+    ".webp",
+    ".xlsx",
+    ".zip",
+}
+
+
+def normalize_status(status: Any) -> str:
+    if not isinstance(status, str):
+        return ""
+    status = status.strip()
+    return STATUS_ALIASES.get(status, status)
+
+
+def status_count(status_counts: dict[str, Any], status: str) -> int:
+    normalized = normalize_status(status)
+    for key, value in status_counts.items():
+        if normalize_status(key) == normalized and isinstance(value, int):
+            return value
+    return 0
 
 
 class ChatCompletionHTTPError(Exception):
@@ -75,6 +163,12 @@ class ChatCompletionHTTPError(Exception):
         self.body = body
 
 
+class ChatCompletionTimeoutError(TimeoutError):
+    def __init__(self, timeout_seconds: float) -> None:
+        super().__init__(f"model request timed out after {timeout_seconds:.1f}s")
+        self.timeout_seconds = timeout_seconds
+
+
 @dataclass(slots=True)
 class BenchmarkItem:
     question: str
@@ -82,6 +176,559 @@ class BenchmarkItem:
     source: str
     choices: dict[str, str] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class CapabilitySupport:
+    capability: str
+    workspace: bool
+    tools: bool
+    output_collection: bool
+    grader: bool
+    native: bool = True
+    reason: str = ""
+
+    @property
+    def supported(self) -> bool:
+        return self.workspace and self.tools and self.output_collection and self.grader and self.native
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "capability": self.capability,
+            "workspace": self.workspace,
+            "tools": self.tools,
+            "output_collection": self.output_collection,
+            "grader": self.grader,
+            "native": self.native,
+            "supported": self.supported,
+            "reason": self.reason,
+        }
+
+
+@dataclass(slots=True)
+class TaskWorkspace:
+    root: Path
+    output_dir: Path
+    manifest: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class AgentRun:
+    answer: str
+    content: str = ""
+    usage: dict[str, Any] = field(default_factory=dict)
+    tool_trace: list[dict[str, Any]] = field(default_factory=list)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
+    status_code: int = 200
+
+
+@dataclass(slots=True)
+class OutputBundle:
+    answer: str = ""
+    patch: str = ""
+    artifact_paths: list[str] = field(default_factory=list)
+    tool_trace: list[dict[str, Any]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+class AdapterSetupError(Exception):
+    def __init__(self, status: str, message: str, details: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        status = normalize_status(status)
+        if status not in STRICT_STATUSES:
+            raise ValueError(f"invalid benchmark status: {status}")
+        self.status = status
+        self.details = details or {}
+
+
+class BenchmarkAdapter:
+    name = "chat_answer"
+
+    def capability_support(self) -> dict[str, CapabilitySupport]:
+        return {}
+
+    def supported_capabilities(self) -> set[str]:
+        return {
+            capability
+            for capability, support in self.capability_support().items()
+            if support.supported
+        }
+
+    def capability_contract(self, required_capabilities: set[str], items: list[BenchmarkItem]) -> dict[str, Any]:
+        return capability_contract_for(required_capabilities, self)
+
+    def prepare_task(self, item: BenchmarkItem) -> TaskWorkspace:
+        root = _isolated_workspace_root(item)
+        _write_model_visible_task_files(root, item)
+        return TaskWorkspace(
+            root=root,
+            output_dir=_item_output_dir(item),
+            manifest=_workspace_manifest(root),
+            metadata={"sanitized_workspace": True, "source": item.source},
+        )
+
+    def available_tools(self, item: BenchmarkItem, workspace: TaskWorkspace) -> list[dict[str, Any]]:
+        return agent_tool_schemas()
+
+    def run_agent_loop(
+        self,
+        benchmark: str,
+        item: BenchmarkItem,
+        workspace: TaskWorkspace,
+        tools: list[dict[str, Any]],
+    ) -> AgentRun:
+        with pushd(workspace.root):
+            try:
+                result = run_agent_loop(benchmark, item, tools=tools)
+            except TypeError as exc:
+                if "tools" not in str(exc):
+                    raise
+                result = run_agent_loop(benchmark, item)
+        return _agent_run_from_dict(result)
+
+    def collect_outputs(self, run: AgentRun, workspace: TaskWorkspace) -> OutputBundle:
+        return OutputBundle(
+            answer=run.answer,
+            tool_trace=run.tool_trace,
+            metadata={"content_sample": run.content[:500], "diagnostics": run.diagnostics},
+        )
+
+    def grade(self, benchmark: str, item: BenchmarkItem, outputs: OutputBundle) -> tuple[float, dict[str, Any]]:
+        score, grade = grade_answer(benchmark, item, outputs.answer)
+        grade.setdefault("output_collection", "answer")
+        return score, grade
+
+    def evaluate_item(self, benchmark: str, item: BenchmarkItem) -> dict[str, Any]:
+        workspace: TaskWorkspace | None = None
+        item_dir = _item_output_dir(item)
+        _write_item_json(item_dir, "item.json", _item_to_dict(item))
+        try:
+            workspace = self.prepare_task(item)
+            tools = self.available_tools(item, workspace)
+            _write_item_json(item_dir, "workspace.json", _workspace_to_dict(workspace))
+            _write_item_json(item_dir, "tools.json", {"tools": tools})
+            run = self.run_agent_loop(benchmark, item, workspace, tools)
+            _write_item_json(item_dir, "agent_run.json", _agent_run_to_dict(run))
+            protocol_status = normalize_status(run.diagnostics.get("status")) if isinstance(run.diagnostics, dict) else ""
+            if protocol_status in STRICT_STATUSES and protocol_status != "passed":
+                payload = evaluation_payload(
+                    item,
+                    run.answer,
+                    0.0,
+                    str(run.diagnostics.get("reason") or protocol_status),
+                    status=protocol_status,
+                    status_code=run.status_code,
+                    content_sample=run.content[:500],
+                    usage=run.usage,
+                    tool_trace=run.tool_trace,
+                    protocol_diagnostics=run.diagnostics,
+                    adapter=self.name,
+                    capabilities_verified=protocol_status not in INVALID_EVALUATION_STATUSES,
+                )
+                _write_item_json(item_dir, "item_result.json", payload)
+                return payload
+            outputs = self.collect_outputs(run, workspace)
+            _write_item_json(item_dir, "output_bundle.json", _output_bundle_to_dict(outputs))
+            protocol = outputs.metadata.get("diagnostics") if isinstance(outputs.metadata, dict) else {}
+            if isinstance(protocol, dict) and protocol.get("final_output_contains_tool_syntax"):
+                payload = evaluation_payload(
+                    item,
+                    outputs.answer,
+                    0.0,
+                    "final output contained tool-call syntax",
+                    status="failed_model_format",
+                    status_code=run.status_code,
+                    content_sample=run.content[:500],
+                    usage=run.usage,
+                    tool_trace=outputs.tool_trace,
+                    protocol_diagnostics=protocol,
+                    output_bundle={
+                        "answer_present": bool(outputs.answer),
+                        "patch_present": bool(outputs.patch),
+                        "artifact_paths": outputs.artifact_paths,
+                        "metadata": outputs.metadata,
+                    },
+                    adapter=self.name,
+                    capabilities_verified=True,
+                )
+                _write_item_json(item_dir, "item_result.json", payload)
+                return payload
+            score, grade = self.grade(benchmark, item, outputs)
+            _write_item_json(item_dir, "grade.json", grade)
+        except ChatCompletionTimeoutError as exc:
+            payload = evaluation_payload(
+                item,
+                "",
+                0.0,
+                str(exc),
+                status="timed_out",
+                timed_out=True,
+                adapter=self.name,
+                capabilities_verified=False,
+            )
+            _write_item_json(item_dir, "item_result.json", payload)
+            return payload
+        except ChatCompletionHTTPError as exc:
+            status = "failed_token_budget" if _looks_like_context_error(exc.body) else "failed_harness_setup"
+            payload = evaluation_payload(
+                item,
+                "",
+                0.0,
+                exc.body[-2000:] or str(exc),
+                status=status,
+                status_code=exc.code,
+                adapter=self.name,
+                capabilities_verified=False,
+            )
+            _write_item_json(item_dir, "item_result.json", payload)
+            return payload
+        except AdapterSetupError as exc:
+            payload = evaluation_payload(
+                item,
+                "",
+                0.0,
+                str(exc),
+                status=exc.status,
+                adapter=self.name,
+                capabilities_verified=False,
+                setup_details=exc.details,
+            )
+            _write_item_json(item_dir, "setup_error.json", {"status": exc.status, "error": str(exc), "details": exc.details})
+            _write_item_json(item_dir, "item_result.json", payload)
+            return payload
+        except Exception as exc:
+            payload = evaluation_payload(
+                item,
+                "",
+                0.0,
+                str(exc),
+                status="failed_harness_setup",
+                adapter=self.name,
+                capabilities_verified=False,
+            )
+            _write_item_json(item_dir, "setup_error.json", {"status": "failed_harness_setup", "error": str(exc)})
+            _write_item_json(item_dir, "item_result.json", payload)
+            return payload
+
+        error_message = ""
+        if score < 1.0:
+            error_message = str(grade.get("reason") or f"expected {item.expected!r}, got {outputs.answer!r}")
+        protocol = outputs.metadata.get("diagnostics") if isinstance(outputs.metadata, dict) else {}
+        status_override = grade.get("status") if isinstance(grade.get("status"), str) else None
+        if score < 1.0 and (not status_override or normalize_status(status_override) == "failed_model_answer"):
+            if isinstance(protocol, dict) and protocol.get("final_output_contains_tool_syntax"):
+                status_override = "failed_model_format"
+                error_message = error_message or "final output contained tool-call syntax"
+            elif isinstance(protocol, dict) and protocol.get("ignored_tool_failure_before_final"):
+                status_override = "failed_model_tool_use"
+                error_message = error_message or "model finalized after a failed tool call"
+        payload = evaluation_payload(
+            item,
+            outputs.answer or outputs.patch or ", ".join(outputs.artifact_paths),
+            score,
+            error_message,
+            status_code=run.status_code,
+            content_sample=run.content[:500],
+            usage=run.usage,
+            tool_trace=outputs.tool_trace,
+            protocol_diagnostics=protocol if isinstance(protocol, dict) else {},
+            output_bundle={
+                "answer_present": bool(outputs.answer),
+                "patch_present": bool(outputs.patch),
+                "artifact_paths": outputs.artifact_paths,
+                "metadata": outputs.metadata,
+            },
+            grade=grade,
+            status=status_override,
+            timed_out=bool(grade.get("timed_out")),
+            judge_parse_repaired=bool(grade.get("judge_parse_repaired")),
+            adapter=self.name,
+            capabilities_verified=normalize_status(status_override) not in INVALID_EVALUATION_STATUSES,
+        )
+        _write_item_json(item_dir, "item_result.json", payload)
+        return payload
+
+
+class ChatAnswerAdapter(BenchmarkAdapter):
+    name = "chat_answer"
+
+    def capability_support(self) -> dict[str, CapabilitySupport]:
+        return {
+            "chat_answer": CapabilitySupport("chat_answer", True, True, True, True),
+            "external_data_required": CapabilitySupport("external_data_required", True, True, True, True),
+        }
+
+
+class FileArtifactAdapter(ChatAnswerAdapter):
+    name = "file_artifact"
+
+    def capability_support(self) -> dict[str, CapabilitySupport]:
+        support = super().capability_support()
+        support["file_artifact"] = CapabilitySupport("file_artifact", True, True, True, True)
+        return support
+
+    def prepare_task(self, item: BenchmarkItem) -> TaskWorkspace:
+        source_root = Path.cwd()
+        asset_paths = _artifact_asset_paths(item, source_root)
+        if not asset_paths:
+            raise AdapterSetupError(
+                "failed_missing_assets",
+                "file_artifact task did not expose required input files or dataset assets",
+                {"source": item.source},
+            )
+        workspace_root = _isolated_workspace_root(item)
+        _write_model_visible_task_files(workspace_root, item)
+        input_assets = _materialize_artifact_assets(asset_paths, workspace_root, item)
+        relative_output_dir = Path("agent_bench_outputs") / _safe_slug(item.source)
+        output_dir = workspace_root / relative_output_dir
+        output_dir.mkdir(parents=True, exist_ok=True)
+        _expose_input_files_at_workspace_root(workspace_root, input_assets)
+        _write_task_file_manifest(workspace_root, input_assets)
+        return TaskWorkspace(
+            root=workspace_root,
+            output_dir=output_dir,
+            manifest=_workspace_manifest(workspace_root),
+            metadata={
+                "sanitized_workspace": True,
+                "input_assets": input_assets,
+                "artifact_output_dir": str(relative_output_dir),
+                "item_output_dir": str(_item_output_dir(item)),
+                "source": item.source,
+                "source_repository_root": str(source_root),
+            },
+        )
+
+    def capability_contract(self, required_capabilities: set[str], items: list[BenchmarkItem]) -> dict[str, Any]:
+        contract = capability_contract_for(required_capabilities, self)
+        if "file_artifact" not in required_capabilities:
+            return contract
+        assetful_items = sum(1 for item in items if _artifact_asset_paths(item, Path.cwd()))
+        support = contract.get("file_artifact")
+        if isinstance(support, dict):
+            support["assets_provisioned_count"] = assetful_items
+            support["required_item_count"] = len(items)
+            if not items or assetful_items <= 0:
+                support["supported"] = False
+                support["workspace"] = False
+                support["reason"] = "No required file-artifact assets were provisioned for extracted items"
+            else:
+                canary = _file_artifact_canary()
+                support["canary"] = canary
+                if not canary.get("passed"):
+                    support["supported"] = False
+                    support["tools"] = False
+                    support["output_collection"] = False
+                    support["reason"] = str(canary.get("reason") or "file_artifact canary failed")
+        return contract
+
+    def run_agent_loop(
+        self,
+        benchmark: str,
+        item: BenchmarkItem,
+        workspace: TaskWorkspace,
+        tools: list[dict[str, Any]],
+    ) -> AgentRun:
+        augmented = BenchmarkItem(
+            question=(
+                f"{item.question}\n\n"
+                "Generate the required deliverable files under "
+                f"{workspace.metadata['artifact_output_dir']}."
+            ),
+            expected=item.expected,
+            source=item.source,
+            choices=item.choices,
+            metadata=item.metadata,
+        )
+        return super().run_agent_loop(benchmark, augmented, workspace, tools)
+
+    def collect_outputs(self, run: AgentRun, workspace: TaskWorkspace) -> OutputBundle:
+        raw_item_dir = str(workspace.metadata.get("item_output_dir") or "")
+        if raw_item_dir:
+            item_dir = Path(raw_item_dir)
+        else:
+            item_dir = _item_output_dir(BenchmarkItem("", "", str(workspace.metadata.get("source", "item"))))
+        artifact_paths = _collect_artifacts_to_output(workspace.output_dir, item_dir / "artifacts")
+        return OutputBundle(
+            answer=run.answer,
+            artifact_paths=artifact_paths,
+            tool_trace=run.tool_trace,
+            metadata={
+                "content_sample": run.content[:500],
+                "diagnostics": run.diagnostics,
+                "artifact_output_dir": workspace.metadata.get("artifact_output_dir", ""),
+                "input_assets": workspace.metadata.get("input_assets", []),
+            },
+        )
+
+    def grade(self, benchmark: str, item: BenchmarkItem, outputs: OutputBundle) -> tuple[float, dict[str, Any]]:
+        if not outputs.artifact_paths:
+            return 0.0, {
+                "method": "artifact_presence",
+                "score": 0.0,
+                "status": "failed_model_answer",
+                "reason": "model did not produce any files in the task output directory",
+            }
+        integrity_errors = _artifact_integrity_errors(outputs.artifact_paths)
+        if integrity_errors:
+            return 0.0, {
+                "method": "artifact_integrity",
+                "score": 0.0,
+                "status": "failed_model_tool_use",
+                "reason": "generated artifact integrity check failed",
+                "artifact_errors": integrity_errors,
+            }
+        artifact_answer = (
+            f"Generated artifacts:\n{json.dumps(outputs.artifact_paths, ensure_ascii=False)}\n\n"
+            f"Final answer:\n{outputs.answer}"
+        )
+        score, grade = judge_answer(benchmark, item, artifact_answer, "file_artifact")
+        grade.setdefault("output_collection", "file_artifact")
+        return score, grade
+
+
+class RepoPatchAdapter(ChatAnswerAdapter):
+    name = "repo_patch"
+
+    def capability_support(self) -> dict[str, CapabilitySupport]:
+        support = super().capability_support()
+        support["repo_patch"] = CapabilitySupport("repo_patch", True, True, True, True)
+        return support
+
+    def capability_contract(self, required_capabilities: set[str], items: list[BenchmarkItem]) -> dict[str, Any]:
+        contract = capability_contract_for(required_capabilities, self)
+        if "repo_patch" not in required_capabilities:
+            return contract
+        missing_metadata = [
+            item.source
+            for item in items
+            if not _repo_patch_target_repo(item) or not _repo_patch_base_commit(item)
+        ]
+        support = contract.get("repo_patch")
+        if isinstance(support, dict):
+            support["missing_metadata_count"] = len(missing_metadata)
+            support["required_item_count"] = len(items)
+            support["missing_metadata_sources"] = missing_metadata[:20]
+            if missing_metadata:
+                support["supported"] = False
+                support["workspace"] = False
+                support["reason"] = "repo_patch items are missing target repo/base_commit metadata"
+            elif not _repo_patch_checkout_available(items):
+                support["supported"] = False
+                support["workspace"] = False
+                support["reason"] = (
+                    "repo_patch target repository checkout is not materialized; "
+                    f"set {TARGET_REPO_ROOT_ENV} or AGENT_BENCH_ALLOW_TARGET_CHECKOUT=1"
+                )
+            else:
+                canary = _repo_patch_canary()
+                support["canary"] = canary
+                if not canary.get("passed"):
+                    support["supported"] = False
+                    support["workspace"] = False
+                    support["tools"] = False
+                    support["output_collection"] = False
+                    support["reason"] = str(canary.get("reason") or "repo_patch canary failed")
+        return contract
+
+    def prepare_task(self, item: BenchmarkItem) -> TaskWorkspace:
+        target_repo = _repo_patch_target_repo(item)
+        base_commit = _repo_patch_base_commit(item)
+        if not target_repo or not base_commit:
+            raise AdapterSetupError(
+                "failed_harness_setup",
+                "repo_patch item is missing target repo/base_commit metadata",
+                {"source": item.source, "metadata_keys": sorted(item.metadata)},
+            )
+        root = _prepare_target_repo_checkout(item, target_repo, base_commit)
+        return TaskWorkspace(
+            root=root,
+            output_dir=_item_output_dir(item),
+            manifest=_workspace_manifest(root),
+            metadata={
+                "target_repo": target_repo,
+                "base_commit": base_commit,
+                "instance_id": str(item.metadata.get("instance_id", "")),
+            },
+        )
+
+    def collect_outputs(self, run: AgentRun, workspace: TaskWorkspace) -> OutputBundle:
+        diff = _git_diff(workspace.root)
+        patch_path = workspace.output_dir / "model.patch"
+        workspace.output_dir.mkdir(parents=True, exist_ok=True)
+        patch_path.write_text(diff, encoding="utf-8")
+        return OutputBundle(
+            answer=run.answer,
+            patch=diff,
+            artifact_paths=[str(patch_path)],
+            tool_trace=run.tool_trace,
+            metadata={
+                "content_sample": run.content[:500],
+                "target_repo": workspace.metadata.get("target_repo", ""),
+                "base_commit": workspace.metadata.get("base_commit", ""),
+                "patch_path": str(patch_path),
+            },
+        )
+
+    def grade(self, benchmark: str, item: BenchmarkItem, outputs: OutputBundle) -> tuple[float, dict[str, Any]]:
+        if not outputs.patch.strip():
+            return 0.0, {
+                "method": "official_patch_tests",
+                "score": 0.0,
+                "status": "failed_model_answer",
+                "reason": "model did not produce a repository patch",
+            }
+        grader_command = os.environ.get(REPO_PATCH_GRADER_ENV, "").strip()
+        if not grader_command:
+            return 0.0, {
+                "method": "official_patch_tests",
+                "score": 0.0,
+                "status": "failed_harness_setup",
+                "reason": (
+                    "repo_patch grading requires the official benchmark patch/test grader; "
+                    "reference-diff exact matching is intentionally not used"
+                ),
+            }
+        return _run_repo_patch_grader(grader_command, item, outputs)
+
+
+class UnsupportedCapabilityAdapter(BenchmarkAdapter):
+    name = "unsupported"
+
+    def __init__(self, capability: str, reason: str) -> None:
+        self.capability = capability
+        self.reason = reason
+
+    def capability_support(self) -> dict[str, CapabilitySupport]:
+        return {
+            "chat_answer": CapabilitySupport("chat_answer", True, True, True, True),
+            "external_data_required": CapabilitySupport("external_data_required", True, True, True, True),
+            self.capability: CapabilitySupport(
+                self.capability,
+                workspace=False,
+                tools=False,
+                output_collection=False,
+                grader=False,
+                native=False,
+                reason=self.reason,
+            )
+        }
+
+
+ADAPTERS: tuple[BenchmarkAdapter, ...] = (
+    ChatAnswerAdapter(),
+    FileArtifactAdapter(),
+    RepoPatchAdapter(),
+)
+UNSUPPORTED_CAPABILITY_REASONS = {
+    "browser_or_gui": "No real desktop/browser environment adapter is implemented",
+    "tool_call": "No benchmark-native stateful tool adapter is implemented",
+}
+HARNESS_SUPPORTED_CAPABILITIES = {
+    capability
+    for adapter in ADAPTERS
+    for capability in adapter.supported_capabilities()
+}
 
 
 def main() -> int:
@@ -108,6 +755,8 @@ def main() -> int:
     output_dir = Path(os.environ.get("AGENT_BENCH_OUTPUT_DIR", "/outputs"))
     output_dir.mkdir(parents=True, exist_ok=True)
     required_capabilities = _required_capabilities(args.benchmark)
+    adapter = select_adapter(required_capabilities)
+    capability_contract = capability_contract_for(required_capabilities, adapter)
     unsupported_capabilities = sorted(required_capabilities - HARNESS_SUPPORTED_CAPABILITIES)
     if unsupported_capabilities:
         payload = _base_result_payload(
@@ -117,6 +766,8 @@ def main() -> int:
             sample_limit=_sample_limit(),
             required_capabilities=sorted(required_capabilities),
             unsupported_capabilities=unsupported_capabilities,
+            adapter=adapter,
+            capability_contract=capability_contract,
         )
         payload.update(
             {
@@ -139,20 +790,33 @@ def main() -> int:
                 "model_evals": [],
                 "model_eval": {},
                 "status_counts": {"skipped_unsupported_capability": 1},
+                "capabilities_verified": False,
             }
         )
         _write_result(output_dir, payload)
         return 0
     sample_limit = _sample_limit()
     items, extraction_errors = extract_benchmark_items(cwd, sample_limit)
-    if not items:
+    if not items and _allow_readiness_fallback():
         fallback = readiness_fallback_item(cwd, args.benchmark)
         if fallback is not None:
             items.append(fallback)
             extraction_errors.append(
                 "Used repository-readiness fallback because no machine-readable benchmark rows were found"
             )
-    evaluations = run_model_evaluations(args.benchmark, items)
+    capability_contract = adapter.capability_contract(required_capabilities, items)
+    preflight_status, preflight_reason = _preflight_failure_from_contract(required_capabilities, capability_contract)
+    if items and preflight_status:
+        evaluations = preflight_failed_evaluations(items, adapter, preflight_status, preflight_reason, capability_contract)
+    else:
+        valid_items, preflight_evaluations = validate_items_preflight(
+            items,
+            adapter,
+            required_capabilities,
+            capability_contract,
+        )
+        model_evaluations = run_model_evaluations(args.benchmark, valid_items, adapter) if valid_items else []
+        evaluations = preflight_evaluations + model_evaluations
     evaluated_count = len(evaluations)
     valid_evaluations = _valid_evaluations(evaluations)
     raw_score = _average_score(evaluations)
@@ -162,6 +826,9 @@ def main() -> int:
         error_message = "No benchmark task records were found in the cloned repository"
     elif not evaluations and _is_remote_provider():
         error_message = "No model evaluations completed"
+    status, status_error = _overall_status_and_error(evaluations, error_message)
+    if status_error:
+        error_message = status_error
 
     payload = _base_result_payload(
         args=args,
@@ -170,35 +837,48 @@ def main() -> int:
         sample_limit=sample_limit,
         required_capabilities=sorted(required_capabilities),
         unsupported_capabilities=[],
+        adapter=adapter,
+        capability_contract=capability_contract,
     )
     payload.update(
         {
             "score": score,
             "raw_score": raw_score,
             "valid_score": score,
-            "status": "completed" if not error_message else "failed_harness_setup",
+            "status": status,
             "extracted_task_count": len(items),
             "evaluated_task_count": evaluated_count,
             "valid_evaluated_task_count": len(valid_evaluations),
             "evaluation_passed_count": sum(1 for item in evaluations if item.get("passed")),
             "skipped_task_count": sum(
-                1 for item in evaluations if str(item.get("status", "")).startswith("skipped_")
+                1
+                for item in evaluations
+                if normalize_status(item.get("status"))
+                in {"failed_missing_assets", "skipped_unsupported_capability"}
             ),
-            "judge_parse_failure_count": sum(1 for item in evaluations if item.get("status") == "failed_judge_parse"),
+            "grader_failure_count": sum(
+                1 for item in evaluations if normalize_status(item.get("status")) == "failed_grader"
+            ),
+            "judge_parse_failure_count": sum(
+                1 for item in evaluations if normalize_status(item.get("status")) == "failed_grader"
+            ),
             "judge_parse_repaired_count": sum(1 for item in evaluations if item.get("judge_parse_repaired")),
             "fallback_task_count": sum(1 for item in items if item.metadata.get("fallback")),
             "extraction_errors": extraction_errors[:20],
             "extraction_sources": sorted({item.source for item in items}),
             "model_evals": evaluations,
             "model_eval": summarize_evaluations(evaluations),
-            "status_counts": _status_counts(evaluations),
+            "status_counts": _status_counts(evaluations) or ({status: 1} if status != "completed" else {}),
+            "capabilities_verified": bool(evaluations) and all(
+                bool(item.get("capabilities_verified", True)) for item in evaluations
+            ),
         }
     )
     if error_message:
         payload["error"] = error_message
 
     _write_result(output_dir, payload)
-    return 0 if evaluated_count > 0 else 2
+    return 0 if status == "completed" else 2
 
 
 def _base_result_payload(
@@ -209,11 +889,14 @@ def _base_result_payload(
     sample_limit: int,
     required_capabilities: list[str],
     unsupported_capabilities: list[str],
+    adapter: BenchmarkAdapter,
+    capability_contract: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "benchmark": args.benchmark,
         "group": os.environ.get("AGENT_BENCH_BENCHMARK_GROUP") or "Benchmarks",
         "kind": args.kind,
+        "adapter": adapter.name,
         "repository": os.environ.get("AGENT_BENCH_REPOSITORY", ""),
         "repository_ref": os.environ.get("AGENT_BENCH_REPOSITORY_REF", ""),
         "subdir": os.environ.get("AGENT_BENCH_SUBDIR", ""),
@@ -229,7 +912,13 @@ def _base_result_payload(
         "sample_files": files,
         "sample_limit": sample_limit,
         "required_capabilities": required_capabilities,
-        "supported_capabilities": sorted(HARNESS_SUPPORTED_CAPABILITIES),
+        "supported_capabilities": sorted(
+            capability
+            for capability in required_capabilities
+            if isinstance(capability_contract.get(capability), dict)
+            and capability_contract[capability].get("supported") is True
+        ),
+        "capability_contract": capability_contract,
         "unsupported_capabilities": unsupported_capabilities,
     }
 
@@ -239,6 +928,38 @@ def _write_result(output_dir: Path, payload: dict[str, Any]) -> None:
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def select_adapter(required_capabilities: set[str]) -> BenchmarkAdapter:
+    if "browser_or_gui" in required_capabilities:
+        return UnsupportedCapabilityAdapter("browser_or_gui", UNSUPPORTED_CAPABILITY_REASONS["browser_or_gui"])
+    if "tool_call" in required_capabilities:
+        return UnsupportedCapabilityAdapter("tool_call", UNSUPPORTED_CAPABILITY_REASONS["tool_call"])
+    if "repo_patch" in required_capabilities:
+        return RepoPatchAdapter()
+    if "file_artifact" in required_capabilities:
+        return FileArtifactAdapter()
+    return ChatAnswerAdapter()
+
+
+def capability_contract_for(required_capabilities: set[str], adapter: BenchmarkAdapter) -> dict[str, Any]:
+    support = adapter.capability_support()
+    contract: dict[str, Any] = {}
+    for capability in sorted(required_capabilities):
+        if capability in support:
+            contract[capability] = support[capability].to_dict()
+            continue
+        reason = UNSUPPORTED_CAPABILITY_REASONS.get(capability, "No adapter advertises this capability")
+        contract[capability] = CapabilitySupport(
+            capability,
+            workspace=False,
+            tools=False,
+            output_collection=False,
+            grader=False,
+            native=False,
+            reason=reason,
+        ).to_dict()
+    return contract
 
 
 def _required_capabilities(benchmark: str) -> set[str]:
@@ -274,12 +995,13 @@ def _capabilities_from_env() -> set[str]:
 def extract_benchmark_items(root: Path, limit: int) -> tuple[list[BenchmarkItem], list[str]]:
     items: list[BenchmarkItem] = []
     errors: list[str] = []
-    hf_items, hf_errors = extract_huggingface_items(limit)
-    items.extend(hf_items)
-    errors.extend(hf_errors)
     specialized_items, specialized_errors = extract_specialized_items(root, limit - len(items))
     items.extend(specialized_items)
     errors.extend(specialized_errors)
+    if not _skip_huggingface_dataset_loader():
+        hf_items, hf_errors = extract_huggingface_items(limit - len(items))
+        items.extend(hf_items)
+        errors.extend(hf_errors)
     for path in _candidate_files(root):
         if len(items) >= limit:
             break
@@ -298,7 +1020,6 @@ def readiness_fallback_item(root: Path, benchmark: str) -> BenchmarkItem | None:
         (
             "README.md",
             "README.rst",
-            "benchmark_plan.md",
             "docs/README.md",
         ),
     )
@@ -324,6 +1045,15 @@ def readiness_fallback_item(root: Path, benchmark: str) -> BenchmarkItem | None:
         source=f"{excerpt_path.relative_to(root)}:readiness-fallback",
         metadata={"grading": "task_compliance", "fallback": True, "expected_key": "readiness_summary"},
     )
+
+
+def _allow_readiness_fallback() -> bool:
+    return os.environ.get("AGENT_BENCH_ALLOW_READINESS_FALLBACK", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def _first_existing_text(root: Path, relative_paths: tuple[str, ...]) -> Path | None:
@@ -374,7 +1104,7 @@ def _candidate_files(root: Path) -> list[Path]:
 def _skip_candidate_file(path: Path) -> bool:
     text = str(path).lower()
     filename = path.name.lower()
-    if filename in {"package-lock.json", "pnpm-lock.yaml", "uv.lock", "poetry.lock"}:
+    if filename in {"package-lock.json", "pnpm-lock.yaml", "uv.lock", "poetry.lock", "benchmark_plan.md"}:
         return True
     if path.suffix.lower() == ".py" and filename != "tasks.py":
         return True
@@ -407,7 +1137,6 @@ def _is_prompt_text_file(path: Path) -> bool:
             "description.md",
             "description_obfuscated.md",
             "spec.md",
-            "benchmark_plan.md",
             "/prompts/",
             "/prompt/",
             "research_problem.txt",
@@ -432,6 +1161,8 @@ def _path_relevance(path: Path) -> int:
 
 
 def extract_huggingface_items(limit: int) -> tuple[list[BenchmarkItem], list[str]]:
+    if limit <= 0:
+        return [], []
     dataset_ids = _huggingface_dataset_ids()
     if not dataset_ids:
         return [], []
@@ -472,6 +1203,11 @@ def _huggingface_dataset_ids() -> list[str]:
         if dataset_id and dataset_id not in unique:
             unique.append(dataset_id)
     return unique
+
+
+def _skip_huggingface_dataset_loader() -> bool:
+    benchmark = os.environ.get("AGENT_BENCH_BENCHMARK_NAME", "")
+    return normalize_text(benchmark).replace("-", " ") in {"biomystery bench"}
 
 
 def _extract_huggingface_dataset_items(
@@ -538,11 +1274,62 @@ def extract_specialized_items(root: Path, limit: int) -> tuple[list[BenchmarkIte
     benchmark = os.environ.get("AGENT_BENCH_BENCHMARK_NAME", "")
     if limit <= 0:
         return [], []
+    if benchmark == "BioMystery Bench":
+        return extract_biomystery_items(root, limit)
     if benchmark == "InvestorBench":
         return extract_investorbench_items(root, limit)
     if benchmark == "Humanity's Last Exam":
-        return extract_hle_items(root, limit)
+        return [], ["Humanity's Last Exam requires accessible dataset records; format-only fallback is disabled"]
     return [], []
+
+
+def extract_biomystery_items(root: Path, limit: int) -> tuple[list[BenchmarkItem], list[str]]:
+    archives = sorted(root.rglob("*.zip"))
+    if not archives:
+        return [], ["BioMystery Bench local data archive was not found"]
+    return [], [
+        "BioMystery Bench scoring is disabled until answer_rubric/gold labels are kept grader-side only"
+    ]
+
+
+def _items_from_archive_member(text: str, member: str, source_prefix: str, limit: int) -> list[BenchmarkItem]:
+    suffix = Path(member).suffix.lower()
+    if suffix == ".json":
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            return []
+        return _items_from_records(walk_records(payload), source_prefix, limit)
+    if suffix == ".jsonl":
+        records = []
+        for line in text.splitlines():
+            if len(records) >= min(limit, MAX_RECORDS_PER_FILE):
+                break
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                records.append(payload)
+        return _items_from_records(records, source_prefix, limit)
+    if suffix == ".csv":
+        reader = csv.DictReader(text.splitlines())
+        return _items_from_records(list(reader)[: min(limit, MAX_RECORDS_PER_FILE)], source_prefix, limit)
+    return []
+
+
+def _items_from_records(records: list[dict[str, Any]], source_prefix: str, limit: int) -> list[BenchmarkItem]:
+    items: list[BenchmarkItem] = []
+    for index, record in enumerate(records):
+        if len(items) >= limit or index >= MAX_RECORDS_PER_FILE:
+            break
+        item = item_from_record(record, f"{source_prefix}:{index + 1}")
+        if item is not None:
+            items.append(item)
+    return items
 
 
 def extract_investorbench_items(root: Path, limit: int) -> tuple[list[BenchmarkItem], list[str]]:
@@ -633,6 +1420,24 @@ def _as_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _is_financemath_benchmark() -> bool:
+    return normalize_text(os.environ.get("AGENT_BENCH_BENCHMARK_NAME", "")).replace("-", " ") == "financemath"
+
+
+def _numeric_answer_from_python_solution(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    for pattern in (
+        r"return\s+(-?\d+(?:\.\d+)?(?:e[+-]?\d+)?)",
+        r"answer\s*=\s*(-?\d+(?:\.\d+)?(?:e[+-]?\d+)?)",
+        r"(-?\d+(?:\.\d+)?(?:e[+-]?\d+)?)\s*$",
+    ):
+        match = re.search(pattern, value.strip(), flags=re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return ""
 
 
 def extract_items_from_file(path: Path, root: Path, limit: int) -> list[BenchmarkItem]:
@@ -783,10 +1588,10 @@ def _items_from_parquet(path: Path, root: Path, limit: int) -> list[BenchmarkIte
 
 def _items_from_json_payload(payload: Any, source: Path, limit: int) -> list[BenchmarkItem]:
     items: list[BenchmarkItem] = []
-    for record in walk_records(payload):
+    for index, record in enumerate(walk_records(payload), 1):
         if len(items) >= limit:
             break
-        item = item_from_record(record, str(source))
+        item = item_from_record(record, f"{source}:record-{index:06d}")
         if item is not None:
             items.append(item)
     return items
@@ -826,27 +1631,95 @@ def item_from_record(record: Any, source: str) -> BenchmarkItem | None:
         grading = "task_compliance"
     else:
         grading = "rubric" if expected_key in RUBRIC_KEYS else "exact"
-        expected = stringify_expected(expected_value, preserve_rubric=grading == "rubric")
+        if _is_financemath_benchmark() and expected_key == "python_solution":
+            solution_answer = _numeric_answer_from_python_solution(expected_value)
+            if solution_answer:
+                expected_value = solution_answer
+        canonical_answer = (
+            extract_canonical_answer_from_rubric(str(expected_value))
+            if expected_key in RUBRIC_KEYS and isinstance(expected_value, str)
+            else ""
+        )
+        if canonical_answer:
+            grading = "exact"
+            expected = canonical_answer
+        else:
+            expected = stringify_expected(expected_value, preserve_rubric=grading == "rubric")
         if not expected and _is_task_like_record(record, source, question):
             grading = "task_compliance"
             expected = "Candidate answer should satisfy the task requirements from the benchmark prompt."
         if grading == "exact" and _looks_like_reference_file(expected):
             grading = "task_compliance"
             expected = "Candidate answer should satisfy the task requirements using the referenced benchmark files."
+    if _is_financemath_benchmark():
+        if _numeric_value(expected) is None:
+            return None
+        grading = "numeric"
     if not expected:
         return None
     choices = _choices_from_record(record)
+    metadata = _record_metadata(record, source, grading, expected_key, expected)
     return BenchmarkItem(
         question=truncate(question),
         expected=truncate(expected, 3000 if grading == "rubric" else 1000),
         choices=choices,
         source=source,
-        metadata={
-            "keys": sorted(str(key) for key in record.keys())[:30],
-            "grading": grading,
-            "expected_key": expected_key or "",
-        },
+        metadata=metadata,
     )
+
+
+def _record_metadata(
+    record: dict[str, Any],
+    source: str,
+    grading: str,
+    expected_key: str,
+    expected: str,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "keys": sorted(str(key) for key in record.keys())[:30],
+        "grading": grading,
+        "expected_key": expected_key or "",
+    }
+    lower_to_key = {str(key).lower(): key for key in record}
+    for key in (
+        "target_repo",
+        "repo",
+        "repo_url",
+        "git_repo",
+        "repository",
+        "base_commit",
+        "commit",
+        "base_sha",
+        "revision",
+        "instance_id",
+        "test_patch",
+        "patch",
+        "gold_patch",
+    ):
+        original = lower_to_key.get(key)
+        if original is None:
+            continue
+        value = record.get(original)
+        if isinstance(value, (str, int, float, bool)):
+            metadata[key] = str(value)
+    if expected_key in {"patch", "gold_patch"} and expected:
+        metadata["reference_patch"] = expected
+    for key in (
+        "input_assets",
+        "input_files",
+        "asset_paths",
+        "attachments",
+        "files",
+        "reference_files",
+        "documents",
+        "dataset_files",
+    ):
+        original = lower_to_key.get(key)
+        if original is not None:
+            metadata[key] = record.get(original)
+    if source.startswith("huggingface:"):
+        metadata["dataset_source"] = source
+    return metadata
 
 
 def _is_task_like_record(record: dict[str, Any], source: str, question: str) -> bool:
@@ -995,6 +1868,9 @@ def _looks_like_reference_file(value: str) -> bool:
 
 
 def extract_expected_from_rubric(value: str) -> str:
+    canonical = extract_canonical_answer_from_rubric(value)
+    if canonical:
+        return canonical
     for pattern in (
         r"(?:expected answer|answer)\s+is\s+([^.\n]+)",
         r"(?:expected|gold|target)\s*[:\-]\s*([^.\n]+)",
@@ -1005,116 +1881,2137 @@ def extract_expected_from_rubric(value: str) -> str:
     return value
 
 
-def run_model_evaluations(benchmark: str, items: list[BenchmarkItem]) -> list[dict[str, Any]]:
+def extract_canonical_answer_from_rubric(value: str) -> str:
+    text = " ".join(value.strip().split())
+    for pattern in (
+        r"\bThe answer is\s+(.+?)\s+Score\s+1(?:\.0)?\b",
+        r"\banswer is\s+(.+?)(?:\.|;)?\s+Score\s+1(?:\.0)?\b",
+        r"\bcorrect answer is\s+(.+?)(?:\.|;)?\s+Score\s+1(?:\.0)?\b",
+        r"^(.{1,120}?)\s+Score\s+1(?:\.0)?\b",
+    ):
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).strip(" .;:,'\"")
+    return ""
+
+
+def run_model_evaluations(
+    benchmark: str,
+    items: list[BenchmarkItem],
+    adapter: BenchmarkAdapter | None = None,
+) -> list[dict[str, Any]]:
     if not _is_remote_provider():
         return []
+    adapter = adapter or select_adapter(_required_capabilities(benchmark))
     evaluations: list[dict[str, Any]] = []
     for item in items:
-        evaluations.append(run_model_on_item(benchmark, item))
+        evaluations.append(run_model_on_item(benchmark, item, adapter))
     return evaluations
 
 
-def run_model_on_item(benchmark: str, item: BenchmarkItem) -> dict[str, Any]:
+def run_model_on_item(
+    benchmark: str,
+    item: BenchmarkItem,
+    adapter: BenchmarkAdapter | None = None,
+) -> dict[str, Any]:
+    adapter = adapter or select_adapter(_required_capabilities(benchmark))
+    return adapter.evaluate_item(benchmark, item)
+
+
+def _preflight_failure_from_contract(
+    required_capabilities: set[str],
+    capability_contract: dict[str, Any],
+) -> tuple[str, str]:
+    for capability in sorted(required_capabilities):
+        support = capability_contract.get(capability)
+        if not isinstance(support, dict) or support.get("supported") is not False:
+            continue
+        reason = str(support.get("reason") or f"{capability} capability preflight failed")
+        if capability == "file_artifact":
+            return "failed_missing_assets", reason
+        if capability == "repo_patch":
+            return "failed_harness_setup", reason
+        return "skipped_unsupported_capability", reason
+    return "", ""
+
+
+def preflight_failed_evaluations(
+    items: list[BenchmarkItem],
+    adapter: BenchmarkAdapter,
+    status: str,
+    reason: str,
+    capability_contract: dict[str, Any],
+) -> list[dict[str, Any]]:
+    evaluations: list[dict[str, Any]] = []
+    for item in items:
+        item_dir = _item_output_dir(item)
+        _write_item_json(item_dir, "item.json", _item_to_dict(item))
+        setup_payload = {
+            "status": status,
+            "error": reason,
+            "capability_contract": capability_contract,
+        }
+        _write_item_json(item_dir, "setup_error.json", setup_payload)
+        payload = evaluation_payload(
+            item,
+            "",
+            0.0,
+            reason,
+            status=status,
+            adapter=adapter.name,
+            capabilities_verified=False,
+            setup_details={"capability_contract": capability_contract},
+        )
+        _write_item_json(item_dir, "item_result.json", payload)
+        evaluations.append(payload)
+    return evaluations
+
+
+def validate_items_preflight(
+    items: list[BenchmarkItem],
+    adapter: BenchmarkAdapter,
+    required_capabilities: set[str],
+    capability_contract: dict[str, Any],
+) -> tuple[list[BenchmarkItem], list[dict[str, Any]]]:
+    valid: list[BenchmarkItem] = []
+    invalid: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    seen_dirs: set[Path] = set()
+    for item in items:
+        status, reason, details = _item_preflight_failure(
+            item,
+            required_capabilities,
+            seen_ids,
+            seen_dirs,
+        )
+        if not status:
+            valid.append(item)
+            continue
+        item_dir = _item_output_dir(item)
+        _write_item_json(item_dir, "item.json", _item_to_dict(item))
+        setup_payload = {
+            "status": status,
+            "error": reason,
+            "details": details,
+            "capability_contract": capability_contract,
+        }
+        _write_item_json(item_dir, "setup_error.json", setup_payload)
+        payload = evaluation_payload(
+            item,
+            "",
+            0.0,
+            reason,
+            status=status,
+            adapter=adapter.name,
+            capabilities_verified=False,
+            setup_details=setup_payload,
+        )
+        _write_item_json(item_dir, "item_result.json", payload)
+        invalid.append(payload)
+    return valid, invalid
+
+
+def _item_preflight_failure(
+    item: BenchmarkItem,
+    required_capabilities: set[str],
+    seen_ids: set[str],
+    seen_dirs: set[Path],
+) -> tuple[str, str, dict[str, Any]]:
+    item_id = _item_id(item)
+    item_dir = _item_output_dir(item)
+    details: dict[str, Any] = {"item_id": item_id, "item_output_dir": str(item_dir)}
+    if item_id in seen_ids:
+        return "failed_dataset_extraction", f"duplicate benchmark item id: {item_id}", details
+    if item_dir in seen_dirs:
+        return "failed_dataset_extraction", f"duplicate item output directory: {item_dir.name}", details
+    seen_ids.add(item_id)
+    seen_dirs.add(item_dir)
+
+    if not item.question.strip():
+        return "failed_dataset_extraction", "extracted record has an empty question", details
+    if not item.expected.strip():
+        return "failed_dataset_extraction", "extracted record has no expected answer or rubric", details
+    if _looks_like_incomplete_prompt_template(item):
+        return (
+            "failed_dataset_extraction",
+            "extracted prompt appears to be a template without the referenced task input",
+            details,
+        )
+
+    missing_refs = _missing_referenced_paths(item, Path.cwd())
+    if missing_refs:
+        details["missing_references"] = missing_refs
+        status = "failed_missing_assets" if "file_artifact" in required_capabilities else "failed_dataset_extraction"
+        return status, "extracted record references missing input files", details
+
+    if _would_exceed_context_budget(item):
+        details["estimated_prompt_tokens"] = _estimated_prompt_tokens(item)
+        details["context_limit_tokens"] = _model_context_limit()
+        return "failed_token_budget", "estimated task prompt exceeds model context budget with reserve", details
+
+    if item.metadata.get("grading") in {"exact", "numeric"} and score_answer(item.expected, item.expected, item.choices) < 1.0:
+        return "failed_grader", "exact-answer grader canary failed on the gold answer", details
+
+    return "", "", {}
+
+
+def _looks_like_incomplete_prompt_template(item: BenchmarkItem) -> bool:
+    text = item.question.strip()
+    lowered = text.lower()
+    benchmark = normalize_text(os.environ.get("AGENT_BENCH_BENCHMARK_NAME", "")).replace("-", " ")
+    if benchmark in {"edinet bench", "stockbench"} and not _has_referenced_or_inferred_assets(item):
+        source = item.source.lower()
+        if "prompt" in source or "template" in source or re.search(r"\b(agent|system)\s+prompt\b", lowered):
+            return True
+    template_endings = (
+        "the report is as follows:",
+        "report is as follows:",
+        "input is as follows:",
+        "data is as follows:",
+        "json is as follows:",
+        "as follows:",
+        "provided below:",
+    )
+    if any(lowered.endswith(ending) for ending in template_endings):
+        return not _has_referenced_or_inferred_assets(item)
+    if re.search(r"\{\{\s*[^}]+\s*\}\}", text) or re.search(r"\{[a-zA-Z_][a-zA-Z0-9_]+\}", text):
+        return not _has_referenced_or_inferred_assets(item)
+    return False
+
+
+def _has_referenced_or_inferred_assets(item: BenchmarkItem) -> bool:
+    if _artifact_asset_paths(item, Path.cwd()):
+        return True
+    return bool(_flatten_string_values(item.metadata.get("input_files")))
+
+
+def _missing_referenced_paths(item: BenchmarkItem, root: Path) -> list[str]:
+    missing: list[str] = []
+    for raw in _referenced_path_values(item):
+        candidate = (root / raw).resolve()
+        try:
+            inside_root = candidate == root.resolve() or root.resolve() in candidate.parents
+        except OSError:
+            inside_root = False
+        if not inside_root:
+            missing.append(raw)
+            continue
+        if not candidate.exists():
+            missing.append(raw)
+    return sorted(set(missing))
+
+
+def _referenced_path_values(item: BenchmarkItem) -> list[str]:
+    values: list[str] = []
+    for key in (
+        "input_assets",
+        "input_files",
+        "asset_paths",
+        "attachments",
+        "files",
+        "reference_files",
+        "documents",
+        "dataset_files",
+    ):
+        for raw in _flatten_string_values(item.metadata.get(key)):
+            if _looks_like_path_value(raw):
+                values.append(raw)
+    return values
+
+
+def _looks_like_path_value(value: str) -> bool:
+    if not value or "\n" in value:
+        return False
+    if value.startswith(("http://", "https://", "s3://", "gs://")):
+        return False
+    return "/" in value or "\\" in value or bool(Path(value).suffix)
+
+
+def _would_exceed_context_budget(item: BenchmarkItem) -> bool:
+    context_limit = _model_context_limit()
+    reserve = max(1024, int(context_limit * 0.05))
+    return _estimated_prompt_tokens(item) + _max_answer_tokens(item) + reserve > context_limit
+
+
+def _estimated_prompt_tokens(item: BenchmarkItem) -> int:
+    choice_chars = sum(len(label) + len(value) + 4 for label, value in item.choices.items())
+    total_chars = len(item.question) + choice_chars + 1200
+    return max(1, total_chars // 4)
+
+
+def _estimated_payload_tokens(payload: dict[str, Any]) -> int:
+    text = json.dumps(payload.get("messages", []), ensure_ascii=False, sort_keys=True)
+    if "tools" in payload:
+        text += json.dumps(payload.get("tools", []), ensure_ascii=False, sort_keys=True)
+    return max(1, len(text) // 4)
+
+
+def _token_budget_failure(payload: dict[str, Any]) -> dict[str, Any] | None:
+    context_limit = _model_context_limit()
+    reserve = max(1024, int(context_limit * 0.05))
+    max_tokens = _bounded_int(payload.get("max_tokens"), _max_answer_tokens(BenchmarkItem("", "", "")), 1, 1_000_000)
+    estimated = _estimated_payload_tokens(payload)
+    if estimated + max_tokens + reserve <= context_limit:
+        return None
+    return {
+        "status": "failed_token_budget",
+        "reason": "estimated model prompt exceeds context budget with reserve",
+        "estimated_prompt_tokens": estimated,
+        "max_answer_tokens": max_tokens,
+        "context_limit_tokens": context_limit,
+        "reserve_tokens": reserve,
+    }
+
+
+def _model_context_limit() -> int:
+    raw = os.environ.get("AGENT_BENCH_MODEL_CONTEXT_LIMIT", os.environ.get("AGENT_BENCH_CONTEXT_LIMIT", "32768"))
+    return _bounded_int(raw, 32768, 2048, 2_000_000)
+
+
+def run_agent_loop(
+    benchmark: str,
+    item: BenchmarkItem,
+    tools: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     base_url = os.environ.get("AGENT_BENCH_BASE_URL", "").rstrip("/")
     model = os.environ.get("AGENT_BENCH_MODEL", "")
-    choice_text = ""
-    if item.choices:
-        choice_text = "\nChoices:\n" + "\n".join(f"{key}. {value}" for key, value in sorted(item.choices.items()))
-        response_instruction = 'Return JSON exactly like {"answer":"A","confidence":0.0}.'
-    else:
-        response_instruction = 'Return JSON exactly like {"answer":"your final answer","confidence":0.0}.'
-    payload = {
-        "model": model,
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "Answer this benchmark task. Do not include hidden reasoning or scratch work. "
-                    "Return only a compact JSON object."
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    "/no_think\n"
-                    f"Benchmark: {benchmark}\n"
-                    f"Question/task from benchmark data:\n{item.question}"
-                    f"{choice_text}\n"
-                    f"{response_instruction}"
-                ),
-            },
-        ],
-        "temperature": 0,
-        "top_p": 1,
-        "max_tokens": _max_answer_tokens(item),
-        "stream": False,
-        "response_format": {"type": "json_object"},
-    }
     headers = {"Content-Type": "application/json"}
     api_key = os.environ.get("AGENT_BENCH_API_KEY", "")
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    try:
-        response_body = post_chat_completion(base_url, payload, headers)
-    except ChatCompletionHTTPError as exc:
-        return evaluation_payload(
-            item,
-            "",
-            0.0,
-            exc.body[-2000:] or str(exc),
-            status="failed_harness_setup",
-            status_code=exc.code,
-        )
-    except Exception as exc:
-        return evaluation_payload(item, "", 0.0, str(exc), status="failed_harness_setup")
 
-    try:
+    choice_text = ""
+    if item.choices:
+        choice_text = "\nChoices:\n" + "\n".join(f"{key}. {value}" for key, value in sorted(item.choices.items()))
+        response_instruction = 'When finished, return JSON exactly like {"answer":"A","confidence":0.0}.'
+    else:
+        response_instruction = 'When finished, return JSON exactly like {"answer":"your final answer","confidence":0.0}.'
+    messages: list[dict[str, Any]] = [
+        {
+            "role": "system",
+            "content": (
+                "You are an agent running inside a cloned benchmark repository. Use tools when they are useful. "
+                "Do not include hidden reasoning or scratch work. If native tool calls are unavailable, request "
+                'one tool by returning only JSON like {"tool":"read_file","arguments":{"path":"README.md"}}. '
+                "After observing tool results, provide the final benchmark answer as compact JSON."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "/no_think\n"
+                f"Benchmark: {benchmark}\n"
+                f"Question/task from benchmark data:\n{item.question}"
+                f"{choice_text}\n"
+                f"{response_instruction}"
+            ),
+        },
+    ]
+    tools = tools or agent_tool_schemas()
+    tool_trace: list[dict[str, Any]] = []
+    usage: dict[str, Any] = {}
+    native_tools: bool | None = None
+    last_content = ""
+    final_answer_count = 0
+    first_final_answer = ""
+
+    for _turn in range(_max_agent_turns()):
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "temperature": 0,
+            "top_p": 1,
+            "max_tokens": _max_answer_tokens(item),
+            "stream": False,
+        }
+        if native_tools is not False:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+        budget_failure = _token_budget_failure(payload)
+        if budget_failure is not None:
+            return _agent_loop_result(
+                "",
+                last_content,
+                usage,
+                tool_trace,
+                final_answer_count,
+                status="failed_token_budget",
+                reason=str(budget_failure["reason"]),
+                extra=budget_failure,
+            )
+        response_body, used_payload = post_chat_completion_with_variant(base_url, payload, headers)
+        native_tools = "tools" in used_payload
         parsed = json.loads(response_body)
-    except json.JSONDecodeError:
-        return evaluation_payload(
-            item,
-            "",
-            0.0,
-            "model response was not JSON",
-            status="failed_harness_setup",
-            response=response_body[-2000:],
-        )
+        if isinstance(parsed.get("usage"), dict):
+            usage = _merge_usage(usage, parsed["usage"])
+        message = extract_openai_message(parsed)
+        content = extract_openai_content(parsed)
+        last_content = content
 
-    content = extract_openai_content(parsed)
-    answer = extract_answer(content)
-    score, grade = grade_answer(benchmark, item, answer)
-    error_message = ""
-    if score < 1.0:
-        if grade.get("reason"):
-            error_message = str(grade["reason"])
-        else:
-            error_message = f"expected {item.expected!r}, got {answer!r}"
-    return evaluation_payload(
-        item,
-        answer,
-        score,
-        error_message,
-        status_code=200,
-        content_sample=content[:500],
-        usage=parsed.get("usage") if isinstance(parsed.get("usage"), dict) else {},
-        grade=grade,
-        status=grade.get("status") if isinstance(grade.get("status"), str) else None,
-        judge_parse_repaired=bool(grade.get("judge_parse_repaired")),
+        tool_calls = extract_openai_tool_calls(parsed)
+        if tool_calls and native_tools:
+            messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
+            final = handle_native_tool_calls(tool_calls, messages, tool_trace)
+            if final is not None:
+                final_answer_count = _final_answer_trace_count(tool_trace)
+                if final and not first_final_answer:
+                    first_final_answer = final
+                answer = first_final_answer or final
+                return _agent_loop_result(answer, final, usage, tool_trace, final_answer_count)
+            protocol_failure = _protocol_limit_failure(tool_trace, final_answer_count, content)
+            if protocol_failure:
+                return _agent_loop_result(
+                    "",
+                    content,
+                    usage,
+                    tool_trace,
+                    final_answer_count,
+                    status="failed_model_tool_use",
+                    reason=protocol_failure,
+                )
+            continue
+
+        text_call = parse_text_tool_request(content)
+        if text_call is not None:
+            tool_name, arguments = text_call
+            if tool_name == "final_answer":
+                final_answer_count += 1
+                answer = str(arguments.get("answer", ""))
+                if answer and not first_final_answer:
+                    first_final_answer = answer
+                return _agent_loop_result(first_final_answer or answer, content, usage, tool_trace, final_answer_count)
+            result = execute_agent_tool(tool_name, arguments)
+            tool_trace.append(
+                {
+                    "tool": tool_name,
+                    "arguments": arguments,
+                    "result": result[:1000],
+                    "failed": _tool_result_failed(tool_name, result),
+                }
+            )
+            protocol_failure = _protocol_limit_failure(tool_trace, final_answer_count, content)
+            if protocol_failure:
+                return _agent_loop_result(
+                    "",
+                    content,
+                    usage,
+                    tool_trace,
+                    final_answer_count,
+                    status="failed_model_tool_use",
+                    reason=protocol_failure,
+                )
+            messages.append({"role": "assistant", "content": content})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": f"Tool result for {tool_name}:\n{result}\n\nContinue or provide the final JSON answer.",
+                }
+            )
+            native_tools = False
+            continue
+
+        answer = extract_answer(content)
+        if answer:
+            return _agent_loop_result(answer, content, usage, tool_trace, final_answer_count)
+        messages.append({"role": "assistant", "content": content})
+        messages.append({"role": "user", "content": "The previous response was empty. Provide the final JSON answer."})
+
+    return {
+        "answer": extract_answer(last_content),
+        "content": last_content,
+        "usage": usage,
+        "tool_trace": tool_trace,
+        "diagnostics": protocol_diagnostics(tool_trace, last_content, final_answer_count),
+    }
+
+
+def _agent_loop_result(
+    answer: str,
+    content: str,
+    usage: dict[str, Any],
+    tool_trace: list[dict[str, Any]],
+    final_answer_count: int,
+    status: str = "",
+    reason: str = "",
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    diagnostics = protocol_diagnostics(tool_trace, content, final_answer_count)
+    if status:
+        diagnostics["status"] = status
+    if reason:
+        diagnostics["reason"] = reason
+    if extra:
+        diagnostics.update(extra)
+    return {
+        "answer": answer,
+        "content": content,
+        "usage": usage,
+        "tool_trace": tool_trace,
+        "diagnostics": diagnostics,
+    }
+
+
+def protocol_diagnostics(
+    tool_trace: list[dict[str, Any]],
+    final_content: str,
+    final_answer_count: int,
+) -> dict[str, Any]:
+    failed_tools = [
+        item
+        for item in tool_trace
+        if isinstance(item, dict) and bool(item.get("failed"))
+    ]
+    tool_names = [str(item.get("tool", "")) for item in tool_trace if isinstance(item, dict)]
+    repeated_identical_calls = 0
+    seen_calls: set[str] = set()
+    for item in tool_trace:
+        if not isinstance(item, dict):
+            continue
+        signature = json.dumps(
+            {"tool": item.get("tool"), "arguments": item.get("arguments")},
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        if signature in seen_calls:
+            repeated_identical_calls += 1
+        seen_calls.add(signature)
+    return {
+        "tool_call_count": len(tool_trace),
+        "tool_failure_count": len(failed_tools),
+        "ignored_tool_failure_before_final": bool(failed_tools and final_content.strip()),
+        "final_answer_count": final_answer_count,
+        "repeated_identical_tool_call_count": repeated_identical_calls,
+        "final_output_contains_tool_syntax": _contains_tool_syntax(final_content),
+        "tool_names": tool_names,
+    }
+
+
+def _protocol_limit_failure(
+    tool_trace: list[dict[str, Any]],
+    final_answer_count: int,
+    final_content: str,
+) -> str:
+    if final_answer_count > 1:
+        return "model attempted to submit more than one final answer"
+    if len(tool_trace) > _max_total_tool_calls():
+        return f"model exceeded maximum total tool calls ({_max_total_tool_calls()})"
+    repeated = _max_identical_tool_call_count(tool_trace)
+    if repeated > MAX_REPEATED_IDENTICAL_TOOL_CALLS:
+        return (
+            "model repeated an identical tool call "
+            f"{repeated} times; maximum is {MAX_REPEATED_IDENTICAL_TOOL_CALLS}"
+        )
+    failed = _consecutive_failed_tool_calls(tool_trace)
+    if failed > MAX_CONSECUTIVE_FAILED_TOOL_CALLS:
+        return (
+            "model made too many consecutive failed tool calls "
+            f"({failed}; maximum is {MAX_CONSECUTIVE_FAILED_TOOL_CALLS})"
+        )
+    if _contains_tool_syntax(final_content) and not tool_trace:
+        return "model emitted tool-call syntax without a valid tool request"
+    return ""
+
+
+def _max_identical_tool_call_count(tool_trace: list[dict[str, Any]]) -> int:
+    counts: dict[str, int] = {}
+    max_count = 0
+    for item in tool_trace:
+        if not isinstance(item, dict):
+            continue
+        if item.get("tool") == "final_answer":
+            continue
+        signature = json.dumps(
+            {"tool": item.get("tool"), "arguments": item.get("arguments")},
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        counts[signature] = counts.get(signature, 0) + 1
+        max_count = max(max_count, counts[signature])
+    return max_count
+
+
+def _consecutive_failed_tool_calls(tool_trace: list[dict[str, Any]]) -> int:
+    count = 0
+    for item in reversed(tool_trace):
+        if not isinstance(item, dict) or item.get("tool") == "final_answer":
+            continue
+        if not item.get("failed"):
+            break
+        count += 1
+    return count
+
+
+def _final_answer_trace_count(tool_trace: list[dict[str, Any]]) -> int:
+    return sum(1 for item in tool_trace if isinstance(item, dict) and item.get("tool") == "final_answer")
+
+
+def _max_total_tool_calls() -> int:
+    return _bounded_int(
+        os.environ.get("AGENT_BENCH_MAX_TOTAL_TOOL_CALLS"),
+        DEFAULT_MAX_TOTAL_TOOL_CALLS,
+        1,
+        10_000,
     )
 
 
+def _tool_result_failed(tool_name: str, result: str) -> bool:
+    prefix = result.strip().lower()
+    if prefix.startswith("tool ") and " failed:" in prefix[:120]:
+        return True
+    if prefix.startswith("unknown tool:"):
+        return True
+    if tool_name == "run_command" and re.search(r"\bexit_code=(?!0\b)\d+", result):
+        return True
+    return any(
+        prefix.startswith(marker)
+        for marker in (
+            "missing ",
+            "invalid ",
+            "unable to ",
+            "file not found:",
+            "path does not exist:",
+            "refusing to ",
+            "run_command expects ",
+            "run_command legacy ",
+            "unsupported ",
+        )
+    )
+
+
+def _contains_tool_syntax(content: str) -> bool:
+    lowered = content.lower()
+    return any(marker in lowered for marker in ("<tool_call", "</tool_call", '"tool":', '"tool_name":'))
+
+
+def agent_tool_schemas() -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "list_files",
+                "description": "List files in the benchmark repository.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Directory path relative to the repository root."},
+                        "pattern": {"type": "string", "description": "Optional substring or suffix filter."},
+                        "max_results": {"type": "integer", "minimum": 1, "maximum": 200},
+                    },
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "read_file",
+                "description": "Read a text file from the benchmark repository.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "start_line": {"type": "integer", "minimum": 1},
+                        "max_lines": {"type": "integer", "minimum": 1, "maximum": 400},
+                        "allow_binary": {"type": "boolean"},
+                    },
+                    "required": ["path"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "search_files",
+                "description": "Search text files for a literal query.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "path": {"type": "string"},
+                        "max_results": {"type": "integer", "minimum": 1, "maximum": 100},
+                    },
+                    "required": ["query"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "write_file",
+                "description": "Deprecated alias for write_text_file. Create or replace a UTF-8 text file.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "content": {"type": "string"},
+                    },
+                    "required": ["path", "content"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "write_text_file",
+                "description": "Create or replace a UTF-8 text file in the benchmark repository.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "content": {"type": "string"},
+                    },
+                    "required": ["path", "content"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "write_base64_file",
+                "description": "Create or replace a binary file from base64-encoded content.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "base64_content": {"type": "string"},
+                    },
+                    "required": ["path", "base64_content"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "read_binary_metadata",
+                "description": "Return size, suffix, and basic integrity metadata for a binary or archive file.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "extract_archive",
+                "description": "Extract a .zip archive inside the benchmark repository.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "output_dir": {"type": "string"},
+                    },
+                    "required": ["path", "output_dir"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "read_spreadsheet",
+                "description": "Read a small preview from a CSV or XLSX spreadsheet.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "sheet": {"type": "string"},
+                        "max_rows": {"type": "integer", "minimum": 1, "maximum": 50},
+                    },
+                    "required": ["path"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "read_pdf_text",
+                "description": "Extract text from a PDF using installed PDF libraries or command-line tools.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "max_chars": {"type": "integer", "minimum": 100, "maximum": 12000},
+                    },
+                    "required": ["path"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "list_artifacts",
+                "description": "List files currently generated under an output/artifact directory.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "max_results": {"type": "integer", "minimum": 1, "maximum": 200},
+                    },
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "apply_patch",
+                "description": "Apply a unified diff patch to repository files.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"patch": {"type": "string"}},
+                    "required": ["patch"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "run_command",
+                "description": "Run a local repository command without a shell and return stdout/stderr.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "argv": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Executable and arguments, for example [\"python3\", \"-c\", \"print('ok')\"].",
+                        },
+                        "stdin": {"type": "string"},
+                        "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 120},
+                    },
+                    "required": ["argv"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "final_answer",
+                "description": "Submit the final answer to be graded.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"answer": {"type": "string"}},
+                    "required": ["answer"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+    ]
+
+
+def handle_native_tool_calls(
+    tool_calls: list[dict[str, Any]],
+    messages: list[dict[str, Any]],
+    tool_trace: list[dict[str, Any]],
+) -> str | None:
+    for tool_call in tool_calls:
+        function = tool_call.get("function") if isinstance(tool_call.get("function"), dict) else {}
+        tool_name = function.get("name") if isinstance(function.get("name"), str) else ""
+        arguments = _parse_tool_arguments(function.get("arguments"))
+        if tool_name == "final_answer":
+            candidate = str(arguments.get("answer", ""))
+            result = "Final answer accepted."
+            tool_trace.append(
+                {
+                    "tool": tool_name,
+                    "arguments": arguments,
+                    "result": result,
+                    "failed": False,
+                }
+            )
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": str(tool_call.get("id", tool_name or "tool_call")),
+                    "content": result,
+                }
+            )
+            return candidate
+        else:
+            result = execute_agent_tool(tool_name, arguments)
+        tool_trace.append(
+            {
+                "tool": tool_name,
+                "arguments": arguments,
+                "result": result[:1000],
+                "failed": _tool_result_failed(tool_name, result),
+            }
+        )
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": str(tool_call.get("id", tool_name or "tool_call")),
+                "content": result,
+            }
+        )
+    return None
+
+
+def parse_text_tool_request(content: str) -> tuple[str, dict[str, Any]] | None:
+    parsed = parse_json_object(content)
+    if not isinstance(parsed, dict):
+        return None
+    if isinstance(parsed.get("tool"), str):
+        name = parsed["tool"]
+    elif isinstance(parsed.get("tool_name"), str):
+        name = parsed["tool_name"]
+    elif isinstance(parsed.get("name"), str) and "arguments" in parsed:
+        name = parsed["name"]
+    elif "final_answer" in parsed:
+        return "final_answer", {"answer": str(parsed.get("final_answer", ""))}
+    else:
+        return None
+    arguments = parsed.get("arguments")
+    if not isinstance(arguments, dict):
+        arguments = {key: value for key, value in parsed.items() if key not in {"tool", "tool_name", "name"}}
+    return name, arguments
+
+
+def execute_agent_tool(name: str, arguments: dict[str, Any]) -> str:
+    try:
+        if name == "list_files":
+            return tool_list_files(arguments)
+        if name == "read_file":
+            return tool_read_file(arguments)
+        if name == "search_files":
+            return tool_search_files(arguments)
+        if name == "write_file":
+            return tool_write_file(arguments)
+        if name == "write_text_file":
+            return tool_write_file(arguments)
+        if name == "write_base64_file":
+            return tool_write_base64_file(arguments)
+        if name == "read_binary_metadata":
+            return tool_read_binary_metadata(arguments)
+        if name == "extract_archive":
+            return tool_extract_archive(arguments)
+        if name == "read_spreadsheet":
+            return tool_read_spreadsheet(arguments)
+        if name == "read_pdf_text":
+            return tool_read_pdf_text(arguments)
+        if name == "list_artifacts":
+            return tool_list_artifacts(arguments)
+        if name == "apply_patch":
+            return tool_apply_patch(arguments)
+        if name == "run_command":
+            return tool_run_command(arguments)
+        return f"Unknown tool: {name}"
+    except Exception as exc:
+        return f"Tool {name} failed: {exc}"
+
+
+def tool_list_files(arguments: dict[str, Any]) -> str:
+    root = Path.cwd()
+    start = _safe_workspace_path(str(arguments.get("path") or "."))
+    pattern = str(arguments.get("pattern") or "")
+    max_results = _bounded_int(arguments.get("max_results"), 80, 1, 200)
+    if not start.exists():
+        return f"Path does not exist: {start.relative_to(root)}"
+    paths = []
+    iterator = start.rglob("*") if start.is_dir() else [start]
+    for path in iterator:
+        if len(paths) >= max_results:
+            break
+        if not path.is_file() or any(part in SKIP_DIRS for part in path.parts):
+            continue
+        relative = str(path.relative_to(root))
+        if pattern and pattern not in relative and not relative.endswith(pattern):
+            continue
+        paths.append(relative)
+    return "\n".join(paths) if paths else "No files matched."
+
+
+def tool_read_file(arguments: dict[str, Any]) -> str:
+    path = _safe_workspace_path(str(arguments.get("path") or ""))
+    if not path.is_file():
+        return f"File not found: {arguments.get('path')}"
+    if _is_binary_like_file(path) and not bool(arguments.get("allow_binary")):
+        return f"Refusing to read binary/archive file as text: {path.relative_to(Path.cwd())}"
+    start_line = _bounded_int(arguments.get("start_line"), 1, 1, 1_000_000)
+    max_lines = _bounded_int(arguments.get("max_lines"), 160, 1, 400)
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    selected = lines[start_line - 1 : start_line - 1 + max_lines]
+    rendered = "\n".join(f"{index}: {line}" for index, line in enumerate(selected, start=start_line))
+    return truncate(rendered, TOOL_RESULT_CHARS)
+
+
+def tool_search_files(arguments: dict[str, Any]) -> str:
+    query = str(arguments.get("query") or "")
+    if not query:
+        return "Missing query."
+    start = _safe_workspace_path(str(arguments.get("path") or "."))
+    max_results = _bounded_int(arguments.get("max_results"), 50, 1, 100)
+    matches: list[str] = []
+    iterator = start.rglob("*") if start.is_dir() else [start]
+    for path in iterator:
+        if len(matches) >= max_results:
+            break
+        if not path.is_file() or any(part in SKIP_DIRS for part in path.parts):
+            continue
+        if _is_binary_like_file(path):
+            continue
+        try:
+            for line_number, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+                if query in line:
+                    matches.append(f"{path.relative_to(Path.cwd())}:{line_number}: {line[:240]}")
+                    if len(matches) >= max_results:
+                        break
+        except OSError:
+            continue
+    return "\n".join(matches) if matches else "No matches."
+
+
+def _is_binary_like_file(path: Path) -> bool:
+    if path.suffix.lower() in BINARY_SUFFIXES:
+        return True
+    try:
+        sample = path.read_bytes()[:2048]
+    except OSError:
+        return True
+    return b"\0" in sample
+
+
+def tool_write_file(arguments: dict[str, Any]) -> str:
+    path = _safe_workspace_path(str(arguments.get("path") or ""))
+    content = str(arguments.get("content") or "")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return f"Wrote {len(content.encode('utf-8'))} bytes to {path.relative_to(Path.cwd())}."
+
+
+def tool_write_base64_file(arguments: dict[str, Any]) -> str:
+    path = _safe_workspace_path(str(arguments.get("path") or ""))
+    raw = str(arguments.get("base64_content") or "")
+    try:
+        data = base64.b64decode(raw, validate=True)
+    except Exception as exc:
+        return f"Invalid base64_content: {exc}"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return f"Wrote {len(data)} binary bytes to {path.relative_to(Path.cwd())}."
+
+
+def tool_read_binary_metadata(arguments: dict[str, Any]) -> str:
+    path = _safe_workspace_path(str(arguments.get("path") or ""))
+    if not path.is_file():
+        return f"File not found: {arguments.get('path')}"
+    metadata = _binary_metadata(path)
+    return json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+
+
+def tool_extract_archive(arguments: dict[str, Any]) -> str:
+    archive = _safe_workspace_path(str(arguments.get("path") or ""))
+    output_dir = _safe_workspace_path(str(arguments.get("output_dir") or ""))
+    if not archive.is_file():
+        return f"Archive not found: {arguments.get('path')}"
+    if archive.suffix.lower() != ".zip":
+        return "Only .zip archives are supported by extract_archive."
+    output_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        with zipfile.ZipFile(archive) as handle:
+            bad_member = handle.testzip()
+            if bad_member:
+                return f"Archive integrity check failed at member: {bad_member}"
+            handle.extractall(output_dir)
+    except zipfile.BadZipFile as exc:
+        return f"Invalid zip archive: {exc}"
+    return f"Extracted {archive.relative_to(Path.cwd())} to {output_dir.relative_to(Path.cwd())}."
+
+
+def tool_read_spreadsheet(arguments: dict[str, Any]) -> str:
+    path = _safe_workspace_path(str(arguments.get("path") or ""))
+    if not path.is_file():
+        return f"File not found: {arguments.get('path')}"
+    max_rows = _bounded_int(arguments.get("max_rows"), 20, 1, 50)
+    suffix = path.suffix.lower()
+    if suffix == ".csv":
+        with path.open("r", encoding="utf-8", errors="replace", newline="") as handle:
+            rows = list(csv.reader(handle))[:max_rows]
+        return _render_table_preview(rows)
+    if suffix in {".xlsx", ".xlsm"}:
+        try:
+            import openpyxl
+        except ImportError:
+            try:
+                return _render_table_preview(_read_xlsx_preview_zip(path, max_rows))
+            except Exception as exc:
+                return f"Unable to read spreadsheet: {exc}"
+        try:
+            workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        except Exception as exc:
+            return f"Unable to read spreadsheet: {exc}"
+        sheet_name = str(arguments.get("sheet") or "")
+        worksheet = workbook[sheet_name] if sheet_name in workbook.sheetnames else workbook[workbook.sheetnames[0]]
+        rows = []
+        for row in worksheet.iter_rows(max_row=max_rows, values_only=True):
+            rows.append(["" if value is None else str(value) for value in row])
+        return _render_table_preview(rows)
+    return f"Unsupported spreadsheet type: {path.suffix}"
+
+
+def _read_xlsx_preview_zip(path: Path, max_rows: int) -> list[list[str]]:
+    if not zipfile.is_zipfile(path):
+        raise ValueError("XLSX file is not a valid ZIP container")
+    with zipfile.ZipFile(path) as handle:
+        shared_strings = _xlsx_shared_strings(handle)
+        workbook = _xlsx_first_sheet_path(handle)
+        if workbook is None:
+            raise ValueError("XLSX workbook does not contain a worksheet")
+        root = ET.fromstring(handle.read(workbook))
+    namespace = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    rows: list[list[str]] = []
+    for row_node in root.findall(".//x:sheetData/x:row", namespace):
+        row_values: list[str] = []
+        for cell in row_node.findall("x:c", namespace):
+            value_node = cell.find("x:v", namespace)
+            inline_node = cell.find("x:is/x:t", namespace)
+            if inline_node is not None and inline_node.text is not None:
+                row_values.append(inline_node.text)
+                continue
+            raw = "" if value_node is None or value_node.text is None else value_node.text
+            if cell.attrib.get("t") == "s":
+                try:
+                    row_values.append(shared_strings[int(raw)])
+                except (ValueError, IndexError):
+                    row_values.append(raw)
+            else:
+                row_values.append(raw)
+        rows.append(row_values)
+        if len(rows) >= max_rows:
+            break
+    return rows
+
+
+def _xlsx_shared_strings(handle: zipfile.ZipFile) -> list[str]:
+    try:
+        raw = handle.read("xl/sharedStrings.xml")
+    except KeyError:
+        return []
+    namespace = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    root = ET.fromstring(raw)
+    values: list[str] = []
+    for item in root.findall(".//x:si", namespace):
+        parts = [node.text or "" for node in item.findall(".//x:t", namespace)]
+        values.append("".join(parts))
+    return values
+
+
+def _xlsx_first_sheet_path(handle: zipfile.ZipFile) -> str | None:
+    for name in sorted(handle.namelist()):
+        if re.fullmatch(r"xl/worksheets/sheet\d+\.xml", name):
+            return name
+    return None
+
+
+def tool_read_pdf_text(arguments: dict[str, Any]) -> str:
+    path = _safe_workspace_path(str(arguments.get("path") or ""))
+    if not path.is_file():
+        return f"File not found: {arguments.get('path')}"
+    max_chars = _bounded_int(arguments.get("max_chars"), 4000, 100, 12000)
+    try:
+        import pypdf
+    except ImportError:
+        pypdf = None
+    if pypdf is not None:
+        try:
+            reader = pypdf.PdfReader(str(path))
+            text = "\n".join(page.extract_text() or "" for page in reader.pages[:10])
+            return truncate(text, max_chars) if text.strip() else "No extractable PDF text found."
+        except Exception:
+            pass
+    pdftotext = shutil.which("pdftotext")
+    if pdftotext:
+        completed = subprocess.run(
+            [pdftotext, "-layout", str(path), "-"],
+            text=True,
+            capture_output=True,
+            cwd=Path.cwd(),
+            timeout=30,
+            check=False,
+        )
+        if completed.returncode == 0:
+            return truncate(completed.stdout, max_chars)
+        return f"pdftotext failed: {completed.stderr[-500:]}"
+    fallback_text = _fallback_pdf_text(path)
+    if fallback_text.strip():
+        return truncate(fallback_text, max_chars)
+    return "Unable to read PDF: no text extractor is installed and fallback extraction found no text."
+
+
+def _fallback_pdf_text(path: Path) -> str:
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return ""
+    if not raw.startswith(b"%PDF-"):
+        return ""
+    chunks: list[str] = []
+    for match in re.finditer(rb"\((.*?)\)", raw, flags=re.DOTALL):
+        value = match.group(1)
+        value = value.replace(rb"\(", b"(").replace(rb"\)", b")").replace(rb"\\n", b"\n")
+        try:
+            text = value.decode("utf-8")
+        except UnicodeDecodeError:
+            text = value.decode("latin-1", errors="replace")
+        if text.strip():
+            chunks.append(text)
+    return "\n".join(chunks)
+
+
+def tool_list_artifacts(arguments: dict[str, Any]) -> str:
+    start = _safe_workspace_path(str(arguments.get("path") or "agent_bench_outputs"))
+    max_results = _bounded_int(arguments.get("max_results"), 80, 1, 200)
+    if not start.exists():
+        return f"Path does not exist: {start.relative_to(Path.cwd())}"
+    rows = []
+    iterator = start.rglob("*") if start.is_dir() else [start]
+    for path in iterator:
+        if len(rows) >= max_results:
+            break
+        if not path.is_file():
+            continue
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = 0
+        rows.append(f"{path.relative_to(Path.cwd())}\t{size} bytes")
+    return "\n".join(rows) if rows else "No artifacts found."
+
+
+def _render_table_preview(rows: list[list[Any]]) -> str:
+    if not rows:
+        return "No rows found."
+    return "\n".join("\t".join(str(value) for value in row) for row in rows)
+
+
+def _binary_metadata(path: Path) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "path": str(path.relative_to(Path.cwd())),
+        "suffix": path.suffix.lower(),
+        "size_bytes": path.stat().st_size,
+        "is_zip": zipfile.is_zipfile(path),
+    }
+    if path.suffix.lower() in {".zip", ".xlsx", ".xlsm", ".docx"} and zipfile.is_zipfile(path):
+        try:
+            with zipfile.ZipFile(path) as handle:
+                metadata["zip_member_count"] = len(handle.namelist())
+                metadata["zip_test_ok"] = handle.testzip() is None
+        except zipfile.BadZipFile:
+            metadata["zip_test_ok"] = False
+    if path.suffix.lower() == ".pdf":
+        try:
+            metadata["pdf_header"] = path.read_bytes()[:5] == b"%PDF-"
+        except OSError:
+            metadata["pdf_header"] = False
+    return metadata
+
+
+def tool_apply_patch(arguments: dict[str, Any]) -> str:
+    patch = str(arguments.get("patch") or "")
+    if not patch.strip():
+        return "Missing patch."
+    completed = subprocess.run(
+        ["patch", "-p1"],
+        input=patch,
+        text=True,
+        capture_output=True,
+        cwd=Path.cwd(),
+        timeout=30,
+        check=False,
+    )
+    output = f"exit_code={completed.returncode}\n{completed.stdout}{completed.stderr}"
+    return truncate(output, TOOL_RESULT_CHARS)
+
+
+def tool_run_command(arguments: dict[str, Any]) -> str:
+    argv = arguments.get("argv")
+    if isinstance(argv, list) and all(isinstance(item, str) and item for item in argv):
+        args = argv
+    else:
+        if arguments.get("command"):
+            return "Invalid run_command arguments: legacy command field is disabled; use argv."
+        return "Missing argv."
+    if not args:
+        return "Missing argv."
+    timeout_seconds = _bounded_int(arguments.get("timeout_seconds"), 30, 1, 120)
+    stdin = arguments.get("stdin")
+    if stdin is not None and not isinstance(stdin, str):
+        return "stdin must be a string."
+    completed = subprocess.run(
+        args,
+        input=stdin,
+        text=True,
+        capture_output=True,
+        cwd=Path.cwd(),
+        timeout=timeout_seconds,
+        check=False,
+    )
+    output = f"exit_code={completed.returncode}\nSTDOUT:\n{completed.stdout}\nSTDERR:\n{completed.stderr}"
+    return truncate(output, TOOL_RESULT_CHARS)
+
+
+def _contains_shell_syntax(command: str) -> bool:
+    return bool(re.search(r"(^|\s)(?:&&|\|\||[|<>;`])|<<|\$\(", command))
+
+
+def _safe_workspace_path(raw_path: str) -> Path:
+    root = Path.cwd().resolve()
+    if not raw_path:
+        raise ValueError("path is required")
+    candidate = (root / raw_path).resolve()
+    if candidate != root and root not in candidate.parents:
+        raise ValueError(f"path escapes repository root: {raw_path}")
+    return candidate
+
+
+@contextmanager
+def pushd(path: Path):
+    previous = Path.cwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
+
+
+@contextmanager
+def wall_clock_timeout(timeout_seconds: float):
+    if not hasattr(signal, "SIGALRM"):
+        yield
+        return
+
+    def _handle_timeout(signum: int, frame: Any) -> None:
+        raise ChatCompletionTimeoutError(timeout_seconds)
+
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    signal.signal(signal.SIGALRM, _handle_timeout)
+    previous_timer = signal.setitimer(signal.ITIMER_REAL, timeout_seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+        if previous_timer[0] > 0:
+            signal.setitimer(signal.ITIMER_REAL, previous_timer[0], previous_timer[1])
+
+
+def _agent_run_from_dict(result: dict[str, Any]) -> AgentRun:
+    return AgentRun(
+        answer=str(result.get("answer", "")),
+        content=str(result.get("content", "")),
+        usage=result.get("usage", {}) if isinstance(result.get("usage"), dict) else {},
+        tool_trace=result.get("tool_trace", []) if isinstance(result.get("tool_trace"), list) else [],
+        diagnostics=result.get("diagnostics", {}) if isinstance(result.get("diagnostics"), dict) else {},
+        status_code=int(result.get("status_code", 200)) if isinstance(result.get("status_code", 200), int) else 200,
+    )
+
+
+def _isolated_workspace_root(item: BenchmarkItem) -> Path:
+    root = _item_output_dir(item) / "workspace"
+    if root.exists():
+        shutil.rmtree(root)
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _write_model_visible_task_files(root: Path, item: BenchmarkItem) -> None:
+    lines = [
+        "Task",
+        "====",
+        "",
+        item.question.strip(),
+    ]
+    if item.choices:
+        lines.extend(["", "Choices"])
+        lines.extend(f"{label}. {text}" for label, text in sorted(item.choices.items()))
+    lines.extend(
+        [
+            "",
+            "Final answer format",
+            "Return the final answer as compact JSON when finished.",
+        ]
+    )
+    (root / "TASK.md").write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
+
+
+def _expose_input_files_at_workspace_root(root: Path, relative_paths: list[str]) -> None:
+    by_name: dict[str, str] = {}
+    collisions: set[str] = set()
+    for relative_path in relative_paths:
+        name = Path(relative_path).name
+        if not name:
+            continue
+        if name in by_name and by_name[name] != relative_path:
+            collisions.add(name)
+        else:
+            by_name[name] = relative_path
+    for name in collisions:
+        by_name.pop(name, None)
+    for name, relative_path in by_name.items():
+        source = root / relative_path
+        target = root / name
+        if target.exists() or target.is_symlink() or not source.is_file():
+            continue
+        try:
+            target.symlink_to(source.relative_to(target.parent))
+        except OSError:
+            shutil.copy2(source, target)
+
+
+def _write_task_file_manifest(root: Path, relative_paths: list[str]) -> None:
+    rows = []
+    for relative_path in sorted(relative_paths):
+        path = root / relative_path
+        if not path.is_file():
+            continue
+        rows.append(
+            {
+                "display_filename": path.name,
+                "tool_path": relative_path,
+                "size_bytes": path.stat().st_size,
+            }
+        )
+    manifest_dir = root / "agent_bench_task_inputs"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    (manifest_dir / "manifest.json").write_text(
+        json.dumps({"files": rows}, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    table = ["| Display filename | Tool path | Size |", "|---|---|---:|"]
+    table.extend(
+        f"| {row['display_filename']} | {row['tool_path']} | {row['size_bytes']} |"
+        for row in rows
+    )
+    (root / "TASK_FILES.md").write_text("\n".join(table) + "\n", encoding="utf-8")
+
+
+def _item_to_dict(item: BenchmarkItem) -> dict[str, Any]:
+    return {
+        "id": _item_id(item),
+        "question": item.question,
+        "expected": item.expected,
+        "source": item.source,
+        "choices": item.choices,
+        "metadata": item.metadata,
+    }
+
+
+def _workspace_to_dict(workspace: TaskWorkspace) -> dict[str, Any]:
+    return {
+        "root": str(workspace.root),
+        "output_dir": str(workspace.output_dir),
+        "manifest": workspace.manifest,
+        "metadata": workspace.metadata,
+    }
+
+
+def _agent_run_to_dict(run: AgentRun) -> dict[str, Any]:
+    return {
+        "answer": run.answer,
+        "content": run.content,
+        "usage": run.usage,
+        "tool_trace": run.tool_trace,
+        "diagnostics": run.diagnostics,
+        "status_code": run.status_code,
+    }
+
+
+def _output_bundle_to_dict(outputs: OutputBundle) -> dict[str, Any]:
+    return {
+        "answer": outputs.answer,
+        "patch": outputs.patch,
+        "artifact_paths": outputs.artifact_paths,
+        "tool_trace": outputs.tool_trace,
+        "metadata": outputs.metadata,
+    }
+
+
+def _write_item_json(item_dir: Path, name: str, payload: dict[str, Any]) -> None:
+    item_dir.mkdir(parents=True, exist_ok=True)
+    (item_dir / name).write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _item_output_dir(item: BenchmarkItem) -> Path:
+    output_root = Path(os.environ.get("AGENT_BENCH_OUTPUT_DIR") or (Path.cwd() / "agent_bench_outputs"))
+    slug = _safe_slug(item.source)[:80]
+    output_dir = output_root / "items" / f"{slug}__sha256-{_item_hash(item)[:16]}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
+
+
+def _item_id(item: BenchmarkItem) -> str:
+    explicit = item.metadata.get("item_id")
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()
+    return f"{_safe_slug(item.source)}__sha256-{_item_hash(item)[:16]}"
+
+
+def _item_hash(item: BenchmarkItem) -> str:
+    digest = hashlib.sha256()
+    payload = {
+        "benchmark": os.environ.get("AGENT_BENCH_BENCHMARK_NAME", ""),
+        "source": item.source,
+        "question": item.question,
+        "expected": item.expected,
+        "choices": item.choices,
+    }
+    digest.update(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8"))
+    return digest.hexdigest()
+
+
+def _workspace_manifest(root: Path, limit: int = 200) -> list[str]:
+    try:
+        paths = [
+            str(path.relative_to(root))
+            for path in root.rglob("*")
+            if path.is_file() and not any(part in SKIP_DIRS for part in path.parts)
+        ]
+    except OSError:
+        return []
+    return sorted(paths)[:limit]
+
+
+def _artifact_asset_paths(item: BenchmarkItem, root: Path) -> list[Path]:
+    candidates: list[str] = []
+    for key in (
+        "input_assets",
+        "input_files",
+        "asset_paths",
+        "attachments",
+        "files",
+        "reference_files",
+        "documents",
+        "dataset_files",
+    ):
+        candidates.extend(_flatten_string_values(item.metadata.get(key)))
+    paths: list[Path] = []
+    root = root.resolve()
+    for raw in candidates:
+        candidate = (root / raw).resolve()
+        if candidate == root or root not in candidate.parents:
+            continue
+        if candidate.exists():
+            paths.append(candidate)
+    paths.extend(_inferred_artifact_assets(item, root))
+    paths.extend(_cached_artifact_assets(item))
+    return sorted(set(paths))
+
+
+def _inferred_artifact_assets(item: BenchmarkItem, root: Path) -> list[Path]:
+    source_path = item.source.split(":", 1)[0]
+    inferred: list[Path] = []
+    candidate_source = (root / source_path).resolve()
+    if candidate_source.exists():
+        parent = candidate_source.parent if candidate_source.is_file() else candidate_source
+        for name in (
+            "assets",
+            "input",
+            "inputs",
+            "data",
+            "reference_files",
+            "deliverable_files",
+            "paper.pdf",
+            "paper.md",
+            "addendum.md",
+            "config.yaml",
+        ):
+            candidate = parent / name
+            if candidate.exists():
+                inferred.append(candidate)
+    for name in ("reference_files", "deliverable_files"):
+        candidate = root / name
+        if candidate.exists():
+            inferred.append(candidate)
+    return inferred
+
+
+def _cached_artifact_assets(item: BenchmarkItem) -> list[Path]:
+    cache = _asset_root()
+    if not cache.exists():
+        return []
+    slug = _safe_slug(item.source)
+    benchmark = _safe_slug(os.environ.get("AGENT_BENCH_BENCHMARK_NAME", "benchmark"))
+    candidates = [cache / benchmark / slug, cache / benchmark, cache / slug]
+    for path in candidates:
+        if path.exists():
+            return [path]
+    return []
+
+
+def _asset_root() -> Path:
+    return Path(os.environ.get("AGENT_BENCH_ASSET_ROOT", DEFAULT_ASSET_ROOT)).expanduser()
+
+
+def _allow_asset_download() -> bool:
+    return os.environ.get("AGENT_BENCH_ALLOW_ASSET_DOWNLOAD", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _materialize_artifact_assets(asset_paths: list[Path], root: Path, item: BenchmarkItem) -> list[str]:
+    input_root = root / "agent_bench_task_inputs" / _safe_slug(item.source)
+    if input_root.exists():
+        shutil.rmtree(input_root)
+    input_root.mkdir(parents=True, exist_ok=True)
+    materialized: list[str] = []
+    for source in asset_paths:
+        if source.is_dir():
+            for child in sorted(source.iterdir()):
+                target = input_root / child.name
+                if child.is_dir():
+                    shutil.copytree(child, target, dirs_exist_ok=True)
+                elif child.is_file():
+                    shutil.copy2(child, target)
+            for path in sorted(input_root.rglob("*")):
+                if path.is_file():
+                    materialized.append(str(path.relative_to(root)))
+        elif source.is_file():
+            target = input_root / source.name
+            shutil.copy2(source, target)
+            materialized.append(str(target.relative_to(root)))
+    return sorted(set(materialized))
+
+
+def _collect_artifacts_to_output(source_dir: Path, artifact_dir: Path) -> list[str]:
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    copied: list[str] = []
+    if not source_dir.exists():
+        return copied
+    for path in sorted(source_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(source_dir)
+        target = artifact_dir / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+        copied.append(str(target))
+    return copied
+
+
+def _artifact_integrity_errors(artifact_paths: list[str]) -> list[dict[str, str]]:
+    errors: list[dict[str, str]] = []
+    for raw_path in artifact_paths:
+        path = Path(raw_path)
+        suffix = path.suffix.lower()
+        if suffix in {".xlsx", ".xlsm", ".docx", ".zip"}:
+            if not zipfile.is_zipfile(path):
+                errors.append({"path": raw_path, "error": f"{suffix} file is not a valid ZIP container"})
+                continue
+            try:
+                with zipfile.ZipFile(path) as handle:
+                    bad_member = handle.testzip()
+                    if bad_member:
+                        errors.append({"path": raw_path, "error": f"ZIP member failed CRC: {bad_member}"})
+            except zipfile.BadZipFile as exc:
+                errors.append({"path": raw_path, "error": str(exc)})
+        elif suffix == ".pdf":
+            try:
+                if path.read_bytes()[:5] != b"%PDF-":
+                    errors.append({"path": raw_path, "error": "PDF header is missing"})
+            except OSError as exc:
+                errors.append({"path": raw_path, "error": str(exc)})
+    return errors
+
+
+def _file_artifact_canary() -> dict[str, Any]:
+    canary_root = Path(os.environ.get("AGENT_BENCH_OUTPUT_DIR", "/outputs")) / "canaries" / "file_artifact"
+    if canary_root.exists():
+        shutil.rmtree(canary_root)
+    canary_root.mkdir(parents=True, exist_ok=True)
+    try:
+        _write_minimal_xlsx(canary_root / "input.xlsx", [["label", "value"], ["canary", "ok"]])
+        _write_minimal_pdf(canary_root / "input.pdf", "agent bench pdf canary")
+        with pushd(canary_root):
+            spreadsheet = tool_read_spreadsheet({"path": "input.xlsx", "max_rows": 5})
+            if _tool_result_failed("read_spreadsheet", spreadsheet) or "canary" not in spreadsheet:
+                return {"passed": False, "reason": "read_spreadsheet canary failed", "result": spreadsheet[:500]}
+            pdf = tool_read_pdf_text({"path": "input.pdf", "max_chars": 1000})
+            if _tool_result_failed("read_pdf_text", pdf) or "agent bench pdf canary" not in pdf:
+                return {"passed": False, "reason": "read_pdf_text canary failed", "result": pdf[:500]}
+            output_dir = Path("agent_bench_outputs") / "canary"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            _write_minimal_xlsx(output_dir / "report.xlsx", [["status"], ["ok"]])
+            (output_dir / "notes.txt").write_text("artifact canary ok\n", encoding="utf-8")
+            listing = tool_list_artifacts({"path": str(output_dir), "max_results": 20})
+            if _tool_result_failed("list_artifacts", listing) or "report.xlsx" not in listing or "notes.txt" not in listing:
+                return {"passed": False, "reason": "list_artifacts canary failed", "result": listing[:500]}
+            collected = _collect_artifacts_to_output(output_dir, canary_root / "collected")
+        if len(collected) < 2:
+            return {"passed": False, "reason": "artifact collection canary did not collect expected files"}
+        integrity_errors = _artifact_integrity_errors(collected)
+        if integrity_errors:
+            return {
+                "passed": False,
+                "reason": "artifact integrity canary failed",
+                "artifact_errors": integrity_errors,
+            }
+        return {"passed": True, "root": str(canary_root), "collected_count": len(collected)}
+    except Exception as exc:
+        return {"passed": False, "reason": f"file_artifact canary failed: {exc}"}
+
+
+def _repo_patch_canary() -> dict[str, Any]:
+    canary_root = Path(os.environ.get("AGENT_BENCH_OUTPUT_DIR", "/outputs")) / "canaries" / "repo_patch"
+    if canary_root.exists():
+        shutil.rmtree(canary_root)
+    repo = canary_root / "repo"
+    repo.mkdir(parents=True, exist_ok=True)
+    try:
+        checks: list[dict[str, Any]] = []
+
+        def run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            completed = subprocess.run(
+                args,
+                text=True,
+                capture_output=True,
+                cwd=repo,
+                timeout=30,
+                check=False,
+                **kwargs,
+            )
+            checks.append({"argv": args, "exit_code": completed.returncode})
+            return completed
+
+        for command in (
+            ["git", "init"],
+            ["git", "config", "user.email", "agent-bench@example.invalid"],
+            ["git", "config", "user.name", "Agent Bench"],
+        ):
+            completed = run(command)
+            if completed.returncode != 0:
+                return {"passed": False, "reason": "repo_patch canary git init failed", "stderr": completed.stderr}
+        (repo / "canary.txt").write_text("before\n", encoding="utf-8")
+        for command in (["git", "add", "canary.txt"], ["git", "commit", "-m", "base"]):
+            completed = run(command)
+            if completed.returncode != 0:
+                return {"passed": False, "reason": "repo_patch canary base commit failed", "stderr": completed.stderr}
+        base = run(["git", "rev-parse", "HEAD"])
+        if base.returncode != 0 or not base.stdout.strip():
+            return {"passed": False, "reason": "repo_patch canary could not identify base commit"}
+        checkout = run(["git", "checkout", "--detach", base.stdout.strip()])
+        if checkout.returncode != 0:
+            return {"passed": False, "reason": "repo_patch canary checkout failed", "stderr": checkout.stderr}
+        patch = (
+            "--- a/canary.txt\n"
+            "+++ b/canary.txt\n"
+            "@@ -1 +1 @@\n"
+            "-before\n"
+            "+after\n"
+        )
+        apply = subprocess.run(
+            ["patch", "-p1"],
+            input=patch,
+            text=True,
+            capture_output=True,
+            cwd=repo,
+            timeout=30,
+            check=False,
+        )
+        checks.append({"argv": ["patch", "-p1"], "exit_code": apply.returncode})
+        if apply.returncode != 0:
+            return {"passed": False, "reason": "repo_patch canary patch apply failed", "stderr": apply.stderr}
+        diff = run(["git", "diff", "--binary"])
+        if diff.returncode != 0 or "+after" not in diff.stdout:
+            return {"passed": False, "reason": "repo_patch canary diff collection failed", "stderr": diff.stderr}
+        test = run(["python", "-c", "from pathlib import Path; assert Path('canary.txt').read_text() == 'after\\n'"])
+        if test.returncode != 0:
+            return {"passed": False, "reason": "repo_patch canary trivial test failed", "stderr": test.stderr}
+        return {"passed": True, "root": str(repo), "base_commit": base.stdout.strip(), "checks": checks}
+    except Exception as exc:
+        return {"passed": False, "reason": f"repo_patch canary failed: {exc}"}
+
+
+def _write_minimal_xlsx(path: Path, rows: list[list[Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sheet_rows: list[str] = []
+    for row_index, row in enumerate(rows, 1):
+        cells: list[str] = []
+        for col_index, value in enumerate(row, 1):
+            ref = f"{_excel_column(col_index)}{row_index}"
+            text = _xml_escape(str(value))
+            cells.append(f'<c r="{ref}" t="inlineStr"><is><t>{text}</t></is></c>')
+        sheet_rows.append(f'<row r="{row_index}">{"".join(cells)}</row>')
+    sheet_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f'<sheetData>{"".join(sheet_rows)}</sheetData></worksheet>'
+    )
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as handle:
+        handle.writestr(
+            "[Content_Types].xml",
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+            '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+            "</Types>",
+        )
+        handle.writestr(
+            "_rels/.rels",
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+            "</Relationships>",
+        )
+        handle.writestr(
+            "xl/workbook.xml",
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            '<sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>',
+        )
+        handle.writestr(
+            "xl/_rels/workbook.xml.rels",
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+            "</Relationships>",
+        )
+        handle.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+
+
+def _write_minimal_pdf(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    escaped = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    path.write_bytes(
+        (
+            "%PDF-1.4\n"
+            "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+            "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n"
+            "3 0 obj << /Type /Page /Parent 2 0 R /Resources << /Font << /F1 4 0 R >> >> "
+            "/MediaBox [0 0 300 144] /Contents 5 0 R >> endobj\n"
+            "4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n"
+            f"5 0 obj << /Length {len(escaped) + 48} >> stream\n"
+            f"BT /F1 12 Tf 36 100 Td ({escaped}) Tj ET\n"
+            "endstream endobj\n"
+            "trailer << /Root 1 0 R >>\n%%EOF\n"
+        ).encode("utf-8")
+    )
+
+
+def _excel_column(index: int) -> str:
+    letters = ""
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        letters = chr(ord("A") + remainder) + letters
+    return letters
+
+
+def _xml_escape(value: str) -> str:
+    return (
+        value.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def _flatten_string_values(value: Any) -> list[str]:
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    if isinstance(value, list):
+        flattened: list[str] = []
+        for item in value:
+            flattened.extend(_flatten_string_values(item))
+        return flattened
+    if isinstance(value, dict):
+        flattened = []
+        for item in value.values():
+            flattened.extend(_flatten_string_values(item))
+        return flattened
+    return []
+
+
+def _repo_patch_target_repo(item: BenchmarkItem) -> str:
+    for key in ("target_repo", "repo", "repo_url", "git_repo", "repository"):
+        value = item.metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _repo_patch_base_commit(item: BenchmarkItem) -> str:
+    for key in ("base_commit", "commit", "base_sha", "revision"):
+        value = item.metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _prepare_target_repo_checkout(item: BenchmarkItem, target_repo: str, base_commit: str) -> Path:
+    existing = _find_materialized_target_repo(item, target_repo)
+    if existing is not None:
+        _checkout_commit(existing, base_commit)
+        return existing
+    local_source = Path(target_repo).expanduser()
+    if local_source.exists():
+        _checkout_commit(local_source.resolve(), base_commit)
+        return local_source.resolve()
+    if os.environ.get("AGENT_BENCH_ALLOW_TARGET_CHECKOUT", "").strip().lower() not in {"1", "true", "yes", "on"}:
+        raise AdapterSetupError(
+            "failed_harness_setup",
+            "repo_patch target repository checkout was not materialized",
+            {
+                "target_repo": target_repo,
+                "base_commit": base_commit,
+                "hint": f"set {TARGET_REPO_ROOT_ENV} or AGENT_BENCH_ALLOW_TARGET_CHECKOUT=1",
+            },
+        )
+    checkout_root = Path(os.environ.get("AGENT_BENCH_OUTPUT_DIR", "/outputs")) / "target_repos"
+    checkout_root.mkdir(parents=True, exist_ok=True)
+    target = checkout_root / _safe_slug(target_repo)
+    if not target.exists():
+        clone = subprocess.run(
+            ["git", "clone", _repo_url(target_repo), str(target)],
+            text=True,
+            capture_output=True,
+            timeout=_git_timeout_seconds(),
+            check=False,
+        )
+        if clone.returncode != 0:
+            raise AdapterSetupError(
+                "failed_harness_setup",
+                f"unable to clone repo_patch target repository: {(clone.stderr or clone.stdout).strip()}",
+                {"target_repo": target_repo},
+            )
+    _checkout_commit(target, base_commit)
+    return target
+
+
+def _repo_patch_checkout_available(items: list[BenchmarkItem]) -> bool:
+    if not items:
+        return False
+    if os.environ.get("AGENT_BENCH_ALLOW_TARGET_CHECKOUT", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return True
+    for item in items:
+        target_repo = _repo_patch_target_repo(item)
+        if not target_repo:
+            return False
+        if Path(target_repo).expanduser().exists():
+            continue
+        if _find_materialized_target_repo(item, target_repo) is None:
+            return False
+    return True
+
+
+def _find_materialized_target_repo(item: BenchmarkItem, target_repo: str) -> Path | None:
+    root_value = os.environ.get(TARGET_REPO_ROOT_ENV, "").strip()
+    if not root_value:
+        return None
+    root = Path(root_value).expanduser().resolve()
+    candidates = [
+        item.metadata.get("instance_id", ""),
+        target_repo.rstrip("/").split("/")[-1].removesuffix(".git"),
+        _safe_slug(target_repo),
+    ]
+    for candidate in candidates:
+        if not isinstance(candidate, str) or not candidate:
+            continue
+        path = (root / candidate).resolve()
+        if (path / ".git").exists():
+            return path
+    if (root / ".git").exists():
+        return root
+    return None
+
+
+def _checkout_commit(root: Path, commit: str) -> None:
+    verify = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--verify", f"{commit}^{{commit}}"],
+        text=True,
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+    if verify.returncode != 0:
+        raise AdapterSetupError(
+            "failed_harness_setup",
+            f"target repo does not contain base_commit {commit}",
+            {"target_repo_path": str(root), "base_commit": commit},
+        )
+    checkout = subprocess.run(
+        ["git", "-C", str(root), "checkout", "--detach", commit],
+        text=True,
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+    if checkout.returncode != 0:
+        raise AdapterSetupError(
+            "failed_harness_setup",
+            f"unable to checkout base_commit {commit}: {(checkout.stderr or checkout.stdout).strip()}",
+            {"target_repo_path": str(root), "base_commit": commit},
+        )
+
+
+def _repo_url(value: str) -> str:
+    if value.startswith(("http://", "https://", "git@", "ssh://")):
+        return value
+    if "/" in value:
+        return f"https://github.com/{value.removesuffix('.git')}.git"
+    return value
+
+
+def _git_timeout_seconds() -> int:
+    return _bounded_int(os.environ.get("AGENT_BENCH_GIT_TIMEOUT"), 900, 30, 7200)
+
+
+def _git_diff(root: Path) -> str:
+    completed = subprocess.run(
+        ["git", "-C", str(root), "diff", "--binary"],
+        text=True,
+        capture_output=True,
+        timeout=120,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise AdapterSetupError(
+            "failed_harness_setup",
+            f"unable to collect git diff: {(completed.stderr or completed.stdout).strip()}",
+            {"target_repo_path": str(root)},
+        )
+    return completed.stdout
+
+
+def _run_repo_patch_grader(command: str, item: BenchmarkItem, outputs: OutputBundle) -> tuple[float, dict[str, Any]]:
+    env = os.environ.copy()
+    env["AGENT_BENCH_MODEL_PATCH_PATH"] = str(outputs.metadata.get("patch_path", ""))
+    env["AGENT_BENCH_TARGET_REPO"] = str(outputs.metadata.get("target_repo", ""))
+    env["AGENT_BENCH_BASE_COMMIT"] = str(outputs.metadata.get("base_commit", ""))
+    env["AGENT_BENCH_INSTANCE_ID"] = str(item.metadata.get("instance_id", ""))
+    completed = subprocess.run(
+        shlex.split(command),
+        text=True,
+        capture_output=True,
+        timeout=_bounded_int(os.environ.get("AGENT_BENCH_REPO_PATCH_GRADER_TIMEOUT"), 1800, 30, 7200),
+        check=False,
+        env=env,
+    )
+    raw = (completed.stdout or "") + (completed.stderr or "")
+    parsed = parse_json_object(raw)
+    if not isinstance(parsed, dict):
+        return 0.0, {
+            "method": "official_patch_tests",
+            "score": 0.0,
+            "status": "failed_harness_setup",
+            "reason": "official repo_patch grader did not return a JSON object",
+            "grader_exit_code": completed.returncode,
+            "grader_output_sample": raw[-1000:],
+        }
+    score = coerce_unit_score(parsed.get("score"))
+    passed = bool(parsed.get("passed")) if "passed" in parsed else score >= 1.0
+    return score, {
+        "method": "official_patch_tests",
+        "score": score,
+        "passed": passed,
+        "status": "passed" if passed else "failed_model_answer",
+        "reason": str(parsed.get("reason", ""))[:500],
+        "grader_exit_code": completed.returncode,
+        "grader_raw_json": parsed,
+    }
+
+
+def _safe_slug(value: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9_.-]+", "-", value).strip("-._")
+    return slug[:120] or "item"
+
+
+def _parse_tool_arguments(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
+def _bounded_int(value: Any, default: int, lower: int, upper: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = default
+    return max(lower, min(upper, number))
+
+
+def _max_agent_turns() -> int:
+    raw = os.environ.get("AGENT_BENCH_AGENT_TURNS", str(MAX_AGENT_TURNS))
+    return _bounded_int(raw, MAX_AGENT_TURNS, 1, 24)
+
+
+def _merge_usage(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(left)
+    for key, value in right.items():
+        if isinstance(value, (int, float)) and isinstance(merged.get(key), (int, float)):
+            merged[key] += value
+        else:
+            merged[key] = value
+    return merged
+
+
 def _max_answer_tokens(item: BenchmarkItem) -> int:
-    grading = item.metadata.get("grading")
-    if grading in {"rubric", "task_compliance"}:
-        return 1600
-    return 512
+    raw = os.environ.get("AGENT_BENCH_MAX_TOKENS", str(DEFAULT_AGENT_MAX_TOKENS))
+    upper_bound = _bounded_int(raw, DEFAULT_AGENT_MAX_TOKENS, 512, 65536)
+    grading = str(item.metadata.get("grading", "exact"))
+    if item.choices:
+        target = 512
+    elif _looks_like_patch_task(item):
+        target = 4096
+    elif grading in {"rubric", "task_compliance"}:
+        target = 2048
+    else:
+        target = 1024
+    return min(upper_bound, target)
+
+
+def _looks_like_patch_task(item: BenchmarkItem) -> bool:
+    expected = item.expected.lstrip()
+    if expected.startswith(("diff --git ", "--- ", "Index: ")):
+        return True
+    text = f"{item.source} {item.question[:500]}".lower()
+    return any(marker in text for marker in ("swe-bench", "patch")) or bool(
+        re.search(r"\b(?:bug|fix|repo|repository)\b", text)
+    )
 
 
 def grade_answer(benchmark: str, item: BenchmarkItem, answer: str) -> tuple[float, dict[str, Any]]:
     grading = item.metadata.get("grading", "exact")
-    if grading == "exact":
+    if grading in {"exact", "numeric"}:
+        if _contains_tool_syntax(answer):
+            return 0.0, {
+                "method": str(grading),
+                "score": 0.0,
+                "status": "failed_model_format",
+                "reason": "answer contained tool-call syntax instead of the requested final answer",
+            }
         score = score_answer(answer, item.expected, item.choices)
-        return score, {"method": "exact", "score": score}
+        return score, {
+            "method": str(grading),
+            "score": score,
+            "status": "passed" if score >= 1.0 else "failed_model_answer",
+        }
     return judge_answer(benchmark, item, answer, str(grading))
 
 
@@ -1136,8 +4033,10 @@ def judge_answer(benchmark: str, item: BenchmarkItem, answer: str, method: str) 
                 "role": "system",
                 "content": (
                     "You are grading a benchmark response. Do not include hidden reasoning or scratch work. "
+                    "Do not require derivations, intermediate work, or explanations unless the task prompt or "
+                    "rubric explicitly asks for them; a concise final answer can be sufficient. "
                     "Return only compact JSON with "
-                    '{"score":0.0,"passed":false,"reason":"short reason"}. '
+                    '{"score":0.0,"passed":false,"reason":"brief concrete reason"}. '
                     "The score must be between 0 and 1."
                 ),
             },
@@ -1163,13 +4062,31 @@ def judge_answer(benchmark: str, item: BenchmarkItem, answer: str, method: str) 
     api_key = os.environ.get("AGENT_BENCH_API_KEY", "")
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    try:
-        response_body = post_chat_completion(base_url, payload, headers)
-    except ChatCompletionHTTPError as exc:
+    budget_failure = _token_budget_failure(payload)
+    if budget_failure is not None:
         return 0.0, {
             "method": method,
             "score": 0.0,
-            "status": "failed_harness_setup",
+            "status": "failed_token_budget",
+            "reason": str(budget_failure["reason"]),
+            "token_budget": budget_failure,
+        }
+    try:
+        response_body = post_chat_completion(base_url, payload, headers)
+    except ChatCompletionTimeoutError as exc:
+        return 0.0, {
+            "method": method,
+            "score": 0.0,
+            "status": "timed_out",
+            "reason": str(exc),
+            "timed_out": True,
+        }
+    except ChatCompletionHTTPError as exc:
+        status = "failed_token_budget" if _looks_like_context_error(exc.body) else "failed_harness_setup"
+        return 0.0, {
+            "method": method,
+            "score": 0.0,
+            "status": status,
             "reason": f"judge request failed: HTTP {exc.code}: {exc.body[-500:]}",
         }
     except Exception as exc:
@@ -1189,65 +4106,163 @@ def judge_answer(benchmark: str, item: BenchmarkItem, answer: str, method: str) 
             "reason": "judge response was not JSON",
         }
     content = extract_openai_content(parsed)
+    judge_text = content or response_body
     try:
-        grade, repaired = parse_judge_json_with_repair(content)
+        grade, repaired = parse_judge_json_with_repair(judge_text)
     except ValueError:
         return 0.0, {
             "method": method,
             "score": 0.0,
-            "status": "failed_judge_parse",
+            "status": "failed_grader",
             "reason": "judge content was not a JSON object",
-            "judge_raw_text": content,
-            "judge_sample": content[:300],
+            "judge_raw_text": judge_text,
+            "judge_parsed_json": {},
+            "judge_parser_status": "failed",
+            "judge_sample": judge_text[:300],
+            "usage": parsed.get("usage") if isinstance(parsed.get("usage"), dict) else {},
         }
     score = coerce_unit_score(grade.get("score"))
     passed = bool(grade.get("passed")) if "passed" in grade else score >= 1.0
+    status = "passed" if passed else "failed_model_answer"
+    reason = str(grade.get("reason", ""))[:500]
+    if repaired:
+        status = "failed_grader"
+        score = 0.0
+        passed = False
+        reason = f"judge JSON required repair; excluded from primary scoring: {reason}".strip()
+    elif normalize_text(reason) == "short reason":
+        status = "failed_grader"
+        score = 0.0
+        passed = False
+        reason = "judge returned placeholder reason; excluded from primary scoring"
     return score, {
         "method": method,
         "score": score,
         "passed": passed,
-        "status": "passed" if passed else "failed_model_answer",
-        "reason": str(grade.get("reason", ""))[:500],
-        "judge_raw_text": content,
+        "status": status,
+        "reason": reason,
+        "judge_raw_text": judge_text,
         "judge_parsed_json": grade,
         "judge_parse_repaired": repaired,
-        "judge_sample": content[:500],
+        "judge_parser_status": "repaired" if repaired else "parsed",
+        "judge_sample": judge_text[:500],
         "usage": parsed.get("usage") if isinstance(parsed.get("usage"), dict) else {},
     }
 
 
 def extract_openai_content(parsed: Any) -> str:
+    message = extract_openai_message(parsed)
+    content = _content_to_text(message.get("content"))
+    if content:
+        return content
+    for key in ("reasoning_content", "reasoning", "text"):
+        content = _content_to_text(message.get(key))
+        if content:
+            return content
+    return ""
+
+
+def extract_openai_message(parsed: Any) -> dict[str, Any]:
     choices = parsed.get("choices") if isinstance(parsed, dict) else None
     if not isinstance(choices, list) or not choices:
-        return ""
+        return {}
     first = choices[0]
     if not isinstance(first, dict):
-        return ""
+        return {}
     message = first.get("message")
-    if isinstance(message, dict) and isinstance(message.get("content"), str):
-        return message["content"]
+    if isinstance(message, dict):
+        return message
     text = first.get("text")
-    return text if isinstance(text, str) else ""
+    return {"content": text if isinstance(text, str) else ""}
+
+
+def extract_openai_tool_calls(parsed: Any) -> list[dict[str, Any]]:
+    message = extract_openai_message(parsed)
+    tool_calls = message.get("tool_calls")
+    if isinstance(tool_calls, list):
+        return [item for item in tool_calls if isinstance(item, dict)]
+    function_call = message.get("function_call")
+    if isinstance(function_call, dict):
+        return [{"id": "function_call", "type": "function", "function": function_call}]
+    return []
+
+
+def _content_to_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                for key in ("text", "content"):
+                    text = item.get(key)
+                    if isinstance(text, str):
+                        parts.append(text)
+                        break
+        return "\n".join(part for part in parts if part)
+    return ""
 
 
 def post_chat_completion(base_url: str, payload: dict[str, Any], headers: dict[str, str]) -> str:
+    response_body, _ = post_chat_completion_with_variant(base_url, payload, headers)
+    return response_body
+
+
+def post_chat_completion_with_variant(
+    base_url: str,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+) -> tuple[str, dict[str, Any]]:
     variants = _chat_completion_payload_variants(payload)
     last_error: ChatCompletionHTTPError | None = None
+    timeout_seconds = _model_request_timeout()
     for index, variant in enumerate(variants):
         body = json.dumps(variant).encode("utf-8")
         probe = request.Request(f"{base_url}/chat/completions", data=body, headers=headers, method="POST")
         try:
-            with request.urlopen(probe, timeout=_model_request_timeout()) as response:
-                return response.read().decode("utf-8", errors="replace")
+            with wall_clock_timeout(timeout_seconds):
+                with request.urlopen(probe, timeout=timeout_seconds) as response:
+                    return response.read().decode("utf-8", errors="replace"), variant
         except error.HTTPError as exc:
             response_body = exc.read().decode("utf-8", errors="replace")
             last_error = ChatCompletionHTTPError(exc.code, response_body)
             if exc.code in HTTP_FALLBACK_STATUS_CODES and index < len(variants) - 1:
                 continue
             raise last_error from exc
+        except (TimeoutError, socket.timeout) as exc:
+            raise ChatCompletionTimeoutError(timeout_seconds) from exc
+        except error.URLError as exc:
+            if _is_url_timeout(exc):
+                raise ChatCompletionTimeoutError(timeout_seconds) from exc
+            raise
     if last_error is not None:
         raise last_error
     raise RuntimeError("no chat completion payload variants were available")
+
+
+def _is_url_timeout(exc: error.URLError) -> bool:
+    reason = getattr(exc, "reason", None)
+    if isinstance(reason, (TimeoutError, socket.timeout)):
+        return True
+    return "timed out" in str(reason).lower()
+
+
+def _looks_like_context_error(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "context length",
+            "context window",
+            "maximum context",
+            "too many tokens",
+            "token limit",
+            "prompt is too long",
+            "maximum number of tokens",
+        )
+    )
 
 
 def _chat_completion_payload_variants(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1256,6 +4271,12 @@ def _chat_completion_payload_variants(payload: dict[str, Any]) -> list[dict[str,
         without_response_format = dict(payload)
         without_response_format.pop("response_format", None)
         variants.append(without_response_format)
+    if "tools" in payload:
+        without_tools = dict(payload)
+        without_tools.pop("tools", None)
+        without_tools.pop("tool_choice", None)
+        without_tools.pop("response_format", None)
+        variants.append(without_tools)
     return variants
 
 
@@ -1266,9 +4287,13 @@ def evaluation_payload(
     error_message: str,
     **extra: Any,
 ) -> dict[str, Any]:
-    status = extra.pop("status", None)
+    status = normalize_status(extra.pop("status", None))
     if not isinstance(status, str) or not status:
         status = "passed" if score >= 1.0 else "failed_model_answer"
+    if status == "completed":
+        status = "passed" if score >= 1.0 else "failed_model_answer"
+    if status not in STRICT_STATUSES:
+        status = "failed_harness_setup"
     payload = {
         "source": item.source,
         "question": item.question,
@@ -1311,7 +4336,8 @@ def summarize_evaluations(evaluations: list[dict[str, Any]]) -> dict[str, Any]:
         "content_sample": first.get("content_sample", ""),
         "grading_methods": grading_methods,
         "status_counts": _status_counts(evaluations),
-        "judge_parse_failure_count": sum(1 for item in evaluations if item.get("status") == "failed_judge_parse"),
+        "grader_failure_count": sum(1 for item in evaluations if normalize_status(item.get("status")) == "failed_grader"),
+        "judge_parse_failure_count": sum(1 for item in evaluations if normalize_status(item.get("status")) == "failed_grader"),
         "judge_parse_repaired_count": sum(1 for item in evaluations if item.get("judge_parse_repaired")),
         "usage": first.get("usage", {}),
         "error": "" if passed == total else f"{passed}/{total} benchmark records passed",
@@ -1319,20 +4345,44 @@ def summarize_evaluations(evaluations: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _valid_evaluations(evaluations: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    invalid_statuses = {
+    return [item for item in evaluations if normalize_status(item.get("status")) not in INVALID_EVALUATION_STATUSES]
+
+
+def _overall_status_and_error(evaluations: list[dict[str, Any]], setup_error: str) -> tuple[str, str]:
+    if setup_error:
+        if setup_error.startswith("No benchmark task records"):
+            return "failed_dataset_extraction", setup_error
+        return "failed_harness_setup", setup_error
+    if not evaluations:
+        return "completed", ""
+    valid_count = len(_valid_evaluations(evaluations))
+    if valid_count > 0:
+        return "completed", ""
+    status_counts = _status_counts(evaluations)
+    for status in (
         "failed_harness_setup",
-        "failed_judge_parse",
-        "skipped_missing_assets",
-        "skipped_unsupported_capability",
+        "failed_dataset_extraction",
+        "failed_grader",
+        "failed_token_budget",
         "timed_out",
-    }
-    return [item for item in evaluations if item.get("status") not in invalid_statuses]
+        "failed_missing_assets",
+        "skipped_unsupported_capability",
+    ):
+        if status_count(status_counts, status):
+            return status, _overall_error_message(status, status_counts)
+    return "completed", ""
+
+
+def _overall_error_message(status: str, status_counts: dict[str, int]) -> str:
+    total = sum(status_counts.values())
+    status_label = status.replace("_", " ")
+    return f"All {total} benchmark record evaluation(s) were invalid: {status_label}"
 
 
 def _status_counts(evaluations: list[dict[str, Any]]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for item in evaluations:
-        status = item.get("status")
+        status = normalize_status(item.get("status"))
         if not isinstance(status, str) or not status:
             status = "passed" if item.get("passed") else "failed_model_answer"
         counts[status] = counts.get(status, 0) + 1
@@ -1342,12 +4392,36 @@ def _status_counts(evaluations: list[dict[str, Any]]) -> dict[str, int]:
 def score_answer(answer: str, expected: str, choices: dict[str, str]) -> float:
     if not answer:
         return 0.0
+    answer = normalize_exact_answer(answer)
+    expected = normalize_exact_answer(expected)
     if choices:
         answer_label = normalize_answer_label(answer, choices)
         expected_label = normalize_answer_label(expected, choices)
         if answer_label and expected_label and answer_label == expected_label:
             return 1.0
+    for numeric_answer in _numeric_candidates(answer):
+        for numeric_expected in _numeric_candidates(expected):
+            tolerance = max(1e-6, abs(numeric_expected) * 1e-4)
+            if abs(numeric_answer - numeric_expected) <= tolerance:
+                return 1.0
     return 1.0 if normalize_text(answer) == normalize_text(expected) else 0.0
+
+
+def normalize_exact_answer(value: str) -> str:
+    parsed = parse_json_object(value)
+    if isinstance(parsed, dict):
+        answer = None
+        for key in ("answer", "final_answer", "final", "value"):
+            if key in parsed:
+                answer = parsed.get(key)
+                break
+        if isinstance(answer, str):
+            return answer.strip()
+        if isinstance(answer, (int, float, bool)):
+            return str(answer)
+        if isinstance(answer, list) and len(answer) == 1:
+            return normalize_exact_answer(str(answer[0]))
+    return value.strip()
 
 
 def coerce_unit_score(value: Any) -> float:
@@ -1380,6 +4454,41 @@ def normalize_answer_label(value: str, choices: dict[str, str]) -> str:
     if stripped.isdigit():
         return normalize_choice_label(stripped, 0)
     return ""
+
+
+def _numeric_value(value: str) -> float | None:
+    candidates = _numeric_candidates(value)
+    return candidates[0] if candidates else None
+
+
+def _numeric_candidates(value: str) -> list[float]:
+    cleaned = normalize_exact_answer(value)
+    multiplier = 1.0
+    lowered = cleaned.lower()
+    if re.search(r"\b(billion|bn)\b", lowered):
+        multiplier = 1_000_000_000.0
+    elif re.search(r"\b(million|mn|mm)\b", lowered):
+        multiplier = 1_000_000.0
+    elif re.search(r"\b(thousand|k)\b", lowered):
+        multiplier = 1_000.0
+    percent = "%" in cleaned or "percent" in lowered
+    basis_points = bool(re.search(r"\b(bps|basis points?)\b", lowered))
+    negative_parentheses = bool(re.search(r"\(\s*\$?\s*[0-9]", cleaned))
+    match = re.search(r"-?\$?\s*([0-9][0-9,]*(?:\.\d+)?(?:e[+-]?\d+)?)", cleaned, flags=re.IGNORECASE)
+    if not match:
+        return []
+    try:
+        number = float(match.group(1).replace(",", "")) * multiplier
+    except ValueError:
+        return []
+    if negative_parentheses:
+        number = -number
+    candidates = [number]
+    if percent:
+        candidates.append(number / 100.0)
+    if basis_points:
+        candidates.append(number / 10_000.0)
+    return candidates
 
 
 def extract_answer(content: str) -> str:
@@ -1500,11 +4609,11 @@ def _sample_limit() -> int:
 
 
 def _model_request_timeout() -> float:
-    raw = os.environ.get("AGENT_BENCH_MODEL_REQUEST_TIMEOUT", "600")
+    raw = os.environ.get("AGENT_BENCH_MODEL_REQUEST_TIMEOUT", "1800")
     try:
         return max(1.0, float(raw))
     except ValueError:
-        return 600.0
+        return 1800.0
 
 
 def _average_score(evaluations: list[dict[str, Any]]) -> float:

@@ -19,6 +19,14 @@ def test_render_summary_html_contains_radar_svg():
         "average_tokens_per_second": 42.0,
         "total_run_duration_seconds": 0.5,
         "total_task_duration_seconds": 0.4,
+        "timing_by_category": {
+            "alpha": {
+                "task_count": 1,
+                "total_task_duration_seconds": 0.4,
+                "average_task_duration_seconds": 0.4,
+            }
+        },
+        "timing_note": "total_task_duration_seconds is the sum of per-task elapsed time and can exceed total_run_duration_seconds when tasks run concurrently.",
         "total_output_tokens": 12,
         "category_scores": {"alpha": 50.0, "beta": 100.0},
         "category_counts": {
@@ -39,26 +47,6 @@ def test_render_summary_html_contains_radar_svg():
                 "model_eval": {"answer": "B", "expected": "A", "question": "Pick the best fix."},
             }
         ],
-        "timing_by_category": {
-            "alpha": {
-                "task_count": 1,
-                "total_task_duration_seconds": 0.4,
-                "average_task_duration_seconds": 0.4,
-                "average_time_to_first_token_seconds": 0.03,
-                "average_tokens_per_second": 42.0,
-                "total_output_tokens": 12,
-            }
-        },
-        "timing_by_problem": {
-            "A": {
-                "kind": "multiple_choice",
-                "task_duration_seconds": 0.4,
-                "request_latency_seconds": 0.1,
-                "time_to_first_token_seconds": 0.03,
-                "tokens_per_second": 42.0,
-                "output_token_count": 12,
-            }
-        },
     }
     html = render_summary_html(
         summary,
@@ -76,6 +64,7 @@ def test_render_summary_html_contains_radar_svg():
                 tokens_per_second=42.0,
                 output_token_count=12,
                 task_duration_seconds=0.4,
+                details={"benchmark": "ExampleBench"},
             )
         ],
     )
@@ -88,15 +77,20 @@ def test_render_summary_html_contains_radar_svg():
     assert "https://example.com/citation" in html
     assert "<th>mock</th>" in html
     assert "<th>Benchmark</th><th>mock</th><th>Items</th><th>Method</th>" in html
-    assert "<th>Group</th><th>Benchmark</th><th>Source</th><th>License</th><th>Credit</th>" in html
+    assert "<th>Benchmark</th><th>Source</th><th>Credit</th>" in html
+    assert "<th>Group</th>" not in html
+    assert "<th>License</th>" not in html
+    assert html.rfind("Benchmark Citations") > html.rfind("Task Results")
+    assert "<th>Benchmark</th><th>Category</th><th>Score</th>" in html
     assert "<th>Method</th><th>Status</th>" not in html
     assert "<th>Method</th><th>Answer</th>" not in html
     assert "<th>Method</th><th>Expected</th>" not in html
-    assert "<th>Kind</th><th>Status</th>" not in html
-    assert "Timing By Category" in html
-    assert "Timing By Problem" in html
-    assert "<th>Category</th><th>Tasks</th><th>Total Task Time</th>" in html
-    assert "Avg TTFT" in html
+    assert "<th>Kind</th>" not in html
+    assert "<h2>Timing</h2>" in html
+    assert "Timing By Problem" not in html
+    assert "TTFT" not in html
+    assert "Tokens/s" not in html
+    assert "Output Tokens" not in html
     assert '<svg viewBox="0 0 320 260"' in html
     assert "alpha" in html
 
@@ -142,8 +136,9 @@ def test_cli_mock_smoke_writes_expected_artifacts(tmp_path):
     assert summary["task_count"] == 1
     assert summary["total_score"] == 100.0
     assert "total_run_duration_seconds" in summary
-    assert "timing_by_category" in summary
-    assert "timing_by_problem" in summary
+    assert summary["timing_by_category"]["sample"]["task_count"] == 1
+    assert summary["timing_by_problem"]["S_001"]["kind"] == "multiple_choice"
+    assert "concurrently" in summary["timing_note"]
 
 
 def test_cli_mock_smoke_runs_all_bundled_benchmarks(tmp_path):
@@ -166,19 +161,19 @@ def test_cli_mock_smoke_runs_all_bundled_benchmarks(tmp_path):
     assert exit_code == 0
     summary = json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))
     html = (out_dir / "summary.html").read_text(encoding="utf-8")
-    assert summary["task_count"] == 20
-    assert len(summary["benchmark_results"]) == 20
+    assert summary["task_count"] == 19
+    assert len(summary["benchmark_results"]) == 19
     assert "public_benchmarks" not in html
     assert "SWE-bench" in html
     assert "GDPval" in html
-    assert "Humanity&#x27;s Last Exam" in html
+    assert "Humanity&#x27;s Last Exam" not in html
     assert "BioMystery Bench" in html
     assert "EDINET-Bench" in html
     assert "Benchmark Citations" in html
     assert "<th>Benchmark</th><th>mock-perfect</th><th>Items</th><th>Method</th>" in html
 
 
-def test_aggregate_results_groups_timing_by_category():
+def test_aggregate_results_emits_timing_breakdowns():
     summary = aggregate_results(
         [
             GradeResult(
@@ -221,11 +216,10 @@ def test_aggregate_results_groups_timing_by_category():
         {"run_duration_seconds": 1.4},
     )
 
-    assert set(summary["timing_by_category"]) == {"alpha", "beta"}
     assert summary["timing_by_category"]["alpha"]["task_count"] == 2
     assert summary["timing_by_category"]["alpha"]["total_task_duration_seconds"] == 0.7
-    assert summary["timing_by_category"]["alpha"]["total_output_tokens"] == 12
-    assert summary["timing_by_category"]["beta"]["task_count"] == 1
+    assert summary["timing_by_problem"]["A"]["task_duration_seconds"] == 0.2
+    assert "concurrently" in summary["timing_note"]
     assert summary["benchmark_results"] == []
 
 
@@ -251,6 +245,9 @@ def test_aggregate_results_emits_external_benchmark_rows():
                     "result": {
                         "repository_ready": True,
                         "file_count_sampled": 12,
+                        "raw_score": 0.5,
+                        "valid_score": 0.75,
+                        "status_counts": {"passed": 2, "failed_harness_setup": 1},
                         "model_eval": {"answer": "A", "expected": "B"},
                     },
                 },
@@ -264,8 +261,16 @@ def test_aggregate_results_emits_external_benchmark_rows():
     }
     assert summary["benchmark_results"][0]["benchmark"] == "ExampleBench"
     assert summary["benchmark_results"][0]["score"] == 75.0
+    assert summary["benchmark_results"][0]["raw_score"] == 50.0
+    assert summary["benchmark_results"][0]["valid_score"] == 75.0
+    assert summary["benchmark_results"][0]["setup_failed_count"] == 1
     assert summary["benchmark_results"][0]["citation"] == "https://example.com/cite"
     assert summary["benchmark_results"][0]["model_eval"] == {"answer": "A", "expected": "B"}
+    assert summary["num_suites_failed_setup"] == 0
+    assert summary["num_items_failed_setup"] == 1
+    assert summary["num_items_valid_model_attempts"] == 2
+    assert summary["num_items_passed_valid_model_attempts"] == 2
+    assert summary["headline"]["coverage"] == "1/1 valid judged suites"
 
 
 def test_aggregate_results_separates_skipped_from_valid_scores():
@@ -290,7 +295,7 @@ def test_aggregate_results_separates_skipped_from_valid_scores():
                 passed=False,
                 json_valid=True,
                 latency_seconds=0.1,
-                status="skipped_unsupported_capability",
+                status="failed_unsupported_capability",
             ),
         ],
         {"run_duration_seconds": 1.0},
@@ -300,3 +305,72 @@ def test_aggregate_results_separates_skipped_from_valid_scores():
     assert summary["total_score"] == 100.0
     assert summary["valid_task_count"] == 1
     assert summary["skipped_count"] == 1
+
+
+def test_aggregate_results_uses_nested_judge_parse_and_model_valid_counts():
+    summary = aggregate_results(
+        [
+            GradeResult(
+                task_id="PB_018",
+                category="Finance",
+                kind="external_benchmark",
+                score=0.0,
+                max_score=1.0,
+                passed=False,
+                json_valid=True,
+                latency_seconds=0.1,
+                details={
+                    "benchmark": "FinanceMath",
+                    "group": "Finance",
+                    "result": {
+                        "status": "completed",
+                        "capabilities_verified": False,
+                        "evaluated_task_count": 1,
+                        "valid_evaluated_task_count": 0,
+                        "judge_parse_failure_count": 1,
+                        "status_counts": {"failed_grader": 1},
+                    },
+                },
+            )
+        ],
+        {"run_duration_seconds": 1.0},
+    )
+
+    assert summary["valid_task_count"] == 1
+    assert summary["model_valid_task_count"] == 0
+    assert summary["model_score_valid_tasks_only"] == 0.0
+    assert summary["judge_parse_failure_count"] == 1
+    assert summary["judge_parse_failed_count"] == 1
+    assert summary["benchmark_item_status_counts"] == {"failed_grader": 1}
+
+
+def test_aggregate_results_counts_nested_passed_items():
+    summary = aggregate_results(
+        [
+            GradeResult(
+                task_id="PB_019",
+                category="Science",
+                kind="external_benchmark",
+                score=0.5,
+                max_score=1.0,
+                passed=False,
+                json_valid=True,
+                latency_seconds=0.1,
+                details={
+                    "benchmark": "BioMystery",
+                    "group": "Science",
+                    "result": {
+                        "status": "completed",
+                        "status_counts": {"passed": 2, "failed_model_answer": 1},
+                        "evaluated_task_count": 3,
+                        "evaluation_passed_count": 2,
+                    },
+                },
+            )
+        ],
+        {"run_duration_seconds": 1.0},
+    )
+
+    assert summary["passed_count"] == 0
+    assert summary["item_passed_count"] == 2
+    assert summary["benchmark_item_status_counts"]["passed"] == 2

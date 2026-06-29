@@ -7,6 +7,7 @@ from agent_bench.models import ModelResponse, Task
 from agent_bench.sandbox import SubprocessSandbox
 from agent_bench.verifiers import (
     grade_coding,
+    grade_external_benchmark,
     grade_multiple_choice,
     grade_text_recall,
     parse_model_json,
@@ -214,3 +215,140 @@ def test_grade_text_recall_uses_token_multiplicity_for_f1():
     assert result.details["true_positives"] == 2
     assert result.details["false_positives"] == 2
     assert result.details["false_negatives"] == 2
+
+
+def test_grade_external_benchmark_treats_unsupported_capability_as_coverage_gap():
+    task = Task(
+        id="PB_001",
+        category="public_benchmarks",
+        type="external_benchmark",
+        question="Run benchmark",
+        source="public_benchmarks.json",
+    )
+    response = _response(
+        json.dumps(
+            {
+                "status": "error",
+                "score": 0.0,
+                "error": "Benchmark requires unsupported capability/capabilities: repo_patch",
+                "timed_out": False,
+                "details": {
+                    "group": "Coding",
+                    "result": {
+                        "status": "skipped_unsupported_capability",
+                        "unsupported_capabilities": ["repo_patch"],
+                    },
+                },
+            }
+        )
+    )
+
+    result = grade_external_benchmark(task, response)
+
+    assert result.status == "skipped_unsupported_capability"
+    assert result.error is None
+    assert result.category == "Coding"
+
+
+def test_grade_external_benchmark_promotes_all_invalid_nested_status():
+    task = Task(
+        id="PB_001",
+        category="public_benchmarks",
+        type="external_benchmark",
+        question="Run benchmark",
+        source="public_benchmarks.json",
+    )
+    response = _response(
+        json.dumps(
+            {
+                "status": "completed",
+                "score": 0.0,
+                "error": None,
+                "timed_out": False,
+                "details": {
+                    "group": "Coding",
+                    "result": {
+                        "status": "completed",
+                        "evaluated_task_count": 3,
+                        "valid_evaluated_task_count": 0,
+                        "status_counts": {"failed_harness_setup": 3},
+                    },
+                },
+            }
+        )
+    )
+
+    result = grade_external_benchmark(task, response)
+
+    assert result.status == "failed_harness_setup"
+    assert result.error == "All 3 benchmark record evaluation(s) were invalid: failed harness setup"
+    assert result.passed is False
+
+
+def test_grade_external_benchmark_marks_nested_timeout_as_timed_out():
+    task = Task(
+        id="PB_001",
+        category="public_benchmarks",
+        type="external_benchmark",
+        question="Run benchmark",
+        source="public_benchmarks.json",
+    )
+    response = _response(
+        json.dumps(
+            {
+                "status": "completed",
+                "score": 0.0,
+                "error": None,
+                "timed_out": False,
+                "details": {
+                    "group": "Coding",
+                    "result": {
+                        "status": "timed_out",
+                        "evaluated_task_count": 1,
+                        "valid_evaluated_task_count": 0,
+                        "status_counts": {"timed_out": 1},
+                    },
+                },
+            }
+        )
+    )
+
+    result = grade_external_benchmark(task, response)
+
+    assert result.status == "timed_out"
+    assert result.timed_out is True
+    assert result.passed is False
+
+
+def test_grade_external_benchmark_maps_completed_zero_score_to_failed_model_answer():
+    task = Task(
+        id="PB_001",
+        category="public_benchmarks",
+        type="external_benchmark",
+        question="Run benchmark",
+        source="public_benchmarks.json",
+    )
+    response = _response(
+        json.dumps(
+            {
+                "status": "completed",
+                "score": 0.0,
+                "error": None,
+                "timed_out": False,
+                "details": {
+                    "group": "Coding",
+                    "result": {
+                        "status": "completed",
+                        "evaluated_task_count": 1,
+                        "valid_evaluated_task_count": 1,
+                    },
+                },
+            }
+        )
+    )
+
+    result = grade_external_benchmark(task, response)
+
+    assert result.status == "failed_model_answer"
+    assert result.answer == "failed_model_answer"
+    assert result.passed is False

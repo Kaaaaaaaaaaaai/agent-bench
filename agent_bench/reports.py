@@ -62,8 +62,6 @@ def render_summary_html(summary: dict[str, Any], results: list[GradeResult]) -> 
     metadata = summary.get("metadata", {})
     category_counts = summary.get("category_counts", {})
     benchmark_results = summary.get("benchmark_results", [])
-    timing_by_category = summary.get("timing_by_category", {})
-    timing_by_problem = summary.get("timing_by_problem", {})
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -105,7 +103,6 @@ def render_summary_html(summary: dict[str, Any], results: list[GradeResult]) -> 
     .status-fail {{ color: var(--red); font-weight: 700; }}
     .radar {{ border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 12px; }}
     .metadata {{ display: grid; grid-template-columns: 190px 1fr; gap: 6px 12px; }}
-    .stack {{ display: grid; gap: 18px; }}
     @media (max-width: 820px) {{ main {{ padding: 18px 14px 34px; }} .grid {{ grid-template-columns: 1fr; }} .metadata {{ grid-template-columns: 1fr; }} }}
   </style>
 </head>
@@ -132,23 +129,26 @@ def render_summary_html(summary: dict[str, Any], results: list[GradeResult]) -> 
       {_benchmark_table(benchmark_results, str(metadata.get("model", "Model")))}
     </section>
     <section>
+      <h2>Status Distribution</h2>
+      {_status_distribution_table(summary)}
+    </section>
+    <section>
+      <h2>Timing</h2>
+      <p class="note">{html.escape(str(summary.get("timing_note", "")))}</p>
+      {_timing_table(summary)}
+    </section>
+    <section>
+      <h2>Run Metadata</h2>
+      {_metadata_table(metadata)}
+    </section>
+    <section>
+      <h2>Task Results</h2>
+      {_results_table(results)}
+    </section>
+    <section>
       <h2>Benchmark Citations</h2>
       {_citation_table(benchmark_results)}
     </section>
-    <section class="stack">
-      <div>
-        <h2>Timing By Category</h2>
-        {_timing_by_category_table(timing_by_category)}
-      </div>
-      <div>
-        <h2>Timing By Problem</h2>
-        {_timing_by_problem_table(timing_by_problem)}
-      </div>
-    </section>
-    <h2>Run Metadata</h2>
-    {_metadata_table(metadata)}
-    <h2>Task Results</h2>
-    {_results_table(results)}
   </main>
 </body>
 </html>
@@ -166,27 +166,73 @@ def _write_results_csv(path: Path, results: list[GradeResult]) -> None:
 
 def _metric_cards(summary: dict[str, Any]) -> str:
     cards = [
-        ("Total Score", _format_percent(summary.get("total_score"))),
-        ("Raw Score", _format_percent(summary.get("raw_score"))),
+        ("Valid Score", _format_percent(summary.get("score_valid_tasks_only", summary.get("total_score")))),
+        ("Model Score", _format_percent(summary.get("model_score_valid_tasks_only"))),
+        ("Raw Score", _format_percent(summary.get("raw_score_all_tasks", summary.get("raw_score")))),
         ("Valid Tasks", _format_integer(summary.get("valid_task_count"))),
+        ("Model Valid", _format_integer(summary.get("model_valid_task_count"))),
         ("Skipped", _format_integer(summary.get("skipped_count"))),
         ("Setup Failed", _format_integer(summary.get("setup_failed_count"))),
-        ("Judge Parse Failed", _format_integer(summary.get("judge_parse_failed_count"))),
+        ("Grader Failed", _format_integer(summary.get("grader_failure_count", summary.get("judge_parse_failed_count")))),
         ("Pass Rate", _format_percent(summary.get("pass_rate"))),
         ("Coding Pass", _format_percent(summary.get("coding_pass_rate"))),
         ("JSON Validity", _format_percent(summary.get("json_validity_rate"))),
         ("Timeout Rate", _format_percent(summary.get("timeout_rate"))),
         ("Avg Latency", f"{float(summary.get('average_latency_seconds', 0.0)):.2f}s"),
-        ("Avg TTFT", _format_seconds(summary.get("average_time_to_first_token_seconds"))),
-        ("Avg Tokens/s", _format_rate(summary.get("average_tokens_per_second"))),
         ("Run Time", _format_seconds(summary.get("total_run_duration_seconds"))),
         ("Task Time Sum", _format_seconds(summary.get("total_task_duration_seconds"))),
-        ("Output Tokens", _format_integer(summary.get("total_output_tokens"))),
     ]
     return '<section class="cards">' + "\n".join(
         f'<section class="card"><span>{html.escape(label)}</span><strong>{html.escape(value)}</strong></section>'
         for label, value in cards
     ) + "</section>"
+
+
+def _status_distribution_table(summary: dict[str, Any]) -> str:
+    rows: list[str] = []
+    for label, key in (
+        ("Task rows", "status_counts"),
+        ("Benchmark items", "benchmark_item_status_counts"),
+    ):
+        counts = summary.get(key)
+        if not isinstance(counts, dict) or not counts:
+            continue
+        for status, count in sorted(counts.items()):
+            rows.append(
+                "<tr>"
+                f"<td>{html.escape(label)}</td>"
+                f"<td>{html.escape(str(status))}</td>"
+                f"<td>{int(count)}</td>"
+                "</tr>"
+            )
+    if not rows:
+        rows.append('<tr><td colspan="3">No statuses were recorded.</td></tr>')
+    return (
+        "<table><thead><tr><th>Scope</th><th>Status</th><th>Count</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def _timing_table(summary: dict[str, Any]) -> str:
+    timing = summary.get("timing_by_category")
+    if not isinstance(timing, dict) or not timing:
+        return "<table><tbody><tr><td>No timing breakdown was recorded.</td></tr></tbody></table>"
+    rows = []
+    for category, data in sorted(timing.items()):
+        if not isinstance(data, dict):
+            continue
+        rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(category))}</td>"
+            f"<td>{int(data.get('task_count', 0))}</td>"
+            f"<td>{_format_seconds(data.get('total_task_duration_seconds'))}</td>"
+            f"<td>{_format_seconds(data.get('average_task_duration_seconds'))}</td>"
+            "</tr>"
+        )
+    return (
+        "<table><thead><tr><th>Category</th><th>Tasks</th><th>Total Task Time</th>"
+        f"<th>Avg Task Time</th></tr></thead><tbody>{''.join(rows)}</tbody></table>"
+    )
 
 
 def _average_scores(summary: dict[str, Any]) -> dict[str, float]:
@@ -347,67 +393,33 @@ def _citation_table(benchmark_results: Any) -> str:
             source_cell = f'<a href="{href}">{html.escape(source)}</a>'
         rows.append(
             "<tr>"
-            f"<td>{html.escape(str(row.get('group', 'Benchmarks')))}</td>"
             f"<td>{html.escape(str(row.get('benchmark', '')))}</td>"
             f"<td>{source_cell}</td>"
-            f"<td>{html.escape(str(row.get('license', '')))}</td>"
             f"<td>{html.escape(str(row.get('credit', '')))}</td>"
             "</tr>"
         )
     return (
-        "<table><thead><tr><th>Group</th><th>Benchmark</th><th>Source</th>"
-        "<th>License</th><th>Credit</th></tr></thead>"
+        "<table><thead><tr><th>Benchmark</th><th>Source</th><th>Credit</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody></table>"
     )
 
 
 def _metadata_table(metadata: dict[str, Any]) -> str:
+    hidden_keys = {
+        "api_key_env",
+        "external_launcher_image",
+        "sandbox",
+        "sandbox_image",
+        "tasks",
+        "temperature",
+        "timeout",
+    }
     rows = []
     for key, value in sorted(metadata.items()):
+        if key in hidden_keys:
+            continue
         rows.append(f"<dt>{html.escape(str(key))}</dt><dd>{html.escape(str(value))}</dd>")
     return f'<dl class="metadata">{"".join(rows)}</dl>'
-
-
-def _timing_by_category_table(timing_by_category: dict[str, Any]) -> str:
-    rows = []
-    for category, data in timing_by_category.items():
-        rows.append(
-            "<tr>"
-            f"<td>{html.escape(category)}</td>"
-            f"<td>{int(data.get('task_count', 0))}</td>"
-            f"<td>{_format_seconds(data.get('total_task_duration_seconds'))}</td>"
-            f"<td>{_format_seconds(data.get('average_task_duration_seconds'))}</td>"
-            f"<td>{_format_seconds(data.get('average_time_to_first_token_seconds'))}</td>"
-            f"<td>{_format_rate(data.get('average_tokens_per_second'))}</td>"
-            f"<td>{_format_integer(data.get('total_output_tokens'))}</td>"
-            "</tr>"
-        )
-    return (
-        "<table><thead><tr><th>Category</th><th>Tasks</th><th>Total Task Time</th>"
-        "<th>Avg Task Time</th><th>Avg TTFT</th><th>Avg Tokens/s</th><th>Output Tokens</th></tr></thead>"
-        f"<tbody>{''.join(rows)}</tbody></table>"
-    )
-
-
-def _timing_by_problem_table(timing_by_problem: dict[str, Any]) -> str:
-    rows = []
-    for task_id, data in timing_by_problem.items():
-        rows.append(
-            "<tr>"
-            f"<td>{html.escape(task_id)}</td>"
-            f"<td>{html.escape(str(data.get('kind', '')))}</td>"
-            f"<td>{_format_seconds(data.get('task_duration_seconds'))}</td>"
-            f"<td>{_format_seconds(data.get('request_latency_seconds'))}</td>"
-            f"<td>{_format_seconds(data.get('time_to_first_token_seconds'))}</td>"
-            f"<td>{_format_rate(data.get('tokens_per_second'))}</td>"
-            f"<td>{_format_integer(data.get('output_token_count'))}</td>"
-            "</tr>"
-        )
-    return (
-        "<table><thead><tr><th>Problem</th><th>Kind</th><th>Total Task Time</th>"
-        "<th>Request Time</th><th>TTFT</th><th>Tokens/s</th><th>Output Tokens</th></tr></thead>"
-        f"<tbody>{''.join(rows)}</tbody></table>"
-    )
 
 
 def _results_table(results: list[GradeResult]) -> str:
@@ -415,25 +427,29 @@ def _results_table(results: list[GradeResult]) -> str:
     for result in results:
         rows.append(
             "<tr>"
-            f"<td>{html.escape(result.task_id)}</td>"
+            f"<td>{html.escape(_result_benchmark_name(result))}</td>"
             f"<td>{html.escape(result.category)}</td>"
-            f"<td>{html.escape(result.kind)}</td>"
             f"<td>{result.score:.3f}</td>"
             f"<td>{'yes' if result.json_valid else 'no'}</td>"
             f"<td>{_format_seconds(result.latency_seconds)}</td>"
-            f"<td>{_format_seconds(result.time_to_first_token_seconds)}</td>"
-            f"<td>{_format_rate(result.tokens_per_second)}</td>"
-            f"<td>{_format_integer(result.output_token_count)}</td>"
             f"<td>{_format_seconds(result.task_duration_seconds)}</td>"
             f"<td>{html.escape(_display_error(result.error))}</td>"
             "</tr>"
         )
     return (
-        "<table><thead><tr><th>Task</th><th>Category</th><th>Kind</th>"
-        "<th>Score</th><th>JSON</th><th>Request Time</th><th>TTFT</th><th>Tokens/s</th>"
-        "<th>Output Tokens</th><th>Total Task Time</th><th>Error</th></tr></thead>"
+        "<table><thead><tr><th>Benchmark</th><th>Category</th>"
+        "<th>Score</th><th>JSON</th><th>Request Time</th>"
+        "<th>Total Task Time</th><th>Error</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody></table>"
     )
+
+
+def _result_benchmark_name(result: GradeResult) -> str:
+    details = result.details if isinstance(result.details, dict) else {}
+    benchmark = details.get("benchmark")
+    if isinstance(benchmark, str) and benchmark.strip():
+        return benchmark
+    return result.task_id
 
 
 def _format_percent(value: Any) -> str:
@@ -452,12 +468,6 @@ def _format_seconds(value: Any) -> str:
     if value is None:
         return "n/a"
     return f"{float(value):.3f}s"
-
-
-def _format_rate(value: Any) -> str:
-    if value is None:
-        return "n/a"
-    return f"{float(value):.2f}"
 
 
 def _format_integer(value: Any) -> str:

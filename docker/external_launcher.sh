@@ -46,12 +46,36 @@ result_file="${AGENT_BENCH_OUTPUT_DIR}/agent_bench_result.json"
 if [[ ! -f "${result_file}" ]]; then
   python - <<PY
 import json
+import os
 from pathlib import Path
 out = Path('${AGENT_BENCH_OUTPUT_DIR}')
 out.mkdir(parents=True, exist_ok=True)
+status = ${status}
+benchmark = os.environ.get('AGENT_BENCH_BENCHMARK_NAME', '')
+group = os.environ.get('AGENT_BENCH_BENCHMARK_GROUP', '')
+required = [item for item in os.environ.get('AGENT_BENCH_REQUIRED_CAPABILITIES', '').split(',') if item]
+error = f"External benchmark command exited with code {status} before writing agent_bench_result.json"
 (out / 'agent_bench_result.json').write_text(json.dumps({
-    'score': 1.0 if ${status} == 0 else 0.0,
-    'exit_code': ${status},
+    'benchmark': benchmark,
+    'group': group,
+    'status': 'completed' if status == 0 else 'failed_harness_setup',
+    'score': 1.0 if status == 0 else 0.0,
+    'raw_score': 1.0 if status == 0 else 0.0,
+    'valid_score': 1.0 if status == 0 else 0.0,
+    'error': '' if status == 0 else error,
+    'exit_code': status,
+    'required_capabilities': required,
+    'supported_capabilities': [],
+    'unsupported_capabilities': [],
+    'capabilities_verified': status == 0,
+    'extracted_task_count': 0,
+    'evaluated_task_count': 0,
+    'valid_evaluated_task_count': 0,
+    'evaluation_passed_count': 0,
+    'skipped_task_count': 0,
+    'model_evals': [],
+    'model_eval': {},
+    'status_counts': {'passed': 1} if status == 0 else {'failed_harness_setup': 1},
 }) + '\n')
 PY
 fi

@@ -12,6 +12,9 @@ from agent_bench.models import ModelResponse, Task
 from agent_bench.prompts import build_messages
 
 
+DEFAULT_CLIENT_MAX_TOKENS = 16384
+
+
 class ModelClient(ABC):
     model: str
 
@@ -31,7 +34,7 @@ class OpenAICompatibleClient(ModelClient):
         api_key_env: str | None = None,
         timeout: float = 60.0,
         temperature: float = 0.0,
-        max_tokens: int = 4096,
+        max_tokens: int = DEFAULT_CLIENT_MAX_TOKENS,
         json_mode: str = "auto",
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -138,7 +141,7 @@ class OllamaNativeClient(ModelClient):
         model: str,
         timeout: float = 60.0,
         temperature: float = 0.0,
-        max_tokens: int = 4096,
+        max_tokens: int = DEFAULT_CLIENT_MAX_TOKENS,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model

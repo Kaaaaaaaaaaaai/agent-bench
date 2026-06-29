@@ -6,7 +6,9 @@
     "benchmark": {
       "name": "SWE-bench",
       "group": "Coding",
-      "capabilities": ["repo_patch"],
+      "capabilities": [
+        "repo_patch"
+      ],
       "homepage": "https://github.com/SWE-bench/SWE-bench",
       "repository": "https://github.com/SWE-bench/SWE-bench.git",
       "dataset_id": "princeton-nlp/SWE-bench",
@@ -31,7 +33,10 @@
     "benchmark": {
       "name": "GDPval",
       "group": "Work",
-      "capabilities": ["file_artifact", "external_data_required"],
+      "capabilities": [
+        "file_artifact",
+        "external_data_required"
+      ],
       "homepage": "https://huggingface.co/datasets/openai/gdpval",
       "repository": "https://huggingface.co/datasets/openai/gdpval",
       "dataset_id": "openai/gdpval",
@@ -56,7 +61,9 @@
     "benchmark": {
       "name": "PaperBench",
       "group": "Research",
-      "capabilities": ["file_artifact"],
+      "capabilities": [
+        "file_artifact"
+      ],
       "homepage": "https://github.com/openai/frontier-evals/tree/main/project/paperbench",
       "repository": "https://github.com/openai/frontier-evals.git",
       "ref": "main",
@@ -80,7 +87,9 @@
     "benchmark": {
       "name": "SWE-Lancer",
       "group": "Coding",
-      "capabilities": ["repo_patch"],
+      "capabilities": [
+        "repo_patch"
+      ],
       "homepage": "https://github.com/openai/frontier-evals/tree/main/project/swelancer",
       "repository": "https://github.com/openai/frontier-evals.git",
       "ref": "main",
@@ -104,7 +113,10 @@
     "benchmark": {
       "name": "MLE-bench",
       "group": "Machine Learning",
-      "capabilities": ["file_artifact", "external_data_required"],
+      "capabilities": [
+        "file_artifact",
+        "external_data_required"
+      ],
       "homepage": "https://github.com/openai/mle-bench",
       "repository": "https://github.com/openai/mle-bench.git",
       "ref": "main",
@@ -128,7 +140,9 @@
     "benchmark": {
       "name": "SWE-bench Verified",
       "group": "Coding",
-      "capabilities": ["repo_patch"],
+      "capabilities": [
+        "repo_patch"
+      ],
       "homepage": "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified",
       "repository": "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified",
       "dataset_id": "princeton-nlp/SWE-bench_Verified",
@@ -153,7 +167,10 @@
     "benchmark": {
       "name": "AutomationBench",
       "group": "Work",
-      "capabilities": ["tool_call", "external_data_required"],
+      "capabilities": [
+        "tool_call",
+        "external_data_required"
+      ],
       "homepage": "https://github.com/zapier/AutomationBench",
       "repository": "https://github.com/zapier/AutomationBench.git",
       "ref": "main",
@@ -177,7 +194,9 @@
     "benchmark": {
       "name": "OSWorld",
       "group": "GUI",
-      "capabilities": ["browser_or_gui"],
+      "capabilities": [
+        "browser_or_gui"
+      ],
       "homepage": "https://github.com/xlang-ai/OSWorld",
       "repository": "https://github.com/xlang-ai/OSWorld.git",
       "ref": "main",
@@ -197,36 +216,14 @@
   {
     "id": "PB_009",
     "type": "external_benchmark",
-    "question": "Run Humanity's Last Exam locally through the Docker-backed public benchmark adapter.",
-    "benchmark": {
-      "name": "Humanity's Last Exam",
-      "group": "Reasoning",
-      "capabilities": ["chat_answer", "external_data_required"],
-      "homepage": "https://github.com/centerforaisafety/hle",
-      "repository": "https://github.com/centerforaisafety/hle.git",
-      "dataset_id": "cais/hle",
-      "ref": "main",
-      "subdir": "",
-      "license": "MIT",
-      "credit": "Center for AI Safety Humanity's Last Exam authors",
-      "citation": "https://github.com/centerforaisafety/hle",
-      "docker": {
-        "image": "agent-bench-external:python3.12",
-        "setup": [],
-        "command": "agent-bench-probe --benchmark \"Humanity's Last Exam\" --kind public-benchmark",
-        "environment": [],
-        "volumes": []
-      }
-    }
-  },
-  {
-    "id": "PB_010",
-    "type": "external_benchmark",
     "question": "Run BioMystery Bench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
       "name": "BioMystery Bench",
       "group": "Biosecurity",
-      "capabilities": ["chat_answer", "external_data_required"],
+      "capabilities": [
+        "chat_answer",
+        "external_data_required"
+      ],
       "homepage": "https://huggingface.co/datasets/Anthropic/BioMysteryBench-preview",
       "repository": "https://huggingface.co/datasets/Anthropic/BioMysteryBench-preview",
       "dataset_id": "Anthropic/BioMysteryBench-preview",
@@ -239,19 +236,24 @@
         "image": "agent-bench-external:python3.12",
         "setup": [],
         "command": "agent-bench-probe --benchmark \"BioMystery Bench\" --kind public-benchmark",
-        "environment": ["AGENT_BENCH_GIT_LFS_SKIP_SMUDGE=0", "AGENT_BENCH_GIT_LFS_PULL=1"],
+        "environment": [
+          "AGENT_BENCH_GIT_LFS_SKIP_SMUDGE=0",
+          "AGENT_BENCH_GIT_LFS_PULL=1"
+        ],
         "volumes": []
       }
     }
   },
   {
-    "id": "PB_011",
+    "id": "PB_010",
     "type": "external_benchmark",
     "question": "Run ExploitBench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
       "name": "ExploitBench",
       "group": "Security",
-      "capabilities": ["tool_call"],
+      "capabilities": [
+        "tool_call"
+      ],
       "homepage": "https://github.com/exploitbench/exploitbench",
       "repository": "https://github.com/exploitbench/exploitbench.git",
       "ref": "main",
@@ -269,13 +271,15 @@
     }
   },
   {
-    "id": "PB_012",
+    "id": "PB_011",
     "type": "external_benchmark",
     "question": "Run codeneedle locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
       "name": "codeneedle",
       "group": "Long Context",
-      "capabilities": ["chat_answer"],
+      "capabilities": [
+        "chat_answer"
+      ],
       "homepage": "https://github.com/alexziskind1/codeneedle",
       "repository": "https://github.com/alexziskind1/codeneedle.git",
       "ref": "main",
@@ -293,13 +297,16 @@
     }
   },
   {
-    "id": "PB_013",
+    "id": "PB_012",
     "type": "external_benchmark",
     "question": "Run StockBench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
       "name": "StockBench",
       "group": "Finance",
-      "capabilities": ["chat_answer", "external_data_required"],
+      "capabilities": [
+        "chat_answer",
+        "external_data_required"
+      ],
       "homepage": "https://github.com/ChenYXxxx/stockbench",
       "repository": "https://github.com/ChenYXxxx/stockbench.git",
       "ref": "main",
@@ -317,13 +324,16 @@
     }
   },
   {
-    "id": "PB_014",
+    "id": "PB_013",
     "type": "external_benchmark",
     "question": "Run InvestorBench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
       "name": "InvestorBench",
       "group": "Finance",
-      "capabilities": ["chat_answer", "external_data_required"],
+      "capabilities": [
+        "chat_answer",
+        "external_data_required"
+      ],
       "homepage": "https://github.com/felis33/INVESTOR-BENCH",
       "repository": "https://github.com/felis33/INVESTOR-BENCH.git",
       "ref": "main",
@@ -341,13 +351,15 @@
     }
   },
   {
-    "id": "PB_015",
+    "id": "PB_014",
     "type": "external_benchmark",
     "question": "Run QuantCode-Bench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
       "name": "QuantCode-Bench",
       "group": "Finance",
-      "capabilities": ["repo_patch"],
+      "capabilities": [
+        "repo_patch"
+      ],
       "homepage": "https://github.com/LimexAILab/QuantCode-Bench",
       "repository": "https://github.com/LimexAILab/QuantCode-Bench.git",
       "ref": "main",
@@ -365,13 +377,16 @@
     }
   },
   {
-    "id": "PB_016",
+    "id": "PB_015",
     "type": "external_benchmark",
     "question": "Run FinMCP-Bench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
       "name": "FinMCP-Bench",
       "group": "Finance",
-      "capabilities": ["tool_call", "external_data_required"],
+      "capabilities": [
+        "tool_call",
+        "external_data_required"
+      ],
       "homepage": "https://huggingface.co/datasets/DianJin/FinMCP-Bench",
       "repository": "https://huggingface.co/datasets/DianJin/FinMCP-Bench",
       "dataset_id": "DianJin/FinMCP-Bench",
@@ -390,13 +405,16 @@
     }
   },
   {
-    "id": "PB_017",
+    "id": "PB_016",
     "type": "external_benchmark",
     "question": "Run FinToolBench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
       "name": "FinToolBench",
       "group": "Finance",
-      "capabilities": ["tool_call", "external_data_required"],
+      "capabilities": [
+        "tool_call",
+        "external_data_required"
+      ],
       "homepage": "https://github.com/Double-wk/FinToolBench",
       "repository": "https://github.com/Double-wk/FinToolBench.git",
       "ref": "main",
@@ -414,13 +432,16 @@
     }
   },
   {
-    "id": "PB_018",
+    "id": "PB_017",
     "type": "external_benchmark",
     "question": "Run Finance Agent v2 locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
       "name": "Finance Agent v2",
       "group": "Finance",
-      "capabilities": ["tool_call", "external_data_required"],
+      "capabilities": [
+        "tool_call",
+        "external_data_required"
+      ],
       "homepage": "https://github.com/vals-ai/finance-agent-v2",
       "repository": "https://github.com/vals-ai/finance-agent-v2.git",
       "ref": "main",
@@ -438,13 +459,15 @@
     }
   },
   {
-    "id": "PB_019",
+    "id": "PB_018",
     "type": "external_benchmark",
     "question": "Run FinanceMath locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
       "name": "FinanceMath",
       "group": "Finance",
-      "capabilities": ["chat_answer"],
+      "capabilities": [
+        "chat_answer"
+      ],
       "homepage": "https://github.com/yale-nlp/FinanceMath",
       "repository": "https://github.com/yale-nlp/FinanceMath.git",
       "ref": "main",
@@ -462,13 +485,16 @@
     }
   },
   {
-    "id": "PB_020",
+    "id": "PB_019",
     "type": "external_benchmark",
     "question": "Run EDINET-Bench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
       "name": "EDINET-Bench",
       "group": "Finance",
-      "capabilities": ["chat_answer", "external_data_required"],
+      "capabilities": [
+        "chat_answer",
+        "external_data_required"
+      ],
       "homepage": "https://github.com/SakanaAI/EDINET-Bench",
       "repository": "https://github.com/SakanaAI/EDINET-Bench.git",
       "ref": "main",

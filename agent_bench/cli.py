@@ -3,7 +3,9 @@ import asyncio
 from pathlib import Path
 
 from agent_bench.runner import (
+    DEFAULT_EXTERNAL_ASSET_ROOT,
     DEFAULT_EXTERNAL_TIMEOUT_SECONDS,
+    DEFAULT_MAX_TOKENS,
     DEFAULT_MODEL_REQUEST_TIMEOUT_SECONDS,
     DEFAULT_TASK_TIMEOUT_SECONDS,
     RunConfig,
@@ -45,11 +47,16 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--limit", type=int, default=None)
     run.add_argument("--include", default=None, help="Comma-separated category, source file, or task IDs")
     run.add_argument("--temperature", type=float, default=0.0)
-    run.add_argument("--max-tokens", type=int, default=4096)
+    run.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
     run.add_argument("--json-mode", choices=["auto", "on", "off"], default="auto")
     run.add_argument("--sandbox", choices=["docker", "subprocess"], default="docker")
     run.add_argument("--sandbox-image", default="agent-bench-python:3.12")
     run.add_argument("--external-launcher-image", default="agent-bench-external:python3.12")
+    run.add_argument(
+        "--asset-root",
+        default=str(DEFAULT_EXTERNAL_ASSET_ROOT),
+        help="Host directory for external benchmark asset cache; mount this path into Docker runs",
+    )
 
     return parser
 
@@ -82,17 +89,21 @@ def main(argv: list[str] | None = None) -> int:
             sandbox=args.sandbox,
             sandbox_image=args.sandbox_image,
             external_launcher_image=args.external_launcher_image,
+            asset_root=Path(args.asset_root),
         )
         summary = asyncio.run(run_benchmark(config))
         print(f"Tasks: {summary['passed_count']} / {summary['task_count']} passed")
-        print(f"Total score: {summary['total_score']:.2f}%")
-        if summary.get("raw_score") != summary.get("total_score") or summary.get("skipped_count"):
-            print(f"Raw score: {summary['raw_score']:.2f}%")
+        print(f"Valid score: {summary['score_valid_tasks_only']:.2f}%")
+        if "model_score_valid_tasks_only" in summary:
+            print(f"Model-valid score: {summary['model_score_valid_tasks_only']:.2f}%")
+        if summary.get("raw_score_all_tasks") != summary.get("score_valid_tasks_only") or summary.get("skipped_count"):
+            print(f"Raw score: {summary['raw_score_all_tasks']:.2f}%")
             print(
-                "Skipped/setup/parse: "
-                f"{summary.get('skipped_count', 0)} skipped, "
+                "Coverage/setup/grader: "
+                f"{summary.get('skipped_count', 0)} coverage gaps, "
                 f"{summary.get('setup_failed_count', 0)} setup failed, "
-                f"{summary.get('judge_parse_failed_count', 0)} judge parse failed"
+                f"{summary.get('grader_failure_count', summary.get('judge_parse_failed_count', 0))} "
+                "grader failed"
             )
         print(f"Run time: {summary['total_run_duration_seconds']:.3f}s")
         if summary["average_time_to_first_token_seconds"] is not None:

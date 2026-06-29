@@ -12,10 +12,13 @@ from pathlib import Path
 from typing import Any
 
 from agent_bench.models import Task
+from agent_bench.statuses import FAILED_HARNESS_SETUP, TIMED_OUT
 
 
 DEFAULT_EXTERNAL_IMAGE = "agent-bench-external:python3.12"
 CONTAINER_OUTPUT_DIR = "/outputs"
+DEFAULT_ASSET_ROOT = Path("/tmp/agent-bench-assets")
+CONTAINER_ASSET_ROOT = "/asset-cache"
 IMAGE_FINGERPRINT_LABEL = "agent-bench.external-fingerprint"
 _IMAGE_BUILD_LOCK = threading.Lock()
 
@@ -40,7 +43,9 @@ class ExternalBenchmarkConfig:
     output_dir: Path
     timeout: float
     limit: int | None = None
-    model_request_timeout: float = 600.0
+    model_request_timeout: float = 1800.0
+    max_tokens: int = 16384
+    asset_root: Path = field(default_factory=lambda: Path(os.environ.get("AGENT_BENCH_EXTERNAL_ASSET_ROOT", DEFAULT_ASSET_ROOT)))
     docker_bin: str = "docker"
     launcher_image: str = DEFAULT_EXTERNAL_IMAGE
     source_root: Path = Path(".")
@@ -62,6 +67,7 @@ class ExternalBenchmarkRunner:
 
         task_output_dir = config.output_dir / "external" / task.id
         task_output_dir.mkdir(parents=True, exist_ok=True)
+        config.asset_root.mkdir(parents=True, exist_ok=True)
 
         benchmark = task.benchmark
         docker = benchmark["docker"]
@@ -86,6 +92,8 @@ class ExternalBenchmarkRunner:
             "host",
             "-v",
             "/var/run/docker.sock:/var/run/docker.sock",
+            "-v",
+            f"{config.asset_root}:{CONTAINER_ASSET_ROOT}",
         ]
         for volume in docker.get("volumes", []):
             command.extend(["-v", volume])
@@ -103,6 +111,13 @@ class ExternalBenchmarkRunner:
             )
         except subprocess.TimeoutExpired as exc:
             _remove_container(config, container_name)
+            result_payload = _synthetic_result_payload(
+                task,
+                TIMED_OUT,
+                f"External benchmark timed out after {config.timeout:.1f}s",
+                score=0.0,
+            )
+            _write_result_payload(task_output_dir / "agent_bench_result.json", result_payload)
             return ExternalBenchmarkResult(
                 score=0.0,
                 passed=False,
@@ -110,7 +125,16 @@ class ExternalBenchmarkRunner:
                 output=_timeout_output(exc),
                 error=f"External benchmark timed out after {config.timeout:.1f}s",
                 timed_out=True,
-                details={"output_dir": str(task_output_dir)},
+                details={
+                    "benchmark": task.benchmark["name"],
+                    "group": task.benchmark.get("group", task.category),
+                    "homepage": task.benchmark["homepage"],
+                    "license": task.benchmark["license"],
+                    "credit": task.benchmark["credit"],
+                    "citation": task.benchmark.get("citation", task.benchmark["homepage"]),
+                    "output_dir": str(task_output_dir),
+                    "result": result_payload,
+                },
             )
 
         copy_error = _copy_container_outputs(config, container_name, task_output_dir)
@@ -120,12 +144,22 @@ class ExternalBenchmarkRunner:
         output = (completed.stdout or "") + (completed.stderr or "")
         if copy_error:
             output = f"{output}{copy_error}\n"
-        score = _coerce_score(payload.get("score"), completed.returncode == 0)
+        score = _coerce_score(payload.get("score"), completed.returncode == 0 and bool(payload))
         error = payload.get("error") if isinstance(payload.get("error"), str) else None
+        if not payload and not error:
+            error = "External benchmark did not produce agent_bench_result.json"
+            payload = _synthetic_result_payload(task, FAILED_HARNESS_SETUP, error, score=0.0)
+            _write_result_payload(result_file, payload)
         if copy_error and not error:
             error = copy_error
+            if not payload:
+                payload = _synthetic_result_payload(task, FAILED_HARNESS_SETUP, error, score=0.0)
+                _write_result_payload(result_file, payload)
         if completed.returncode != 0 and not error:
             error = f"External benchmark exited with code {completed.returncode}"
+            if not payload:
+                payload = _synthetic_result_payload(task, FAILED_HARNESS_SETUP, error, score=0.0)
+                _write_result_payload(result_file, payload)
         details = {
             "benchmark": benchmark["name"],
             "group": benchmark.get("group", task.category),
@@ -273,7 +307,9 @@ def _docker_env(task: Task, benchmark: dict[str, Any], docker: dict[str, Any], c
         "AGENT_BENCH_BASE_URL": config.base_url,
         "AGENT_BENCH_MODEL": config.model,
         "AGENT_BENCH_MODEL_REQUEST_TIMEOUT": str(config.model_request_timeout),
+        "AGENT_BENCH_MAX_TOKENS": str(config.max_tokens),
         "AGENT_BENCH_OUTPUT_DIR": CONTAINER_OUTPUT_DIR,
+        "AGENT_BENCH_ASSET_ROOT": CONTAINER_ASSET_ROOT,
     }
     if config.api_key_env:
         env["AGENT_BENCH_API_KEY_ENV"] = config.api_key_env
@@ -301,6 +337,71 @@ def _load_result_payload(path: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _write_result_payload(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _synthetic_result_payload(task: Task, status: str, error: str, score: float = 0.0) -> dict[str, Any]:
+    benchmark = task.benchmark
+    required_capabilities = _benchmark_capabilities(benchmark)
+    capability_contract = _synthetic_capability_contract(required_capabilities)
+    return {
+        "benchmark": benchmark.get("name", task.id),
+        "group": benchmark.get("group", task.category),
+        "status": status,
+        "score": score,
+        "raw_score": score,
+        "valid_score": 0.0,
+        "error": error,
+        "repository": benchmark.get("repository", benchmark.get("homepage", "")),
+        "repository_ref": benchmark.get("ref", ""),
+        "required_capabilities": required_capabilities,
+        "supported_capabilities": [
+            capability
+            for capability, support in capability_contract.items()
+            if support.get("supported") is True
+        ],
+        "capability_contract": capability_contract,
+        "unsupported_capabilities": [],
+        "capabilities_verified": False,
+        "extracted_task_count": 0,
+        "evaluated_task_count": 0,
+        "valid_evaluated_task_count": 0,
+        "evaluation_passed_count": 0,
+        "skipped_task_count": 0,
+        "judge_parse_failure_count": 0,
+        "judge_parse_repaired_count": 0,
+        "model_evals": [],
+        "model_eval": {},
+        "status_counts": {status: 1},
+    }
+
+
+def _synthetic_capability_contract(required_capabilities: list[str]) -> dict[str, dict[str, Any]]:
+    supported = {"chat_answer", "external_data_required"}
+    reasons = {
+        "browser_or_gui": "No real desktop/browser environment adapter is implemented",
+        "tool_call": "No benchmark-native stateful tool adapter is implemented",
+        "repo_patch": "External benchmark did not complete before repo_patch workspace/grader verification",
+        "file_artifact": "External benchmark did not complete before file_artifact asset/output verification",
+    }
+    contract: dict[str, dict[str, Any]] = {}
+    for capability in required_capabilities:
+        is_supported = capability in supported
+        contract[capability] = {
+            "capability": capability,
+            "workspace": is_supported,
+            "tools": is_supported,
+            "output_collection": is_supported,
+            "grader": is_supported,
+            "native": is_supported,
+            "supported": is_supported,
+            "reason": "" if is_supported else reasons.get(capability, "External benchmark did not complete"),
+        }
+    return contract
 
 
 def _coerce_score(value: Any, success: bool) -> float:

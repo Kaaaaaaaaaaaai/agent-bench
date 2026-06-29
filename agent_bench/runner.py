@@ -20,7 +20,9 @@ from agent_bench.verifiers import grade_task
 MAX_EMPTY_RESPONSES_PER_TASK = 3
 DEFAULT_TASK_TIMEOUT_SECONDS = 60.0
 DEFAULT_EXTERNAL_TIMEOUT_SECONDS = 6 * 60 * 60.0
-DEFAULT_MODEL_REQUEST_TIMEOUT_SECONDS = 10 * 60.0
+DEFAULT_MODEL_REQUEST_TIMEOUT_SECONDS = 30 * 60.0
+DEFAULT_MAX_TOKENS = 16384
+DEFAULT_EXTERNAL_ASSET_ROOT = Path("/tmp/agent-bench-assets")
 
 
 @dataclass(slots=True)
@@ -39,11 +41,12 @@ class RunConfig:
     limit: int | None = None
     include: set[str] | None = None
     temperature: float = 0.0
-    max_tokens: int = 4096
+    max_tokens: int = DEFAULT_MAX_TOKENS
     json_mode: str = "auto"
     sandbox: str = "docker"
     sandbox_image: str = "agent-bench-python:3.12"
     external_launcher_image: str = "agent-bench-external:python3.12"
+    asset_root: Path = DEFAULT_EXTERNAL_ASSET_ROOT
 
 
 async def run_benchmark(config: RunConfig) -> dict[str, Any]:
@@ -175,18 +178,22 @@ async def _run_external_benchmark(
             timeout=config.external_timeout,
             limit=config.limit,
             model_request_timeout=config.model_request_timeout,
+            max_tokens=config.max_tokens,
+            asset_root=config.asset_root,
             launcher_image=config.external_launcher_image,
             source_root=Path(os.environ.get("AGENT_BENCH_SOURCE_ROOT", Path.cwd())),
         ),
     )
     details = dict(result.details)
     details["output_tail"] = result.output
+    result_payload = details.get("result") if isinstance(details.get("result"), dict) else {}
+    benchmark_status = result_payload.get("status") if isinstance(result_payload.get("status"), str) else ""
     return ModelResponse(
         task_id=task.id,
         model=config.model or config.provider,
         raw_response=json.dumps(
             {
-                "status": "completed" if result.error is None else "error",
+                "status": benchmark_status or ("completed" if result.error is None else "error"),
                 "score": result.score,
                 "error": result.error,
                 "timed_out": result.timed_out,
@@ -221,22 +228,15 @@ def _metadata(
         "provider": config.provider,
         "base_url": config.base_url or "",
         "model": config.model or ("mock-perfect" if config.provider == "mock" else ""),
-        "api_key_env": config.api_key_env or "",
-        "tasks": str(config.tasks_dir),
         "task_count": task_count,
         "output_dir": str(output_dir),
         "run_duration_seconds": run_duration_seconds,
         "request_concurrency": config.request_concurrency,
         "eval_concurrency": config.eval_concurrency,
-        "timeout": config.timeout,
         "external_timeout": config.external_timeout,
         "model_request_timeout": config.model_request_timeout,
-        "temperature": config.temperature,
         "max_tokens": config.max_tokens,
         "json_mode": config.json_mode,
-        "sandbox": config.sandbox,
-        "sandbox_image": config.sandbox_image if config.sandbox == "docker" else "",
-        "external_launcher_image": config.external_launcher_image,
     }
 
 

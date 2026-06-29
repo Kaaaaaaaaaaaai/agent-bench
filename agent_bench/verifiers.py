@@ -5,6 +5,22 @@ from typing import Any
 
 from agent_bench.models import GradeResult, ModelResponse, Task
 from agent_bench.sandbox import BaseSandbox
+from agent_bench.statuses import (
+    FAILED_DATASET_EXTRACTION,
+    FAILED_GRADER,
+    FAILED_HARNESS_SETUP,
+    FAILED_MISSING_ASSETS,
+    FAILED_MODEL_ANSWER,
+    FAILED_MODEL_FORMAT,
+    FAILED_TOKEN_BUDGET,
+    INVALID_EVALUATION_STATUSES,
+    PASSED,
+    SKIPPED_UNSUPPORTED_CAPABILITY,
+    STRICT_STATUSES,
+    TIMED_OUT,
+    is_skipped_like_status,
+    normalize_status,
+)
 
 
 def parse_model_json(raw_response: str) -> tuple[dict[str, Any] | None, str | None]:
@@ -44,7 +60,7 @@ async def grade_task(
             latency_seconds=response.latency_seconds,
             **_response_measurements(response),
             error=response.error,
-            status="failed_harness_setup",
+            status=FAILED_HARNESS_SETUP,
         )
     if task.is_multiple_choice:
         return grade_multiple_choice(task, response)
@@ -65,7 +81,7 @@ async def grade_task(
         latency_seconds=response.latency_seconds,
         **_response_measurements(response),
         error=f"Unsupported task type: {task.type}",
-        status="failed_harness_setup",
+        status=FAILED_HARNESS_SETUP,
     )
 
 
@@ -201,7 +217,7 @@ async def grade_coding(
         confidence=confidence,
         error=sandbox_result.error,
         timed_out=sandbox_result.timed_out,
-        status="timed_out" if sandbox_result.timed_out else "",
+        status=TIMED_OUT if sandbox_result.timed_out else "",
         details={
             "passed_cases": sandbox_result.passed_cases,
             "total_cases": total,
@@ -222,7 +238,7 @@ def _invalid_json_result(task: Task, response: ModelResponse, error: str | None)
         latency_seconds=response.latency_seconds,
         **_response_measurements(response),
         error=error,
-        status="failed_model_answer",
+        status=FAILED_MODEL_FORMAT,
     )
 
 
@@ -286,8 +302,6 @@ def _recall_token_f1(expected: str, actual: str) -> tuple[float, int, int, int]:
         return 1.0, true_positives, false_positives, false_negatives
     return (2 * true_positives) / denominator, true_positives, false_positives, false_negatives
 
-
-
 def grade_external_benchmark(task: Task, response: ModelResponse) -> GradeResult:
     payload, error = parse_model_json(response.raw_response)
     if payload is None:
@@ -299,23 +313,89 @@ def grade_external_benchmark(task: Task, response: ModelResponse) -> GradeResult
     benchmark_error = payload.get("error") if isinstance(payload.get("error"), str) else None
     details = payload.get("details") if isinstance(payload.get("details"), dict) else {}
     group = details.get("group")
-    status = payload.get("status") if isinstance(payload.get("status"), str) else ""
-    if not status:
-        result_payload = details.get("result") if isinstance(details.get("result"), dict) else {}
-        status = result_payload.get("status") if isinstance(result_payload.get("status"), str) else ""
+    result_payload = details.get("result") if isinstance(details.get("result"), dict) else {}
+    result_status = result_payload.get("status") if isinstance(result_payload.get("status"), str) else ""
+    status = _external_benchmark_status(
+        result_status,
+        payload.get("status") if isinstance(payload.get("status"), str) else "",
+        result_payload,
+        normalized_score,
+        benchmark_error,
+    )
+    if is_skipped_like_status(status):
+        benchmark_error = None
+    elif status in INVALID_EVALUATION_STATUSES and not benchmark_error:
+        benchmark_error = _external_status_error(status, result_payload)
     return GradeResult(
         task_id=task.id,
         category=group if isinstance(group, str) and group.strip() else task.category,
         kind=task.type,
         score=normalized_score,
         max_score=1.0,
-        passed=normalized_score >= 1.0 and benchmark_error is None,
+        passed=(
+            normalized_score >= 1.0
+            and benchmark_error is None
+            and status == PASSED
+        ),
         json_valid=True,
         latency_seconds=response.latency_seconds,
         **_response_measurements(response),
-        answer=payload.get("status"),
+        answer=status,
         error=benchmark_error,
-        timed_out=bool(payload.get("timed_out", False)),
+        timed_out=bool(payload.get("timed_out", False)) or status == TIMED_OUT,
         status=status,
         details=details,
     )
+
+def _external_benchmark_status(
+    result_status: str,
+    payload_status: str,
+    result_payload: dict[str, Any],
+    score: float,
+    error: str | None,
+) -> str:
+    status = normalize_status(result_status or payload_status)
+    if status in STRICT_STATUSES:
+        return status
+    status_counts = result_payload.get("status_counts")
+    if isinstance(status_counts, dict):
+        evaluated_count = result_payload.get("evaluated_task_count")
+        valid_count = result_payload.get("valid_evaluated_task_count")
+        if isinstance(evaluated_count, int) and isinstance(valid_count, int):
+            if evaluated_count > 0 and valid_count <= 0:
+                for invalid_status in (
+                    FAILED_HARNESS_SETUP,
+                    FAILED_DATASET_EXTRACTION,
+                    FAILED_GRADER,
+                    FAILED_TOKEN_BUDGET,
+                    TIMED_OUT,
+                    FAILED_MISSING_ASSETS,
+                    SKIPPED_UNSUPPORTED_CAPABILITY,
+                ):
+                    if _status_count(status_counts, invalid_status):
+                        return invalid_status
+    if status == "error":
+        return FAILED_HARNESS_SETUP
+    if error:
+        return FAILED_HARNESS_SETUP
+    return PASSED if score >= 1.0 else FAILED_MODEL_ANSWER
+
+
+def _external_status_error(status: str, result_payload: dict[str, Any]) -> str:
+    error = result_payload.get("error")
+    if isinstance(error, str) and error:
+        return error
+    status_counts = result_payload.get("status_counts")
+    if isinstance(status_counts, dict):
+        total = sum(count for count in status_counts.values() if isinstance(count, int))
+        if total > 0:
+            return f"All {total} benchmark record evaluation(s) were invalid: {status.replace('_', ' ')}"
+    return status.replace("_", " ")
+
+
+def _status_count(status_counts: dict[str, Any], status: str) -> int:
+    normalized = normalize_status(status)
+    for key, value in status_counts.items():
+        if normalize_status(key) == normalized and isinstance(value, int):
+            return value
+    return 0
