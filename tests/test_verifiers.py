@@ -246,7 +246,7 @@ def test_grade_external_benchmark_treats_unsupported_capability_as_coverage_gap(
     result = grade_external_benchmark(task, response)
 
     assert result.status == "skipped_unsupported_capability"
-    assert result.error is None
+    assert result.error == "Benchmark requires unsupported capability/capabilities: repo_patch"
     assert result.category == "Coding"
 
 

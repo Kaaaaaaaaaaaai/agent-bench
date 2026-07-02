@@ -9,7 +9,9 @@ from agent_bench.statuses import (
     FAILED_DATASET_EXTRACTION,
     FAILED_GRADER,
     FAILED_HARNESS_SETUP,
+    FAILED_INVALID_TASK_CONTEXT,
     FAILED_MISSING_ASSETS,
+    FAILED_MISSING_REQUIRED_TOOL,
     FAILED_MODEL_ANSWER,
     FAILED_MODEL_FORMAT,
     FAILED_TOKEN_BUDGET,
@@ -18,7 +20,6 @@ from agent_bench.statuses import (
     SKIPPED_UNSUPPORTED_CAPABILITY,
     STRICT_STATUSES,
     TIMED_OUT,
-    is_skipped_like_status,
     normalize_status,
 )
 
@@ -106,7 +107,7 @@ def grade_multiple_choice(task: Task, response: ModelResponse) -> GradeResult:
             **_response_measurements(response),
             confidence=confidence,
             error="answer must be a choice letter string or list of strings",
-            details={"expected": expected},
+            details=_extraction_details(response, None, "failed") | {"expected": expected},
         )
     passed = set(answer) == set(expected) and len(answer) == len(expected)
     return GradeResult(
@@ -121,7 +122,7 @@ def grade_multiple_choice(task: Task, response: ModelResponse) -> GradeResult:
         **_response_measurements(response),
         answer=answer,
         confidence=confidence,
-        details={"expected": expected},
+        details=_extraction_details(response, answer, "extracted") | {"expected": expected},
     )
 
 
@@ -145,6 +146,7 @@ def grade_text_recall(task: Task, response: ModelResponse) -> GradeResult:
             **_response_measurements(response),
             confidence=confidence,
             error="answer must be a string",
+            details=_extraction_details(response, None, "failed"),
         )
 
     expected = _normalize_recall_text(task.expected_text or "")
@@ -164,6 +166,7 @@ def grade_text_recall(task: Task, response: ModelResponse) -> GradeResult:
         answer=answer,
         confidence=confidence,
         details={
+            **_extraction_details(response, answer, "extracted"),
             "expected": task.expected_text or "",
             "true_positives": true_positives,
             "false_positives": false_positives,
@@ -198,6 +201,7 @@ async def grade_coding(
             **_response_measurements(response),
             confidence=confidence,
             error="code must be a non-empty string",
+            details=_extraction_details(response, None, "failed"),
         )
 
     sandbox_result = await sandbox.run(task, _clean_code(code), timeout_seconds)
@@ -219,6 +223,7 @@ async def grade_coding(
         timed_out=sandbox_result.timed_out,
         status=TIMED_OUT if sandbox_result.timed_out else "",
         details={
+            **_extraction_details(response, "<code>", "extracted"),
             "passed_cases": sandbox_result.passed_cases,
             "total_cases": total,
             "case_results": sandbox_result.case_results,
@@ -239,6 +244,7 @@ def _invalid_json_result(task: Task, response: ModelResponse, error: str | None)
         **_response_measurements(response),
         error=error,
         status=FAILED_MODEL_FORMAT,
+        details=_extraction_details(response, None, "failed"),
     )
 
 
@@ -247,6 +253,14 @@ def _response_measurements(response: ModelResponse) -> dict[str, Any]:
         "time_to_first_token_seconds": response.time_to_first_token_seconds,
         "tokens_per_second": response.tokens_per_second,
         "output_token_count": response.output_token_count,
+    }
+
+
+def _extraction_details(response: ModelResponse, extracted_answer: Any, status: str) -> dict[str, Any]:
+    return {
+        "raw_model_response": response.raw_response,
+        "extracted_answer": extracted_answer,
+        "extraction_status": status,
     }
 
 
@@ -311,7 +325,8 @@ def grade_external_benchmark(task: Task, response: ModelResponse) -> GradeResult
         score = 0.0
     normalized_score = max(0.0, min(1.0, float(score)))
     benchmark_error = payload.get("error") if isinstance(payload.get("error"), str) else None
-    details = payload.get("details") if isinstance(payload.get("details"), dict) else {}
+    details = dict(payload.get("details")) if isinstance(payload.get("details"), dict) else {}
+    _add_benchmark_descriptor_details(task, details)
     group = details.get("group")
     result_payload = details.get("result") if isinstance(details.get("result"), dict) else {}
     result_status = result_payload.get("status") if isinstance(result_payload.get("status"), str) else ""
@@ -322,9 +337,7 @@ def grade_external_benchmark(task: Task, response: ModelResponse) -> GradeResult
         normalized_score,
         benchmark_error,
     )
-    if is_skipped_like_status(status):
-        benchmark_error = None
-    elif status in INVALID_EVALUATION_STATUSES and not benchmark_error:
+    if status in INVALID_EVALUATION_STATUSES and not benchmark_error:
         benchmark_error = _external_status_error(status, result_payload)
     return GradeResult(
         task_id=task.id,
@@ -347,6 +360,19 @@ def grade_external_benchmark(task: Task, response: ModelResponse) -> GradeResult
         details=details,
     )
 
+
+def _add_benchmark_descriptor_details(task: Task, details: dict[str, Any]) -> None:
+    benchmark = task.benchmark if isinstance(task.benchmark, dict) else {}
+    details.setdefault("suite_id", task.id)
+    details.setdefault("benchmark", benchmark.get("name", task.id))
+    details.setdefault("group", benchmark.get("group", task.category))
+    details.setdefault("homepage", benchmark.get("homepage", ""))
+    details.setdefault("license", benchmark.get("license", ""))
+    details.setdefault("credit", benchmark.get("credit", ""))
+    details.setdefault("citation", benchmark.get("citation", benchmark.get("homepage", "")))
+    details["required_capabilities"] = benchmark.get("capabilities", [])
+
+
 def _external_benchmark_status(
     result_status: str,
     payload_status: str,
@@ -368,6 +394,8 @@ def _external_benchmark_status(
                     FAILED_DATASET_EXTRACTION,
                     FAILED_GRADER,
                     FAILED_TOKEN_BUDGET,
+                    FAILED_MISSING_REQUIRED_TOOL,
+                    FAILED_INVALID_TASK_CONTEXT,
                     TIMED_OUT,
                     FAILED_MISSING_ASSETS,
                     SKIPPED_UNSUPPORTED_CAPABILITY,

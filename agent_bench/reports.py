@@ -7,10 +7,39 @@ from pathlib import Path
 from typing import Any
 
 from agent_bench.models import GradeResult, ModelResponse
+from agent_bench.statuses import (
+    FAILED_DATASET_EXTRACTION,
+    FAILED_GRADER,
+    FAILED_HARNESS_SETUP,
+    FAILED_INVALID_TASK_CONTEXT,
+    FAILED_MISSING_ASSETS,
+    FAILED_MISSING_REQUIRED_TOOL,
+    FAILED_MODEL_ANSWER,
+    FAILED_MODEL_FORMAT,
+    FAILED_MODEL_TOOL_USE,
+    FAILED_TOKEN_BUDGET,
+    INVALID_EVALUATION_STATUSES,
+    PASSED,
+    RUN_COMPLETED,
+    RUN_EXECUTION_ERROR,
+    RUN_INFRASTRUCTURE_ERROR,
+    RUN_SKIPPED,
+    SCORE_FAILED_MODEL_ANSWER,
+    SCORE_NOT_APPLICABLE,
+    SCORE_PARTIALLY_CORRECT,
+    SCORE_PASSED,
+    SCORE_UNGRADED,
+    SKIPPED_UNSUPPORTED_CAPABILITY,
+    TIMED_OUT,
+    is_invalid_evaluation_status,
+    normalize_status,
+)
 
 
 RESULT_FIELDS = [
     "task_id",
+    "suite_id",
+    "suite_name",
     "category",
     "kind",
     "score",
@@ -25,7 +54,19 @@ RESULT_FIELDS = [
     "confidence",
     "answer",
     "error",
+    "error_details",
     "status",
+    "run_status",
+    "score_status",
+    "included_in_official_score",
+    "blocker_type",
+    "raw_score",
+    "valid_score",
+    "raw_model_response",
+    "extracted_answer",
+    "extraction_status",
+    "judge_parser_status",
+    "judge_parse_repaired_count",
 ]
 
 
@@ -129,6 +170,14 @@ def render_summary_html(summary: dict[str, Any], results: list[GradeResult]) -> 
       {_benchmark_table(benchmark_results, str(metadata.get("model", "Model")))}
     </section>
     <section>
+      <h2>Profile Coverage</h2>
+      {_profile_table(summary.get("profile_results"))}
+    </section>
+    <section>
+      <h2>Skipped Suites</h2>
+      {_skipped_suite_table(summary.get("skipped_suites"))}
+    </section>
+    <section>
       <h2>Status Distribution</h2>
       {_status_distribution_table(summary)}
     </section>
@@ -160,20 +209,48 @@ def _write_results_csv(path: Path, results: list[GradeResult]) -> None:
         writer = csv.DictWriter(handle, fieldnames=RESULT_FIELDS)
         writer.writeheader()
         for result in results:
-            row = result.to_dict()
+            row = _result_csv_row(result)
             writer.writerow({field: row.get(field) for field in RESULT_FIELDS})
+
+
+def _result_csv_row(result: GradeResult) -> dict[str, Any]:
+    row = result.to_dict()
+    details = result.details if isinstance(result.details, dict) else {}
+    payload = details.get("result") if isinstance(details.get("result"), dict) else {}
+    row["status"] = _result_status(result)
+    row["suite_id"] = details.get("suite_id", result.task_id)
+    row["suite_name"] = _result_benchmark_name(result)
+    row["run_status"] = _run_status(result)
+    row["score_status"] = _score_status(result)
+    row["included_in_official_score"] = _result_status(result) not in INVALID_EVALUATION_STATUSES
+    row["blocker_type"] = _blocker_type(result)
+    row["error_details"] = _result_error_reason(result)
+    row["raw_score"] = _unit_to_percent(payload.get("raw_score"))
+    row["valid_score"] = _unit_to_percent(payload.get("valid_score"))
+    row["raw_model_response"] = details.get("raw_model_response")
+    row["extracted_answer"] = _json_cell(details.get("extracted_answer"))
+    row["extraction_status"] = details.get("extraction_status")
+    row["judge_parser_status"] = payload.get("judge_parser_status")
+    row["judge_parse_repaired_count"] = payload.get("judge_parse_repaired_count")
+    return row
 
 
 def _metric_cards(summary: dict[str, Any]) -> str:
     cards = [
-        ("Valid Score", _format_percent(summary.get("score_valid_tasks_only", summary.get("total_score")))),
+        ("Valid Judged Score", _format_rate(summary.get("valid_judged_score"))),
+        ("Suite Coverage", _format_rate(summary.get("suite_coverage_rate"))),
+        ("Item Coverage", _format_rate(summary.get("item_coverage_rate"))),
+        ("Conservative Score", _format_rate(summary.get("conservative_all_suite_score"))),
         ("Model Score", _format_percent(summary.get("model_score_valid_tasks_only"))),
         ("Raw Score", _format_percent(summary.get("raw_score_all_tasks", summary.get("raw_score")))),
         ("Valid Tasks", _format_integer(summary.get("valid_task_count"))),
         ("Model Valid", _format_integer(summary.get("model_valid_task_count"))),
-        ("Skipped", _format_integer(summary.get("skipped_count"))),
+        ("Skipped Suites", _format_integer(summary.get("skipped_suite_count", summary.get("skipped_count")))),
         ("Setup Failed", _format_integer(summary.get("setup_failed_count"))),
-        ("Grader Failed", _format_integer(summary.get("grader_failure_count", summary.get("judge_parse_failed_count")))),
+        ("Missing Assets", _format_integer(summary.get("missing_asset_count", summary.get("missing_assets_count")))),
+        ("Missing Graders", _format_integer(summary.get("missing_grader_count"))),
+        ("Judge Errors", _format_integer(summary.get("judge_error_count", summary.get("grader_failure_count")))),
+        ("Parser Repairs", _format_integer(summary.get("parser_repair_count"))),
         ("Pass Rate", _format_percent(summary.get("pass_rate"))),
         ("Coding Pass", _format_percent(summary.get("coding_pass_rate"))),
         ("JSON Validity", _format_percent(summary.get("json_validity_rate"))),
@@ -210,6 +287,53 @@ def _status_distribution_table(summary: dict[str, Any]) -> str:
     return (
         "<table><thead><tr><th>Scope</th><th>Status</th><th>Count</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def _profile_table(value: Any) -> str:
+    if not isinstance(value, dict) or not value:
+        return "<table><tbody><tr><td>No benchmark profiles were recorded.</td></tr></tbody></table>"
+    rows = []
+    for profile, data in sorted(value.items()):
+        if not isinstance(data, dict):
+            continue
+        blockers = data.get("blocker_counts")
+        blocker_text = ", ".join(f"{key}: {count}" for key, count in sorted(blockers.items())) if isinstance(blockers, dict) else ""
+        rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(profile))}</td>"
+            f"<td>{int(data.get('valid_judged_suite_count', 0))}/{int(data.get('suite_count', 0))}</td>"
+            f"<td>{_format_rate(data.get('suite_coverage_rate'))}</td>"
+            f"<td>{_format_rate(data.get('valid_judged_score'))}</td>"
+            f"<td>{html.escape(blocker_text)}</td>"
+            "</tr>"
+        )
+    return (
+        "<table><thead><tr><th>Profile</th><th>Runnable Suites</th><th>Coverage</th>"
+        f"<th>Valid Score</th><th>Blockers</th></tr></thead><tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def _skipped_suite_table(value: Any) -> str:
+    if not isinstance(value, list) or not value:
+        return "<table><tbody><tr><td>No skipped suites were recorded.</td></tr></tbody></table>"
+    rows = []
+    for row in value:
+        if not isinstance(row, dict):
+            continue
+        rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(row.get('task_id', '')))}</td>"
+            f"<td>{html.escape(str(row.get('category', '')))}</td>"
+            f"<td>{html.escape(str(row.get('run_status', '')))}</td>"
+            f"<td>{html.escape(str(row.get('status', '')))}</td>"
+            f"<td>{html.escape(str(row.get('blocker_type', '')))}</td>"
+            f"<td>{html.escape(_display_error(str(row.get('error', ''))))}</td>"
+            "</tr>"
+        )
+    return (
+        "<table><thead><tr><th>Suite</th><th>Category</th><th>Run</th><th>Status</th>"
+        f"<th>Blocker</th><th>Reason</th></tr></thead><tbody>{''.join(rows)}</tbody></table>"
     )
 
 
@@ -337,24 +461,31 @@ def _benchmark_table(benchmark_results: Any, model: str) -> str:
         group = str(row.get("group", "Benchmarks"))
         if group != current_group:
             rows.append(
-                f'<tr class="group-row"><td colspan="4">{html.escape(group)}</td></tr>'
+                f'<tr class="group-row"><td colspan="8">{html.escape(group)}</td></tr>'
             )
             current_group = group
         methods = _grading_methods(row)
         evaluated = row.get("evaluated_task_count")
         passed_count = row.get("evaluation_passed_count")
         items = f"{passed_count}/{evaluated}" if evaluated is not None and passed_count is not None else "n/a"
+        blocker = str(row.get("blocker_type") or "")
+        reason = _display_error(str(row.get("error_details") or row.get("error") or ""))
         rows.append(
             "<tr>"
             f"<td>{html.escape(str(row.get('benchmark', '')))}</td>"
+            f"<td>{html.escape(str(row.get('profile', '')))}</td>"
             f'<td class="score-cell">{_format_percent(row.get("score"))}</td>'
             f"<td>{html.escape(items)}</td>"
             f"<td>{html.escape(methods)}</td>"
+            f"<td>{html.escape(str(row.get('run_status', '')))}</td>"
+            f"<td>{html.escape(str(row.get('score_status', '')))}</td>"
+            f"<td>{html.escape(blocker or reason)}</td>"
             "</tr>"
         )
     return (
         "<table><thead><tr><th>Benchmark</th>"
-        f"<th>{html.escape(model)}</th><th>Items</th><th>Method</th></tr></thead>"
+        f"<th>Profile</th><th>{html.escape(model)}</th><th>Items</th><th>Method</th>"
+        "<th>Run</th><th>Score Status</th><th>Blocker/Reason</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody></table>"
     )
 
@@ -452,10 +583,167 @@ def _result_benchmark_name(result: GradeResult) -> str:
     return result.task_id
 
 
+def _result_status(result: GradeResult) -> str:
+    status = normalize_status(result.status)
+    if status:
+        return status
+    if result.timed_out:
+        return TIMED_OUT
+    if result.passed:
+        return PASSED
+    return FAILED_MODEL_ANSWER
+
+
+def _run_status(result: GradeResult) -> str:
+    status = _result_status(result)
+    if status in {PASSED, FAILED_MODEL_ANSWER, FAILED_MODEL_FORMAT, FAILED_MODEL_TOOL_USE}:
+        return RUN_COMPLETED
+    if status in {FAILED_MISSING_ASSETS, FAILED_MISSING_REQUIRED_TOOL, SKIPPED_UNSUPPORTED_CAPABILITY}:
+        return RUN_SKIPPED
+    if status in {FAILED_GRADER, FAILED_TOKEN_BUDGET, FAILED_INVALID_TASK_CONTEXT}:
+        return RUN_INFRASTRUCTURE_ERROR
+    if status in {FAILED_HARNESS_SETUP, FAILED_DATASET_EXTRACTION, TIMED_OUT}:
+        return RUN_EXECUTION_ERROR
+    return RUN_INFRASTRUCTURE_ERROR if is_invalid_evaluation_status(status) else RUN_COMPLETED
+
+
+def _score_status(result: GradeResult) -> str:
+    status = _result_status(result)
+    if status in INVALID_EVALUATION_STATUSES:
+        return SCORE_NOT_APPLICABLE if _run_status(result) == RUN_SKIPPED else SCORE_UNGRADED
+    if result.passed:
+        return SCORE_PASSED
+    if result.score > 0.0:
+        return SCORE_PARTIALLY_CORRECT
+    return SCORE_FAILED_MODEL_ANSWER
+
+
+def _blocker_type(result: GradeResult) -> str:
+    status = _result_status(result)
+    error = _result_error_reason(result).lower()
+    details = result.details if isinstance(result.details, dict) else {}
+    payload = details.get("result") if isinstance(details.get("result"), dict) else {}
+    explicit = _explicit_blocker_type(details, payload, error)
+    if explicit:
+        return explicit
+    unsupported = payload.get("unsupported_capabilities")
+    unsupported_values = {str(item) for item in unsupported} if isinstance(unsupported, list) else set()
+    contract = payload.get("capability_contract")
+    if isinstance(contract, dict):
+        for capability, data in contract.items():
+            if isinstance(data, dict) and data.get("supported") is False:
+                unsupported_values.add(str(capability))
+                if data.get("grader") is False:
+                    return "missing_grader"
+    if "official patch/test grader" in error or "grader is not configured" in error:
+        return "missing_grader"
+    if "scoring is disabled" in error or "grader_side_gold_labels" in unsupported_values:
+        return "disabled_scoring"
+    if status == FAILED_MISSING_ASSETS:
+        if "git lfs pointer" in error or "pointer stub" in error:
+            return "git_lfs_pointer_stub"
+        return "missing_asset"
+    if status == FAILED_MISSING_REQUIRED_TOOL:
+        return "missing_required_tool"
+    if status == FAILED_INVALID_TASK_CONTEXT:
+        return "invalid_task_context"
+    if status == SKIPPED_UNSUPPORTED_CAPABILITY:
+        if "kaggle" in " ".join(sorted(unsupported_values)).lower():
+            return "external_platform_unavailable"
+        return "unsupported_capability"
+    if status == FAILED_GRADER:
+        return "judge_parse_error"
+    if status in {FAILED_MODEL_FORMAT, FAILED_DATASET_EXTRACTION}:
+        return "output_parse_error"
+    return ""
+
+
+def _explicit_blocker_type(details: dict[str, Any], payload: dict[str, Any], error: str) -> str:
+    containers: list[Any] = [
+        payload,
+        details.get("setup_details"),
+        details.get("details"),
+    ]
+    setup = payload.get("setup_details")
+    if isinstance(setup, dict):
+        containers.extend([setup, setup.get("details")])
+    for container in containers:
+        blocker = _nested_blocker_type(container)
+        if blocker:
+            return blocker
+    if "repo_patch canary" in error or "patch executable" in error:
+        return "repo_patch_harness_setup"
+    if "git lfs pointer" in error or "pointer stub" in error:
+        return "git_lfs_pointer_stub"
+    if "missing required tool" in error or "missing tools" in error:
+        return "missing_required_tool"
+    if "missing reference dataset" in error:
+        return "missing_reference_dataset"
+    if "missing reference document" in error:
+        return "missing_reference_documents"
+    if "missing task instance" in error or "concrete exploit tasks are missing" in error:
+        return "missing_task_instances"
+    return ""
+
+
+def _nested_blocker_type(value: Any, *, depth: int = 0) -> str:
+    if depth > 8:
+        return ""
+    if isinstance(value, dict):
+        blocker = value.get("blocker_type")
+        if isinstance(blocker, str) and blocker.strip():
+            return blocker.strip()
+        for nested in value.values():
+            found = _nested_blocker_type(nested, depth=depth + 1)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for nested in value:
+            found = _nested_blocker_type(nested, depth=depth + 1)
+            if found:
+                return found
+    return ""
+
+
+def _result_error_reason(result: GradeResult) -> str:
+    if isinstance(result.error, str) and result.error.strip():
+        return result.error.strip()
+    details = result.details if isinstance(result.details, dict) else {}
+    payload = details.get("result") if isinstance(details.get("result"), dict) else {}
+    for key in ("error", "reason", "skip_reason", "blocker_reason"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    status = _result_status(result)
+    if status in INVALID_EVALUATION_STATUSES:
+        return status.replace("_", " ")
+    return ""
+
+
+def _unit_to_percent(value: Any) -> float | None:
+    if isinstance(value, (int, float)):
+        return round(float(value) * 100.0, 4)
+    return None
+
+
+def _json_cell(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
 def _format_percent(value: Any) -> str:
     if value is None:
         return "n/a"
     return f"{float(value):.2f}%"
+
+
+def _format_rate(value: Any) -> str:
+    if value is None:
+        return "n/a"
+    return f"{float(value) * 100.0:.2f}%"
 
 
 def _display_error(value: str | None) -> str:

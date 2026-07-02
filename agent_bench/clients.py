@@ -234,12 +234,15 @@ class MockClient(ModelClient):
                 "details": {
                     "benchmark": benchmark.get("name"),
                     "group": benchmark.get("group", task.category),
+                    "suite_id": task.id,
+                    "required_capabilities": benchmark.get("capabilities", []),
                     "homepage": benchmark.get("homepage", ""),
                     "license": benchmark.get("license", ""),
                     "credit": benchmark.get("credit", ""),
                     "citation": benchmark.get("citation", benchmark.get("homepage", "")),
                     "result": {
                         "repository_ready": True,
+                        "required_capabilities": benchmark.get("capabilities", []),
                         "file_count_sampled": 0,
                         "extracted_task_count": 1,
                         "evaluated_task_count": 1,

@@ -2,7 +2,11 @@ import json
 from pathlib import Path
 from subprocess import CompletedProcess
 
-from agent_bench.external import ExternalBenchmarkConfig, ExternalBenchmarkRunner
+from agent_bench.external import (
+    ExternalBenchmarkConfig,
+    ExternalBenchmarkRunner,
+    _prepare_benchmark_asset_cache,
+)
 from agent_bench.models import Task
 
 
@@ -68,9 +72,11 @@ def test_external_runner_uses_descriptor_docker_image(monkeypatch, tmp_path):
     assert commands[1][-1] == "example-benchmark:local"
     assert "AGENT_BENCH_DOCKER_IMAGE=example-benchmark:local" in commands[1]
     assert "AGENT_BENCH_REQUIRED_CAPABILITIES=repo_patch,chat_answer" in commands[1]
+    assert "AGENT_BENCH_ALLOW_TARGET_CHECKOUT=1" in commands[1]
     assert "AGENT_BENCH_MODEL_REQUEST_TIMEOUT=1800.0" in commands[1]
     assert "AGENT_BENCH_MAX_TOKENS=16384" in commands[1]
     assert "AGENT_BENCH_ASSET_ROOT=/asset-cache" in commands[1]
+    assert "AGENT_BENCH_ASSET_CACHE_KEY=examplebench" in commands[1]
     assert f"{tmp_path / 'asset-cache'}:/asset-cache" in commands[1]
     assert not any(item.endswith(":/outputs") for item in commands[1])
     assert commands[2][:2] == ["docker", "cp"]
@@ -134,3 +140,182 @@ def test_external_runner_fails_when_result_file_missing(monkeypatch, tmp_path):
     assert payload["error"] == "External benchmark did not produce agent_bench_result.json"
     assert payload["capability_contract"]["chat_answer"]["supported"] is True
     assert result.details["result"]["status"] == "failed_harness_setup"
+
+
+def test_external_runner_prepares_paperbench_asset_cache(monkeypatch, tmp_path):
+    commands: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        if "clone" in command:
+            clone_dir = Path(command[-1])
+            paper_dir = clone_dir / "project" / "paperbench" / "data" / "papers" / "paper-1"
+            paper_dir.mkdir(parents=True)
+            (paper_dir / "paper.pdf").write_bytes(b"%PDF-1.4\nreal pdf")
+            return CompletedProcess(command, 0, "", "")
+        return CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr("agent_bench.external.shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("agent_bench.external.subprocess.run", fake_run)
+    task = Task(
+        id="PB_003",
+        category="public_benchmarks",
+        type="external_benchmark",
+        question="Run PaperBench",
+        source="public_benchmarks.json",
+        benchmark={
+            "name": "PaperBench",
+            "homepage": "https://github.com/openai/frontier-evals/tree/main/project/paperbench",
+            "repository": "https://github.com/openai/frontier-evals.git",
+            "ref": "main",
+            "license": "MIT",
+            "credit": "OpenAI",
+            "docker": {"command": "agent-bench-probe --benchmark PaperBench"},
+        },
+    )
+    config = ExternalBenchmarkConfig(
+        provider="openai-compatible",
+        base_url="http://localhost:8000/v1",
+        model="example-model",
+        api_key_env="",
+        output_dir=tmp_path / "runs",
+        timeout=5.0,
+        asset_root=tmp_path / "agent-bench-assets",
+    )
+
+    error = _prepare_benchmark_asset_cache(task, config)
+
+    assert error is None
+    assert (
+        tmp_path
+        / "agent-bench-assets"
+        / "paperbench"
+        / "project"
+        / "paperbench"
+        / "data"
+        / "papers"
+        / "paper-1"
+        / "paper.pdf"
+    ).is_file()
+    assert any(command[:4] == ["/usr/bin/git", "-C", str(tmp_path / "agent-bench-assets" / "_downloads" / "paperbench" / "repo"), "lfs"] for command in commands)
+
+
+def test_external_runner_prepares_gdpval_asset_cache(monkeypatch, tmp_path):
+    def fake_run(command, **kwargs):
+        if "clone" in command:
+            clone_dir = Path(command[-1])
+            (clone_dir / "reference_files" / "case-1").mkdir(parents=True)
+            (clone_dir / "reference_files" / "case-1" / "Population.xlsx").write_bytes(b"PK\x03\x04real xlsx")
+            (clone_dir / "deliverable_files" / "case-1").mkdir(parents=True)
+            (clone_dir / "deliverable_files" / "case-1" / "Sample.xlsx").write_bytes(b"PK\x03\x04real xlsx")
+        return CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr("agent_bench.external.shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("agent_bench.external.subprocess.run", fake_run)
+    task = Task(
+        id="PB_002",
+        category="public_benchmarks",
+        type="external_benchmark",
+        question="Run GDPval",
+        source="public_benchmarks.json",
+        benchmark={
+            "name": "GDPval",
+            "homepage": "https://huggingface.co/datasets/openai/gdpval",
+            "repository": "https://huggingface.co/datasets/openai/gdpval",
+            "ref": "main",
+            "license": "MIT",
+            "credit": "OpenAI",
+            "docker": {"command": "agent-bench-probe --benchmark GDPval"},
+        },
+    )
+    config = ExternalBenchmarkConfig(
+        provider="openai-compatible",
+        base_url="http://localhost:8000/v1",
+        model="example-model",
+        api_key_env="",
+        output_dir=tmp_path / "runs",
+        timeout=5.0,
+        asset_root=tmp_path / "agent-bench-assets",
+    )
+
+    error = _prepare_benchmark_asset_cache(task, config)
+
+    assert error is None
+    assert (
+        tmp_path
+        / "agent-bench-assets"
+        / "gdpval"
+        / "reference_files"
+        / "case-1"
+        / "Population.xlsx"
+    ).is_file()
+    assert (
+        tmp_path
+        / "agent-bench-assets"
+        / "gdpval"
+        / "deliverable_files"
+        / "case-1"
+        / "Sample.xlsx"
+    ).is_file()
+
+
+def test_external_runner_uses_docker_asset_downloader_when_git_lfs_missing(monkeypatch, tmp_path):
+    commands: list[list[str]] = []
+
+    def fake_which(name):
+        if name == "git-lfs":
+            return None
+        return f"/usr/bin/{name}"
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        if command[:2] == ["docker", "run"]:
+            mount = command[command.index("-v") + 1]
+            host_asset_root = Path(mount.split(":", 1)[0])
+            target = host_asset_root / "gdpval" / "reference_files" / "case-1"
+            target.mkdir(parents=True)
+            (target / "Population.xlsx").write_bytes(b"PK\x03\x04real xlsx")
+            (host_asset_root / "gdpval" / ".agent-bench-assets-ready.json").write_text(
+                '{"downloaded":true}\n',
+                encoding="utf-8",
+            )
+            return CompletedProcess(command, 0, "", "")
+        return CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr("agent_bench.external.shutil.which", fake_which)
+    monkeypatch.setattr("agent_bench.external.subprocess.run", fake_run)
+    task = Task(
+        id="PB_002",
+        category="public_benchmarks",
+        type="external_benchmark",
+        question="Run GDPval",
+        source="public_benchmarks.json",
+        benchmark={
+            "name": "GDPval",
+            "homepage": "https://huggingface.co/datasets/openai/gdpval",
+            "repository": "https://huggingface.co/datasets/openai/gdpval",
+            "license": "MIT",
+            "credit": "OpenAI",
+            "docker": {"command": "agent-bench-probe --benchmark GDPval"},
+        },
+    )
+    config = ExternalBenchmarkConfig(
+        provider="openai-compatible",
+        base_url="http://localhost:8000/v1",
+        model="example-model",
+        api_key_env="",
+        output_dir=tmp_path / "runs",
+        timeout=5.0,
+        asset_root=tmp_path / "agent-bench-assets",
+    )
+
+    error = _prepare_benchmark_asset_cache(
+        task,
+        config,
+        launcher_image="agent-bench-external:python3.12",
+    )
+
+    assert error is None
+    assert commands[0][:2] == ["docker", "run"]
+    assert "--entrypoint" in commands[0]
+    assert "agent-bench-external:python3.12" in commands[0]

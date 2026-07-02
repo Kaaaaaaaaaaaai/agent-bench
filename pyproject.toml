@@ -26,6 +26,7 @@ include = ["agent_bench*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+norecursedirs = ["runs", "tmp", "agent-bench-assets", "agent_bench_outputs", "agent_bench_task_inputs", "assets"]
 markers = [
     "docker: tests that require Docker and the sandbox image",
 ]

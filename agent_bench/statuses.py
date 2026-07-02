@@ -14,7 +14,35 @@ FAILED_UNSUPPORTED_CAPABILITY = "failed_unsupported_capability"
 SKIPPED_UNSUPPORTED_CAPABILITY = "skipped_unsupported_capability"
 FAILED_GRADER = "failed_grader"
 FAILED_TOKEN_BUDGET = "failed_token_budget"
+FAILED_MISSING_REQUIRED_TOOL = "failed_missing_required_tool"
+FAILED_INVALID_TASK_CONTEXT = "failed_invalid_task_context"
 TIMED_OUT = "timed_out"
+
+RUN_COMPLETED = "completed"
+RUN_SKIPPED = "skipped"
+RUN_EXECUTION_ERROR = "execution_error"
+RUN_INFRASTRUCTURE_ERROR = "infrastructure_error"
+
+SCORE_PASSED = "passed"
+SCORE_FAILED_MODEL_ANSWER = "failed_model_answer"
+SCORE_PARTIALLY_CORRECT = "partially_correct"
+SCORE_NOT_APPLICABLE = "not_applicable"
+SCORE_UNGRADED = "ungraded"
+
+BLOCKER_UNSUPPORTED_CAPABILITY = "unsupported_capability"
+BLOCKER_MISSING_ASSET = "missing_asset"
+BLOCKER_MISSING_GRADER = "missing_grader"
+BLOCKER_DISABLED_SCORING = "disabled_scoring"
+BLOCKER_EXTERNAL_PLATFORM_UNAVAILABLE = "external_platform_unavailable"
+BLOCKER_GIT_LFS_POINTER_STUB = "git_lfs_pointer_stub"
+BLOCKER_INVALID_TASK_CONTEXT = "invalid_task_context"
+BLOCKER_JUDGE_PARSE_ERROR = "judge_parse_error"
+BLOCKER_MISSING_REFERENCE_DATASET = "missing_reference_dataset"
+BLOCKER_MISSING_REFERENCE_DOCUMENTS = "missing_reference_documents"
+BLOCKER_MISSING_REQUIRED_TOOL = "missing_required_tool"
+BLOCKER_MISSING_TASK_INSTANCES = "missing_task_instances"
+BLOCKER_OUTPUT_PARSE_ERROR = "output_parse_error"
+BLOCKER_REPO_PATCH_HARNESS_SETUP = "repo_patch_harness_setup"
 
 STATUS_ALIASES = {
     "failed_unsupported_capability": SKIPPED_UNSUPPORTED_CAPABILITY,
@@ -34,6 +62,8 @@ STRICT_STATUSES = {
     SKIPPED_UNSUPPORTED_CAPABILITY,
     FAILED_GRADER,
     FAILED_TOKEN_BUDGET,
+    FAILED_MISSING_REQUIRED_TOOL,
+    FAILED_INVALID_TASK_CONTEXT,
     TIMED_OUT,
 }
 
@@ -45,6 +75,8 @@ INVALID_EVALUATION_STATUSES = {
     SKIPPED_UNSUPPORTED_CAPABILITY,
     FAILED_GRADER,
     FAILED_TOKEN_BUDGET,
+    FAILED_MISSING_REQUIRED_TOOL,
+    FAILED_INVALID_TASK_CONTEXT,
     TIMED_OUT,
 }
 
@@ -70,4 +102,5 @@ def is_skipped_like_status(status: Any) -> bool:
     return normalize_status(status) in {
         FAILED_MISSING_ASSETS,
         SKIPPED_UNSUPPORTED_CAPABILITY,
+        FAILED_MISSING_REQUIRED_TOOL,
     }

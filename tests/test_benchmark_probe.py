@@ -56,6 +56,33 @@ def test_probe_json_records_get_unique_sources_and_item_dirs(tmp_path, monkeypat
     assert "__sha256-" in item_dirs[0].name
 
 
+def test_probe_fails_before_model_call_when_required_tool_missing(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.setenv("AGENT_BENCH_OUTPUT_DIR", str(tmp_path / "outputs"))
+
+    class MissingToolAdapter(probe.BenchmarkAdapter):
+        def available_tools(self, item, workspace):
+            return [{"type": "function", "function": {"name": "quote_lookup"}}]
+
+        def run_agent_loop(self, benchmark, item, workspace, tools):
+            raise AssertionError("agent loop should be skipped by required-tool preflight")
+
+    item = probe.BenchmarkItem(
+        "Call the benchmark-selected finance API.",
+        "Use the selected tool.",
+        "synthetic:1",
+        metadata={"required_tools": ["earnings_calendar"]},
+    )
+
+    result = MissingToolAdapter().evaluate_item("FinToolBench", item)
+
+    assert result["status"] == "failed_missing_required_tool"
+    assert result["setup_details"]["blocker_type"] == "missing_required_tool"
+    assert result["setup_details"]["missing_tools"] == ["earnings_calendar"]
+    assert result["setup_details"]["exposed_tools"] == ["quote_lookup"]
+    assert result["included_in_official_score"] is False
+
+
 def test_probe_extracts_csv_records_and_scores_choices(tmp_path):
     probe = _load_probe_module()
     (tmp_path / "sample.csv").write_text(
@@ -69,6 +96,55 @@ def test_probe_extracts_csv_records_and_scores_choices(tmp_path):
     assert len(items) == 1
     assert probe.score_answer("right", items[0].expected, items[0].choices) == 1.0
     assert probe.score_answer("A", items[0].expected, items[0].choices) == 0.0
+
+
+def test_probe_scores_verbose_choice_final_decision():
+    probe = _load_probe_module()
+    choices = {"A": "buy", "B": "sell", "C": "hold"}
+    answer = """
+    * A (Buy): possible bullish interpretation.
+    * B (Sell): possible bearish interpretation.
+
+    * Action: Buy.
+    * Choice A is buy
+    """
+
+    assert probe.score_answer(answer, "buy", choices) == 1.0
+    assert probe.score_answer(answer, "sell", choices) == 0.0
+
+
+def test_probe_scores_embedded_exact_code_line():
+    probe = _load_probe_module()
+    answer = (
+        "The most salient API entry point is HTTPServer. "
+        "The line that defines it is `class HTTPServer(socketserver.TCPServer):`."
+    )
+
+    assert probe.score_answer(answer, "class HTTPServer(socketserver.TCPServer):", {}) == 1.0
+
+
+def test_probe_exact_items_use_direct_answer_path():
+    probe = _load_probe_module()
+
+    assert probe._is_direct_answer_item(
+        probe.BenchmarkItem(
+            "codeneedle retrieval task. Return the exact line.",
+            "class A:",
+            "fixtures/sample.py:codeneedle",
+            metadata={"grading": "exact", "expected_key": "fixture_needle"},
+        )
+    )
+    assert probe._is_direct_answer_item(
+        probe.BenchmarkItem(
+            "Identify the gene from the clues.",
+            "CTCF",
+            "data.zip!records.jsonl:1",
+            metadata={"grading": "exact", "expected_key": "answer_rubric"},
+        )
+    )
+    assert not probe._is_direct_answer_item(
+        probe.BenchmarkItem("Read the answer from answer.txt.", "42", "source", metadata={"grading": "exact"})
+    )
 
 
 def test_probe_reports_no_items_for_unanswerable_repository(tmp_path):
@@ -117,6 +193,16 @@ def test_probe_uses_configurable_agent_max_tokens(monkeypatch):
         )
         == 2048
     )
+
+
+def test_probe_gdpval_requires_office_document_capability(monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.delenv("AGENT_BENCH_REQUIRED_CAPABILITIES", raising=False)
+
+    capabilities = probe._required_capabilities("GDPval")
+
+    assert "office_document_editing" in capabilities
+    assert "office_document_editing" in probe.HARNESS_SUPPORTED_CAPABILITIES
 
 
 def test_probe_caps_agent_max_tokens_with_environment(monkeypatch):
@@ -253,15 +339,15 @@ def test_probe_rejects_judge_text_without_json():
 
 def test_probe_classifies_unsupported_capabilities(monkeypatch):
     probe = _load_probe_module()
-    monkeypatch.setenv("AGENT_BENCH_REQUIRED_CAPABILITIES", "repo_patch,chat_answer,browser_or_gui")
+    monkeypatch.setenv("AGENT_BENCH_REQUIRED_CAPABILITIES", "repo_patch,chat_answer,kaggle_competition_submission")
 
     required = probe._required_capabilities("ExampleBench")
 
-    assert required == {"repo_patch", "chat_answer", "browser_or_gui"}
-    assert sorted(required - probe.HARNESS_SUPPORTED_CAPABILITIES) == ["browser_or_gui"]
+    assert required == {"repo_patch", "chat_answer", "kaggle_competition_submission"}
+    assert sorted(required - probe.HARNESS_SUPPORTED_CAPABILITIES) == ["kaggle_competition_submission"]
 
 
-def test_probe_does_not_treat_generic_tools_as_tool_call_support(monkeypatch):
+def test_probe_supports_tool_call_with_stateful_tool_adapter(monkeypatch):
     probe = _load_probe_module()
     monkeypatch.setenv("AGENT_BENCH_REQUIRED_CAPABILITIES", "tool_call,external_data_required")
 
@@ -269,10 +355,22 @@ def test_probe_does_not_treat_generic_tools_as_tool_call_support(monkeypatch):
     adapter = probe.select_adapter(required)
     contract = probe.capability_contract_for(required, adapter)
 
-    assert "tool_call" not in probe.HARNESS_SUPPORTED_CAPABILITIES
-    assert adapter.supported_capabilities() == {"chat_answer", "external_data_required"}
-    assert contract["tool_call"]["supported"] is False
-    assert "benchmark-native" in contract["tool_call"]["reason"]
+    assert "tool_call" in probe.HARNESS_SUPPORTED_CAPABILITIES
+    assert adapter.supported_capabilities() == {"chat_answer", "external_data_required", "tool_call"}
+    assert contract["tool_call"]["supported"] is True
+
+
+def test_bundled_descriptor_capabilities_are_supported():
+    probe = _load_probe_module()
+    task_file = Path(__file__).resolve().parents[1] / "tasks" / "public_benchmarks.json"
+    tasks = json.loads(task_file.read_text(encoding="utf-8"))
+    declared = {
+        capability
+        for task in tasks
+        for capability in task["benchmark"].get("capabilities", [])
+    }
+
+    assert sorted(declared - probe.HARNESS_SUPPORTED_CAPABILITIES) == []
 
 
 def test_probe_base_payload_reports_only_required_supported_capabilities():
@@ -307,9 +405,27 @@ def test_probe_base_payload_uses_verified_capability_contract():
     assert payload["supported_capabilities"] == []
 
 
+def test_probe_payload_reports_contract_unsupported_capabilities():
+    probe = _load_probe_module()
+
+    unsupported = probe._payload_unsupported_capabilities(
+        {"repo_patch", "chat_answer"},
+        {
+            "chat_answer": {"supported": True},
+            "repo_patch": {"supported": False, "reason": "official patch/test grader missing"},
+        },
+        "skipped_unsupported_capability",
+        "All benchmark records were invalid",
+        "SWE-bench",
+    )
+
+    assert unsupported == ["repo_patch"]
+
+
 def test_probe_repo_patch_contract_missing_metadata_is_setup_failure(monkeypatch):
     probe = _load_probe_module()
     monkeypatch.delenv("AGENT_BENCH_ALLOW_TARGET_CHECKOUT", raising=False)
+    monkeypatch.setenv("AGENT_BENCH_REPO_PATCH_GRADER", "grader")
     item = probe.BenchmarkItem(
         "Fix the bug.",
         "diff --git a/a.py b/a.py",
@@ -345,6 +461,7 @@ def test_probe_repo_patch_missing_target_checkout_fails_setup(monkeypatch):
 
 def test_probe_repo_patch_contract_requires_canary(monkeypatch):
     probe = _load_probe_module()
+    monkeypatch.setenv("AGENT_BENCH_REPO_PATCH_GRADER", "grader")
     monkeypatch.setattr(probe, "_repo_patch_checkout_available", lambda items: True)
     monkeypatch.setattr(probe, "_repo_patch_canary", lambda: {"passed": False, "reason": "repo canary failed"})
     item = probe.BenchmarkItem(
@@ -361,9 +478,38 @@ def test_probe_repo_patch_contract_requires_canary(monkeypatch):
     assert contract["repo_patch"]["canary"]["passed"] is False
 
 
+def test_probe_repo_patch_without_grader_uses_model_judge_fallback(monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.delenv("AGENT_BENCH_REPO_PATCH_GRADER", raising=False)
+    monkeypatch.setattr(probe, "_repo_patch_checkout_available", lambda items: True)
+    monkeypatch.setattr(probe, "_repo_patch_canary", lambda: {"passed": True})
+    item = probe.BenchmarkItem(
+        "Fix the bug.",
+        "diff --git a/a.py b/a.py",
+        "huggingface:swe-bench/test:1",
+        metadata={"repo": "astropy/astropy", "base_commit": "abc123", "grading": "exact"},
+    )
+
+    contract = probe.RepoPatchAdapter().capability_contract({"repo_patch"}, [item])
+    status, reason = probe._preflight_failure_from_contract({"repo_patch"}, contract)
+
+    assert contract["repo_patch"]["supported"] is True
+    assert contract["repo_patch"]["official_grader"] is False
+    assert contract["repo_patch"]["fallback_grader"] == "model_judge_task_compliance"
+    assert status == ""
+    assert reason == ""
+
+
 def test_probe_repo_patch_grading_rejects_reference_diff(monkeypatch):
     probe = _load_probe_module()
     monkeypatch.delenv("AGENT_BENCH_REPO_PATCH_GRADER", raising=False)
+    calls = []
+
+    def fake_judge(benchmark, item, answer, method):
+        calls.append((benchmark, item, answer, method))
+        return 0.0, {"method": method, "score": 0.0, "status": "failed_model_answer", "reason": "not sufficient"}
+
+    monkeypatch.setattr(probe, "judge_answer", fake_judge)
     item = probe.BenchmarkItem(
         "Fix the bug.",
         "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n",
@@ -378,9 +524,11 @@ def test_probe_repo_patch_grading_rejects_reference_diff(monkeypatch):
     )
 
     assert score == 0.0
-    assert grade["status"] == "failed_harness_setup"
-    assert grade["method"] == "official_patch_tests"
-    assert "reference-diff exact matching is intentionally not used" in grade["reason"]
+    assert grade["status"] == "failed_model_answer"
+    assert grade["method"] == "repo_patch_model_judge"
+    assert grade["official_grader"] is False
+    assert calls[0][3] == "task_compliance"
+    assert "Model patch:" in calls[0][2]
 
 
 def test_probe_file_artifact_missing_assets_fails_preflight(tmp_path, monkeypatch):
@@ -460,7 +608,7 @@ def test_probe_incomplete_prompt_template_fails_dataset_preflight(tmp_path, monk
     monkeypatch.setenv("AGENT_BENCH_BASE_URL", "http://model.test/v1")
     monkeypatch.setenv("AGENT_BENCH_MODEL", "model")
     monkeypatch.setenv("AGENT_BENCH_OUTPUT_DIR", str(tmp_path / "outputs"))
-    monkeypatch.setattr("sys.argv", ["agent-bench-probe", "--benchmark", "EDINET-Bench"])
+    monkeypatch.setattr("sys.argv", ["agent-bench-probe", "--benchmark", "ExampleBench"])
     (tmp_path / "tasks.json").write_text(
         json.dumps(
             [
@@ -485,8 +633,7 @@ def test_probe_incomplete_prompt_template_fails_dataset_preflight(tmp_path, monk
     assert payload["status"] == "failed_dataset_extraction"
     assert payload["model_evals"][0]["status"] == "failed_dataset_extraction"
 
-
-def test_probe_file_artifact_requires_generated_output(tmp_path, monkeypatch):
+def test_probe_file_artifact_grades_text_fallback_without_generated_output(tmp_path, monkeypatch):
     probe = _load_probe_module()
     monkeypatch.chdir(tmp_path)
     (tmp_path / "input.txt").write_text("source data", encoding="utf-8")
@@ -494,7 +641,17 @@ def test_probe_file_artifact_requires_generated_output(tmp_path, monkeypatch):
     def fake_loop(benchmark, item, tools=None):
         return {"answer": "done", "content": '{"answer":"done"}', "usage": {}, "tool_trace": []}
 
+    def fake_judge(benchmark, item, answer, method):
+        return 0.25, {
+            "method": method,
+            "score": 0.25,
+            "status": "failed_model_answer",
+            "passed": False,
+            "reason": "text fallback was partially relevant",
+        }
+
     monkeypatch.setattr(probe, "run_agent_loop", fake_loop)
+    monkeypatch.setattr(probe, "judge_answer", fake_judge)
     item = probe.BenchmarkItem(
         "Create the report.",
         "rubric",
@@ -505,7 +662,8 @@ def test_probe_file_artifact_requires_generated_output(tmp_path, monkeypatch):
     result = probe.run_model_on_item("PaperBench", item, probe.FileArtifactAdapter())
 
     assert result["status"] == "failed_model_answer"
-    assert "did not produce any files" in result["error"]
+    assert result["score"] == 0.25
+    assert result["grade"]["output_collection"] == "text_answer_fallback"
 
 
 def test_probe_file_artifact_rejects_corrupt_xlsx(tmp_path, monkeypatch):
@@ -531,6 +689,59 @@ def test_probe_file_artifact_rejects_corrupt_xlsx(tmp_path, monkeypatch):
 
     assert result["status"] == "failed_model_tool_use"
     assert result["grade"]["method"] == "artifact_integrity"
+
+
+def test_probe_file_artifact_collects_file_replacing_output_dir(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AGENT_BENCH_OUTPUT_DIR", str(tmp_path / "outputs"))
+    (tmp_path / "input.txt").write_text("source data", encoding="utf-8")
+
+    def fake_loop(benchmark, item, tools=None):
+        output_path = Path.cwd() / "agent_bench_outputs" / probe._safe_slug(item.source)
+        if output_path.exists():
+            output_path.rmdir()
+        output_path.write_text("answer artifact", encoding="utf-8")
+        return {"answer": "done", "content": '{"answer":"done"}', "usage": {}, "tool_trace": []}
+
+    def fake_judge(benchmark, item, answer, method):
+        return 1.0, {"method": method, "score": 1.0, "status": "passed", "passed": True, "reason": "ok"}
+
+    monkeypatch.setattr(probe, "run_agent_loop", fake_loop)
+    monkeypatch.setattr(probe, "judge_answer", fake_judge)
+    item = probe.BenchmarkItem(
+        "Create the report.",
+        "rubric",
+        "artifact:1",
+        metadata={"grading": "rubric", "input_files": ["input.txt"]},
+    )
+
+    result = probe.run_model_on_item("FileArtifactBench", item, probe.FileArtifactAdapter())
+
+    assert result["status"] == "passed"
+    assert result["output_bundle"]["artifact_paths"]
+
+
+def test_probe_write_text_file_redirects_directory_path(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "agent_bench_outputs" / "item").mkdir(parents=True)
+
+    result = probe.tool_write_file({"path": "agent_bench_outputs/item", "content": "answer"})
+
+    assert "agent_bench_outputs/item/response.md" in result
+    assert (tmp_path / "agent_bench_outputs" / "item" / "response.md").read_text(encoding="utf-8") == "answer"
+
+
+def test_probe_artifact_previews_include_text_content(tmp_path):
+    probe = _load_probe_module()
+    artifact = tmp_path / "response.md"
+    artifact.write_text("concrete deliverable text", encoding="utf-8")
+
+    preview = probe._artifact_previews([str(artifact)])
+
+    assert "response.md" in preview
+    assert "concrete deliverable text" in preview
 
 
 def test_probe_file_artifact_persists_inputs_outputs_and_item_files(tmp_path, monkeypatch):
@@ -608,6 +819,32 @@ def test_probe_chat_adapter_uses_sanitized_workspace(tmp_path, monkeypatch):
     assert (workspace.root / "TASK.md").is_file()
     assert not (workspace.root / "problems.csv").exists()
     assert "secret rubric" not in (workspace.root / "TASK.md").read_text(encoding="utf-8")
+
+
+def test_probe_chat_adapter_exposes_record_tables_but_not_answers(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AGENT_BENCH_OUTPUT_DIR", str(tmp_path / "outputs"))
+    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "FinanceMath")
+    item = probe.item_from_record(
+        {
+            "question": "Use Exhibit 1 to calculate beta.",
+            "tables": [{"title": "Exhibit 1", "rows": [["asset", "covariance"], ["real estate", "0.578"]]}],
+            "ground_truth": "0.578",
+            "python_solution": "def solve():\n    return 0.578",
+        },
+        "data/validation.json:record-000003",
+    )
+    assert item is not None
+
+    workspace = probe.ChatAnswerAdapter().prepare_task(item)
+    task_text = (workspace.root / "TASK.md").read_text(encoding="utf-8")
+
+    assert "Benchmark record context" in task_text
+    assert "Exhibit 1" in task_text
+    assert "real estate" in task_text
+    assert "ground_truth" not in task_text
+    assert "python_solution" not in task_text
 
 
 def test_probe_file_artifact_workspace_exposes_only_task_inputs(tmp_path, monkeypatch):
@@ -698,7 +935,7 @@ def test_probe_extracts_canonical_answer_from_rubric_for_grader_side_use():
     assert probe.score_answer("CTCF", compact_item.expected, {}) == 1.0
 
 
-def test_probe_disables_biomystery_scoring_from_local_zip(tmp_path, monkeypatch):
+def test_probe_extracts_biomystery_answer_rubric_from_local_zip(tmp_path, monkeypatch):
     probe = _load_probe_module()
     monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "BioMystery Bench")
     monkeypatch.setenv("AGENT_BENCH_DATASET_ID", "Anthropic/BioMysteryBench-preview")
@@ -716,10 +953,166 @@ def test_probe_disables_biomystery_scoring_from_local_zip(tmp_path, monkeypatch)
 
     items, errors = probe.extract_benchmark_items(tmp_path, limit=3)
 
-    assert items == []
-    assert errors == [
-        "BioMystery Bench scoring is disabled until answer_rubric/gold labels are kept grader-side only"
-    ]
+    assert errors == []
+    assert len(items) == 1
+    assert items[0].expected == "Homo sapiens"
+    assert items[0].metadata["expected_key"] == "answer_rubric"
+    assert items[0].metadata["grading"] == "exact"
+
+
+def test_probe_biomystery_workspace_hides_answer_rubric(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AGENT_BENCH_OUTPUT_DIR", str(tmp_path / "outputs"))
+    item = probe.BenchmarkItem(
+        "Identify the species from the hidden biological clues.",
+        "Homo sapiens",
+        "data.zip!records.jsonl:1",
+        metadata={"grading": "exact", "expected_key": "answer_rubric"},
+    )
+
+    workspace = probe.ChatAnswerAdapter().prepare_task(item)
+    task_text = (workspace.root / "TASK.md").read_text(encoding="utf-8")
+
+    assert "Identify the species" in task_text
+    assert "Homo sapiens" not in task_text
+    assert "answer_rubric" not in task_text
+
+
+def test_probe_biomystery_answer_rubric_scores_exact_answer(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AGENT_BENCH_PROVIDER", "openai-compatible")
+    monkeypatch.setenv("AGENT_BENCH_BASE_URL", "http://model.test/v1")
+    monkeypatch.setenv("AGENT_BENCH_MODEL", "model")
+    monkeypatch.setenv("AGENT_BENCH_OUTPUT_DIR", str(tmp_path / "outputs"))
+    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "BioMystery Bench")
+    monkeypatch.setenv("AGENT_BENCH_DATASET_ID", "Anthropic/BioMysteryBench-preview")
+    monkeypatch.setattr("sys.argv", ["agent-bench-probe", "--benchmark", "BioMystery Bench"])
+    with zipfile.ZipFile(tmp_path / "data.zip", "w") as archive:
+        archive.writestr(
+            "records.jsonl",
+            '{"question":"q","answer_rubric":"The answer is X Score 1"}\n',
+        )
+
+    monkeypatch.setattr(
+        probe,
+        "run_agent_loop",
+        lambda benchmark, item, tools=None: {
+            "answer": "X",
+            "content": '{"answer":"X"}',
+            "usage": {},
+            "tool_trace": [],
+        },
+    )
+
+    exit_code = probe.main()
+    payload = json.loads((tmp_path / "outputs" / "agent_bench_result.json").read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert payload["status"] == "completed"
+    assert payload["unsupported_capabilities"] == []
+    assert payload["model_evals"][0]["status"] == "passed"
+
+
+def test_probe_biomystery_terminal_extraction_does_not_fall_through_to_csv(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "BioMystery Bench")
+    with zipfile.ZipFile(tmp_path / "data.zip", "w") as archive:
+        archive.writestr("records.jsonl", '{"question":"q","answer_rubric":"The answer is X Score 1"}\n')
+    (tmp_path / "problems.csv").write_text("question,answer_rubric\nq,The answer is X Score 1\n", encoding="utf-8")
+
+    items, errors = probe.extract_benchmark_items(tmp_path, limit=3)
+
+    assert errors == []
+    assert len(items) == 1
+    assert items[0].source == "data.zip!records.jsonl:1"
+
+
+def test_probe_extracts_codeneedle_fixture_tasks(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "codeneedle")
+    fixtures = tmp_path / "fixtures"
+    fixtures.mkdir()
+    (fixtures / "sample.py").write_text("import os\n\ndef target_api(value):\n    return value\n", encoding="utf-8")
+
+    items, errors = probe.extract_benchmark_items(tmp_path, limit=3)
+
+    assert errors == []
+    assert len(items) == 1
+    assert items[0].expected == "def target_api(value):"
+    assert items[0].metadata["grading"] == "exact"
+
+
+def test_probe_extracts_stockbench_cached_financial_tasks(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "StockBench")
+    financials = tmp_path / "storage" / "cache" / "financials"
+    financials.mkdir(parents=True)
+    (financials / "AAPL.annual.json").write_text(json.dumps({"revenue": [1, 2, 3]}), encoding="utf-8")
+    (tmp_path / "stockbench" / "agents" / "prompts").mkdir(parents=True)
+    (tmp_path / "stockbench" / "agents" / "prompts" / "decision_agent_v1.txt").write_text(
+        "prompt template {{ input }}",
+        encoding="utf-8",
+    )
+
+    items, errors = probe.extract_benchmark_items(tmp_path, limit=3)
+
+    assert errors == []
+    assert len(items) == 1
+    assert "AAPL" in items[0].question
+    assert items[0].metadata["input_files"] == ["storage/cache/financials/AAPL.annual.json"]
+
+
+def test_probe_extracts_swelancer_repo_patch_metadata(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "SWE-Lancer")
+    subprocess_run = []
+
+    def fake_run(command, **kwargs):
+        subprocess_run.append(command)
+        return type("Completed", (), {"returncode": 0, "stdout": "abc123\n", "stderr": ""})()
+
+    monkeypatch.setattr(probe.subprocess, "run", fake_run)
+    (tmp_path / "all_swelancer_tasks.csv").write_text(
+        "question_id,title,description\n12155_1,Fix bug,Patch the failing behavior\n",
+        encoding="utf-8",
+    )
+    issue = tmp_path / "issues" / "12155_1"
+    issue.mkdir(parents=True)
+    (issue / "issue_data.json").write_text(json.dumps({"issue": "Detailed issue"}), encoding="utf-8")
+    (issue / "commit_id.txt").write_text("issuecommit\n", encoding="utf-8")
+
+    items, errors = probe.extract_benchmark_items(tmp_path, limit=3)
+
+    assert errors == []
+    assert len(items) == 1
+    assert items[0].metadata["target_repo"] == str(tmp_path)
+    assert items[0].metadata["base_commit"] == "abc123"
+    assert items[0].metadata["issue_commit_id"] == "issuecommit"
+
+
+def test_probe_extracts_quantcode_repo_patch_metadata(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "QuantCode-Bench")
+
+    def fake_run(command, **kwargs):
+        return type("Completed", (), {"returncode": 0, "stdout": "def456\n", "stderr": ""})()
+
+    monkeypatch.setattr(probe.subprocess, "run", fake_run)
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "benchmark_tasks_multiframe.json").write_text(
+        json.dumps([{"id": "task-1", "reformulated_task": "Implement SMA crossover"}]),
+        encoding="utf-8",
+    )
+
+    items, errors = probe.extract_benchmark_items(tmp_path, limit=3)
+
+    assert errors == []
+    assert len(items) == 1
+    assert items[0].metadata["target_repo"] == str(tmp_path)
+    assert items[0].metadata["base_commit"] == "def456"
 
 
 def test_probe_text_tools_skip_binary_files(tmp_path, monkeypatch):
@@ -827,6 +1220,83 @@ def test_probe_extracts_benchmark_description_text(tmp_path):
     assert items[0].metadata["grading"] == "rubric"
 
 
+def test_probe_extracts_paperbench_leaf_rubric_tasks_first(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "PaperBench")
+    paper_dir = tmp_path / "data" / "papers" / "sample-paper"
+    paper_dir.mkdir(parents=True)
+    (paper_dir / "paper.md").write_text("Paper text", encoding="utf-8")
+    (paper_dir / "rubric.json").write_text(
+        json.dumps(
+            {
+                "id": "root",
+                "requirements": "The whole paper is reproduced.",
+                "sub_tasks": [
+                    {
+                        "id": "models",
+                        "requirements": "All model components are available.",
+                        "sub_tasks": [
+                            {
+                                "id": "vit",
+                                "requirements": "ViT-Base loading code is implemented.",
+                                "sub_tasks": [],
+                                "weight": 1,
+                            },
+                            {
+                                "id": "resnet",
+                                "requirements": "ResNet-50 loading code is implemented.",
+                                "sub_tasks": [],
+                                "weight": 1,
+                            },
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    items, errors = probe.extract_benchmark_items(tmp_path, limit=2)
+
+    assert errors == []
+    assert [item.question for item in items] == [
+        "ViT-Base loading code is implemented.",
+        "ResNet-50 loading code is implemented.",
+    ]
+    assert all("rubric.json:leaf-" in item.source for item in items)
+    assert "The whole paper is reproduced" in items[0].metadata["visible_context"]
+    assert paper_dir / "paper.md" in probe._artifact_asset_paths(items[0], tmp_path)
+
+
+def test_probe_paperbench_lfs_pointer_assets_are_missing_assets(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "PaperBench")
+    paper_dir = tmp_path / "data" / "papers" / "sample-paper"
+    paper_dir.mkdir(parents=True)
+    (paper_dir / "rubric.json").write_text("{}", encoding="utf-8")
+    (paper_dir / "config.yaml").write_text("id: sample-paper\n", encoding="utf-8")
+    (paper_dir / "paper.md").write_text(
+        "version https://git-lfs.github.com/spec/v1\n"
+        "oid sha256:abc\n"
+        "size 12345\n",
+        encoding="utf-8",
+    )
+    item = probe.BenchmarkItem(
+        "Implement the method.",
+        "Candidate answer should satisfy the task requirements from the benchmark prompt.",
+        "data/papers/sample-paper/rubric.json:leaf-000001",
+        metadata={"grading": "task_compliance"},
+    )
+
+    status, reason, details = probe._item_preflight_failure(item, {"file_artifact"}, set(), set())
+
+    assert status == "failed_missing_assets"
+    assert "Git LFS pointer" in reason
+    assert details["blocker_type"] == "git_lfs_pointer_stub"
+    assert details["asset_errors"][0]["reason"] == "git_lfs_pointer_stub"
+
+
 def test_probe_extracts_investorbench_market_records(tmp_path, monkeypatch):
     probe = _load_probe_module()
     monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "InvestorBench")
@@ -902,6 +1372,223 @@ def test_probe_classifies_judge_request_timeout(monkeypatch):
     assert grade["timed_out"] is True
 
 
+def test_probe_unparseable_judge_text_is_grader_failure(monkeypatch):
+    probe = _load_probe_module()
+
+    def fake_post(base_url, payload, headers):
+        return json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "The candidate does not provide the required label, so the score should be low."
+                        }
+                    }
+                ],
+                "usage": {"total_tokens": 7},
+            }
+        )
+
+    monkeypatch.setenv("AGENT_BENCH_BASE_URL", "http://model.test/v1")
+    monkeypatch.setenv("AGENT_BENCH_MODEL", "model")
+    monkeypatch.setattr(probe, "post_chat_completion", fake_post)
+
+    score, grade = probe.judge_answer(
+        "ExampleBench",
+        probe.BenchmarkItem("q", "rubric", "source", metadata={"grading": "rubric"}),
+        "answer",
+        "rubric",
+    )
+
+    assert score == 0.0
+    assert grade["status"] == "failed_grader"
+    assert grade["judge_parser_status"] == "fallback_unparsed"
+
+
+def test_probe_accepts_repaired_judge_json(monkeypatch):
+    probe = _load_probe_module()
+
+    def fake_post(base_url, payload, headers):
+        return json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '```json\n{"score":0.0,"passed":false,"reason":"not complete"}\n```'
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setenv("AGENT_BENCH_BASE_URL", "http://model.test/v1")
+    monkeypatch.setenv("AGENT_BENCH_MODEL", "model")
+    monkeypatch.setattr(probe, "post_chat_completion", fake_post)
+
+    score, grade = probe.judge_answer(
+        "ExampleBench",
+        probe.BenchmarkItem("q", "rubric", "source", metadata={"grading": "rubric"}),
+        "answer",
+        "rubric",
+    )
+
+    assert score == 0.0
+    assert grade["status"] == "failed_model_answer"
+    assert grade["judge_parse_repaired"] is True
+
+
+def test_probe_accepts_numeric_prose_judge_score(monkeypatch):
+    probe = _load_probe_module()
+
+    def fake_post(base_url, payload, headers):
+        return json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "The candidate gives the right label but no rationale. Score: 0.5"
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setenv("AGENT_BENCH_BASE_URL", "http://model.test/v1")
+    monkeypatch.setenv("AGENT_BENCH_MODEL", "model")
+    monkeypatch.setattr(probe, "post_chat_completion", fake_post)
+
+    score, grade = probe.judge_answer(
+        "ExampleBench",
+        probe.BenchmarkItem("q", "rubric", "source", metadata={"grading": "rubric"}),
+        "answer",
+        "rubric",
+    )
+
+    assert score == 0.5
+    assert grade["status"] == "failed_model_answer"
+    assert grade["judge_parser_status"] == "prose_score"
+
+
+def test_probe_accepts_positive_qualitative_prose_judge(monkeypatch):
+    probe = _load_probe_module()
+
+    def fake_post(base_url, payload, headers):
+        return json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "The candidate answer is a concise and accurate summary of the prompt."
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setenv("AGENT_BENCH_BASE_URL", "http://model.test/v1")
+    monkeypatch.setenv("AGENT_BENCH_MODEL", "model")
+    monkeypatch.setattr(probe, "post_chat_completion", fake_post)
+
+    score, grade = probe.judge_answer(
+        "ExampleBench",
+        probe.BenchmarkItem("q", "rubric", "source", metadata={"grading": "rubric"}),
+        "answer",
+        "rubric",
+    )
+
+    assert score == 0.5
+    assert grade["judge_parser_status"] == "prose_score"
+
+
+def test_probe_rejects_negative_qualitative_prose_judge(monkeypatch):
+    probe = _load_probe_module()
+
+    def fake_post(base_url, payload, headers):
+        return json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "The candidate answer is incomplete and fails to provide the required output."
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setenv("AGENT_BENCH_BASE_URL", "http://model.test/v1")
+    monkeypatch.setenv("AGENT_BENCH_MODEL", "model")
+    monkeypatch.setattr(probe, "post_chat_completion", fake_post)
+
+    score, grade = probe.judge_answer(
+        "ExampleBench",
+        probe.BenchmarkItem("q", "rubric", "source", metadata={"grading": "rubric"}),
+        "answer",
+        "rubric",
+    )
+
+    assert score == 0.0
+    assert grade["judge_parser_status"] == "fallback_unparsed"
+
+
+def test_probe_gives_partial_credit_for_valid_choice_when_judge_scores_zero(monkeypatch):
+    probe = _load_probe_module()
+
+    def fake_post(base_url, payload, headers):
+        return json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"score":0.0,"passed":false,"reason":"missing rationale"}'
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setenv("AGENT_BENCH_BASE_URL", "http://model.test/v1")
+    monkeypatch.setenv("AGENT_BENCH_MODEL", "model")
+    monkeypatch.setattr(probe, "post_chat_completion", fake_post)
+    item = probe.BenchmarkItem(
+        "Choose stronger, weaker, or mixed.",
+        "rubric",
+        "stockbench",
+        choices={"A": "stronger", "B": "weaker", "C": "mixed"},
+        metadata={"grading": "task_compliance"},
+    )
+
+    score, grade = probe.judge_answer("StockBench", item, "C", "task_compliance")
+
+    assert score == 0.5
+    assert grade["status"] == "failed_model_answer"
+    assert "valid choice label" in grade["reason"]
+
+
+def test_probe_gives_partial_credit_for_valid_choice_when_judge_unparsed(monkeypatch):
+    probe = _load_probe_module()
+
+    def fake_post(base_url, payload, headers):
+        return json.dumps({"choices": [{"message": {"content": "The answer lacks a rationale."}}]})
+
+    monkeypatch.setenv("AGENT_BENCH_BASE_URL", "http://model.test/v1")
+    monkeypatch.setenv("AGENT_BENCH_MODEL", "model")
+    monkeypatch.setattr(probe, "post_chat_completion", fake_post)
+    item = probe.BenchmarkItem(
+        "Choose stronger, weaker, or mixed.",
+        "rubric",
+        "stockbench",
+        choices={"A": "stronger", "B": "weaker", "C": "mixed"},
+        metadata={"grading": "task_compliance"},
+    )
+
+    score, grade = probe.judge_answer("StockBench", item, "mixed", "task_compliance")
+
+    assert score == 0.0
+    assert grade["status"] == "failed_grader"
+    assert grade["judge_parser_status"] == "fallback_unparsed"
+
+
 def test_probe_rejects_placeholder_judge_reason(monkeypatch):
     probe = _load_probe_module()
 
@@ -948,6 +1635,8 @@ def test_probe_financemath_uses_deterministic_numeric_grader(monkeypatch):
     assert item is not None
     assert item.metadata["grading"] == "numeric"
     assert probe.grade_answer("FinanceMath", item, '{"answer":"1,200,000"}')[0] == 1.0
+    assert probe.grade_answer("FinanceMath", item, "computed value is $1.2 million")[0] == 1.0
+    assert probe.score_answer("beta = 0.57822", "0.578", {}) == 1.0
     assert probe.grade_answer("FinanceMath", item, '{"answer":"short reason"}')[0] == 0.0
 
 
@@ -996,6 +1685,48 @@ def test_probe_protocol_limit_detects_repeated_identical_tool_calls():
     reason = probe._protocol_limit_failure(trace, final_answer_count=0, final_content="")
 
     assert "repeated an identical tool call" in reason
+
+
+def test_probe_detects_intermediate_agent_progress_message():
+    probe = _load_probe_module()
+
+    assert probe._looks_like_intermediate_agent_message("Okay, the directory exists. Now I will write the file.")
+    assert not probe._looks_like_intermediate_agent_message('{"answer":"done"}')
+    assert probe._contains_tool_syntax("<|tool_call>call:write_text_file{content:<|\"|>x")
+
+
+def test_probe_parses_angle_bracket_tool_call():
+    probe = _load_probe_module()
+
+    parsed = probe.parse_text_tool_request(
+        '<|tool_call>call:run_command{argv:[<|"|>python3<|"|>,<|"|>-c<|"|>,<|"|>print("ok")<|"|>]}'
+    )
+
+    assert parsed == ("run_command", {"argv": ["python3", "-c", 'print("ok")']})
+
+    suffix_parsed = probe.parse_text_tool_request('call:read_file{path:<|"|>TASK.md<|"|>}<tool_call|>')
+
+    assert suffix_parsed == ("read_file", {"path": "TASK.md"})
+
+
+def test_probe_parses_qwen_tagged_json_tool_call():
+    probe = _load_probe_module()
+
+    parsed = probe.parse_text_tool_request(
+        '<tool_call>\n{"name": "read_file", "arguments": {"path": "TASK.md"}}\n</tool_call>'
+    )
+
+    assert parsed == ("read_file", {"path": "TASK.md"})
+
+
+def test_probe_parses_gemma_parameter_alias_tool_call():
+    probe = _load_probe_module()
+
+    parsed = probe.parse_text_tool_request(
+        '```json\n{"tool_name":"search_files","parameters":{"query":"answer_rubric","path":"."}}\n```'
+    )
+
+    assert parsed == ("search_files", {"query": "answer_rubric", "path": "."})
 
 
 def test_agent_loop_executes_native_tool_calls(tmp_path, monkeypatch):

@@ -18,6 +18,12 @@ if [[ ! -d "${repo_dir}/.git" ]]; then
   fi
 fi
 
+asset_cache_key="${AGENT_BENCH_ASSET_CACHE_KEY:-}"
+asset_cache_root="${AGENT_BENCH_ASSET_ROOT:-/asset-cache}"
+if [[ -n "${asset_cache_key}" && -d "${asset_cache_root}/${asset_cache_key}" ]]; then
+  cp -a "${asset_cache_root}/${asset_cache_key}/." "${repo_dir}/"
+fi
+
 cd "${repo_dir}"
 if [[ "${AGENT_BENCH_GIT_LFS_PULL:-0}" == "1" ]] && command -v git-lfs >/dev/null 2>&1; then
   unset GIT_LFS_SKIP_SMUDGE

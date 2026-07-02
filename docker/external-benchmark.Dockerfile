@@ -4,7 +4,7 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /workspace
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends bash ca-certificates curl docker-cli git git-lfs \
+    && apt-get install -y --no-install-recommends bash ca-certificates curl docker-cli git git-lfs patch \
     && rm -rf /var/lib/apt/lists/* \
     && python -m pip install --no-cache-dir datasets pyarrow
 

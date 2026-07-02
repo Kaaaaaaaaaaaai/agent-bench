@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_bench.tasks import TaskLoadError, load_tasks
+from agent_bench.tasks import TaskLoadError, load_task_registry, load_tasks
 
 
 REPO_TASKS_DIR = Path(__file__).resolve().parents[1] / "tasks"
@@ -103,22 +103,35 @@ def test_load_tasks_supports_text_recall(tmp_path):
 def test_bundled_public_benchmarks_are_external_tasks_with_credits():
     tasks = json.loads((REPO_TASKS_DIR / "public_benchmarks.json").read_text(encoding="utf-8"))
 
-    assert len(tasks) == 19
+    assert len(tasks) == 15
     assert {task["type"] for task in tasks} == {"external_benchmark"}
     assert all(task["benchmark"].get("license") for task in tasks)
     assert all(task["benchmark"].get("credit") for task in tasks)
     assert all(task["benchmark"].get("citation") for task in tasks)
     assert all(task["benchmark"].get("group") for task in tasks)
-    assert [task["id"] for task in tasks] == [f"PB_{index:03d}" for index in range(1, 20)]
+    assert [task["id"] for task in tasks] == [
+        "PB_001",
+        "PB_002",
+        "PB_003",
+        "PB_004",
+        "PB_005",
+        "PB_008",
+        "PB_009",
+        "PB_010",
+        "PB_011",
+        "PB_012",
+        "PB_013",
+        "PB_014",
+        "PB_015",
+        "PB_016",
+        "PB_017",
+    ]
     assert [task["benchmark"]["name"] for task in tasks] == [
         "SWE-bench",
         "GDPval",
         "PaperBench",
         "SWE-Lancer",
-        "MLE-bench",
         "SWE-bench Verified",
-        "AutomationBench",
-        "OSWorld",
         "BioMystery Bench",
         "ExploitBench",
         "codeneedle",
@@ -129,19 +142,18 @@ def test_bundled_public_benchmarks_are_external_tasks_with_credits():
         "FinToolBench",
         "Finance Agent v2",
         "FinanceMath",
-        "EDINET-Bench",
     ]
 
+    registry = load_task_registry(REPO_TASKS_DIR)
     loaded = load_tasks(REPO_TASKS_DIR)
-    assert len(loaded) == 19
+    assert len(registry) == 15
+    assert len(loaded) == 15
     assert "public_benchmarks" not in {task.category for task in loaded}
     assert {task.category for task in loaded} == {
         "Biosecurity",
         "Coding",
         "Finance",
-        "GUI",
         "Long Context",
-        "Machine Learning",
         "Research",
         "Security",
         "Work",

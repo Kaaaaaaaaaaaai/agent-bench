@@ -76,7 +76,8 @@ def test_render_summary_html_contains_radar_svg():
     assert "ExampleBench" in html
     assert "https://example.com/citation" in html
     assert "<th>mock</th>" in html
-    assert "<th>Benchmark</th><th>mock</th><th>Items</th><th>Method</th>" in html
+    assert "<th>Benchmark</th><th>Profile</th><th>mock</th><th>Items</th><th>Method</th>" in html
+    assert "<th>Run</th><th>Score Status</th><th>Blocker/Reason</th>" in html
     assert "<th>Benchmark</th><th>Source</th><th>Credit</th>" in html
     assert "<th>Group</th>" not in html
     assert "<th>License</th>" not in html
@@ -161,16 +162,21 @@ def test_cli_mock_smoke_runs_all_bundled_benchmarks(tmp_path):
     assert exit_code == 0
     summary = json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))
     html = (out_dir / "summary.html").read_text(encoding="utf-8")
-    assert summary["task_count"] == 19
-    assert len(summary["benchmark_results"]) == 19
+    assert summary["task_count"] == 15
+    assert summary["selected_suite_count"] == 15
+    assert summary["known_suite_count"] == 15
+    assert len(summary["benchmark_results"]) == 15
+    assert summary["suite_coverage_rate"] == 1.0
+    assert summary["conservative_all_suite_score"] == 1.0
     assert "public_benchmarks" not in html
     assert "SWE-bench" in html
     assert "GDPval" in html
     assert "Humanity&#x27;s Last Exam" not in html
     assert "BioMystery Bench" in html
-    assert "EDINET-Bench" in html
+    assert "EDINET-Bench" not in html
+    assert "MLE-bench" not in html
     assert "Benchmark Citations" in html
-    assert "<th>Benchmark</th><th>mock-perfect</th><th>Items</th><th>Method</th>" in html
+    assert "<th>Benchmark</th><th>Profile</th><th>mock-perfect</th><th>Items</th><th>Method</th>" in html
 
 
 def test_aggregate_results_emits_timing_breakdowns():
@@ -261,6 +267,9 @@ def test_aggregate_results_emits_external_benchmark_rows():
     }
     assert summary["benchmark_results"][0]["benchmark"] == "ExampleBench"
     assert summary["benchmark_results"][0]["score"] == 75.0
+    assert summary["benchmark_results"][0]["score_fraction"] == 0.75
+    assert summary["benchmark_results"][0]["run_status"] == "completed"
+    assert summary["benchmark_results"][0]["score_status"] == "partially_correct"
     assert summary["benchmark_results"][0]["raw_score"] == 50.0
     assert summary["benchmark_results"][0]["valid_score"] == 75.0
     assert summary["benchmark_results"][0]["setup_failed_count"] == 1
@@ -303,15 +312,109 @@ def test_aggregate_results_separates_skipped_from_valid_scores():
 
     assert summary["raw_score"] == 50.0
     assert summary["total_score"] == 100.0
+    assert summary["valid_judged_score"] == 1.0
+    assert summary["suite_coverage_rate"] == 0.5
+    assert summary["item_coverage_rate"] == 0.5
+    assert summary["conservative_all_suite_score"] == 0.5
     assert summary["valid_task_count"] == 1
+    assert summary["skipped_suite_count"] == 1
+    assert summary["skipped_suites"][0]["blocker_type"] == "unsupported_capability"
+    assert summary["skipped_suites"][0]["error"]
     assert summary["skipped_count"] == 1
+
+
+def test_aggregate_results_surfaces_nested_lfs_blocker_type():
+    summary = aggregate_results(
+        [
+            GradeResult(
+                task_id="PB_003",
+                category="Research",
+                kind="external_benchmark",
+                score=0.0,
+                max_score=1.0,
+                passed=False,
+                json_valid=True,
+                latency_seconds=0.1,
+                status="failed_missing_assets",
+                error="All benchmark record evaluations were invalid: failed missing assets",
+                details={
+                    "benchmark": "PaperBench",
+                    "group": "Research",
+                    "result": {
+                        "status": "failed_missing_assets",
+                        "status_counts": {"failed_missing_assets": 1},
+                        "model_evals": [
+                            {
+                                "status": "failed_missing_assets",
+                                "setup_details": {
+                                    "details": {
+                                        "blocker_type": "git_lfs_pointer_stub",
+                                        "asset_errors": [
+                                            {
+                                                "blocker_type": "git_lfs_pointer_stub",
+                                                "reason": "git_lfs_pointer_stub",
+                                            }
+                                        ],
+                                    }
+                                },
+                            }
+                        ],
+                    },
+                },
+            )
+        ],
+        {"run_duration_seconds": 1.0},
+    )
+
+    assert summary["skipped_suites"][0]["blocker_type"] == "git_lfs_pointer_stub"
+    assert summary["benchmark_results"][0]["blocker_type"] == "git_lfs_pointer_stub"
+
+
+def test_aggregate_results_surfaces_repo_patch_canary_blocker_type():
+    summary = aggregate_results(
+        [
+            GradeResult(
+                task_id="PB_001",
+                category="Coding",
+                kind="external_benchmark",
+                score=0.0,
+                max_score=1.0,
+                passed=False,
+                json_valid=True,
+                latency_seconds=0.1,
+                status="failed_harness_setup",
+                error="All benchmark record evaluations were invalid: failed harness setup",
+                details={
+                    "benchmark": "SWE-bench",
+                    "group": "Coding",
+                    "result": {
+                        "status": "failed_harness_setup",
+                        "capability_contract": {
+                            "repo_patch": {
+                                "supported": False,
+                                "canary": {
+                                    "passed": False,
+                                    "blocker_type": "repo_patch_harness_setup",
+                                    "reason": "repo_patch requires the `patch` executable",
+                                },
+                            }
+                        },
+                    },
+                },
+            )
+        ],
+        {"run_duration_seconds": 1.0},
+    )
+
+    assert summary["skipped_suites"][0]["blocker_type"] == "repo_patch_harness_setup"
+    assert summary["benchmark_results"][0]["blocker_type"] == "repo_patch_harness_setup"
 
 
 def test_aggregate_results_uses_nested_judge_parse_and_model_valid_counts():
     summary = aggregate_results(
         [
             GradeResult(
-                task_id="PB_018",
+                task_id="PB_017",
                 category="Finance",
                 kind="external_benchmark",
                 score=0.0,
@@ -348,7 +451,7 @@ def test_aggregate_results_counts_nested_passed_items():
     summary = aggregate_results(
         [
             GradeResult(
-                task_id="PB_019",
+                task_id="PB_008",
                 category="Science",
                 kind="external_benchmark",
                 score=0.5,

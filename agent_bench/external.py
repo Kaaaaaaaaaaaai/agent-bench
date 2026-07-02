@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import threading
@@ -17,7 +18,7 @@ from agent_bench.statuses import FAILED_HARNESS_SETUP, TIMED_OUT
 
 DEFAULT_EXTERNAL_IMAGE = "agent-bench-external:python3.12"
 CONTAINER_OUTPUT_DIR = "/outputs"
-DEFAULT_ASSET_ROOT = Path("/tmp/agent-bench-assets")
+DEFAULT_ASSET_ROOT = Path("agent-bench-assets")
 CONTAINER_ASSET_ROOT = "/asset-cache"
 IMAGE_FINGERPRINT_LABEL = "agent-bench.external-fingerprint"
 _IMAGE_BUILD_LOCK = threading.Lock()
@@ -81,6 +82,9 @@ class ExternalBenchmarkRunner:
                 latency_seconds=time.perf_counter() - started,
                 error=image_error,
             )
+        asset_cache_error = _prepare_benchmark_asset_cache(task, config, launcher_image=launcher_image)
+        if asset_cache_error:
+            env["AGENT_BENCH_ASSET_CACHE_WARNING"] = asset_cache_error
 
         container_name = f"agent-bench-{task.id.lower()}-{uuid.uuid4().hex[:12]}"
         command = [
@@ -126,8 +130,10 @@ class ExternalBenchmarkRunner:
                 error=f"External benchmark timed out after {config.timeout:.1f}s",
                 timed_out=True,
                 details={
+                    "suite_id": task.id,
                     "benchmark": task.benchmark["name"],
                     "group": task.benchmark.get("group", task.category),
+                    "required_capabilities": task.benchmark.get("capabilities", []),
                     "homepage": task.benchmark["homepage"],
                     "license": task.benchmark["license"],
                     "credit": task.benchmark["credit"],
@@ -161,8 +167,10 @@ class ExternalBenchmarkRunner:
                 payload = _synthetic_result_payload(task, FAILED_HARNESS_SETUP, error, score=0.0)
                 _write_result_payload(result_file, payload)
         details = {
+            "suite_id": task.id,
             "benchmark": benchmark["name"],
             "group": benchmark.get("group", task.category),
+            "required_capabilities": benchmark.get("capabilities", []),
             "homepage": benchmark["homepage"],
             "license": benchmark["license"],
             "credit": benchmark["credit"],
@@ -310,7 +318,10 @@ def _docker_env(task: Task, benchmark: dict[str, Any], docker: dict[str, Any], c
         "AGENT_BENCH_MAX_TOKENS": str(config.max_tokens),
         "AGENT_BENCH_OUTPUT_DIR": CONTAINER_OUTPUT_DIR,
         "AGENT_BENCH_ASSET_ROOT": CONTAINER_ASSET_ROOT,
+        "AGENT_BENCH_ASSET_CACHE_KEY": _asset_cache_key(benchmark["name"]),
     }
+    if "repo_patch" in _benchmark_capabilities(benchmark):
+        env.setdefault("AGENT_BENCH_ALLOW_TARGET_CHECKOUT", "1")
     if config.api_key_env:
         env["AGENT_BENCH_API_KEY_ENV"] = config.api_key_env
         env["AGENT_BENCH_API_KEY"] = os.environ.get(config.api_key_env, "")
@@ -320,6 +331,224 @@ def _docker_env(task: Task, benchmark: dict[str, Any], docker: dict[str, Any], c
         key, _, value = item.partition("=")
         env[key] = value
     return env
+
+
+def _prepare_benchmark_asset_cache(
+    task: Task,
+    config: ExternalBenchmarkConfig,
+    *,
+    launcher_image: str | None = None,
+) -> str | None:
+    recipe = _asset_cache_recipe(task.benchmark)
+    if recipe is None:
+        return None
+    cache_dir = config.asset_root / recipe["key"]
+    sentinel = cache_dir / ".agent-bench-assets-ready.json"
+    if sentinel.is_file() and _cache_has_materialized_files(cache_dir):
+        return None
+    git_bin = shutil.which("git")
+    git_lfs_bin = shutil.which("git-lfs")
+    if (git_bin is None or git_lfs_bin is None) and launcher_image:
+        return _prepare_benchmark_asset_cache_with_docker(recipe, config, launcher_image)
+    if git_bin is None:
+        return "asset cache download skipped: git was not found and Docker fallback was unavailable"
+    if git_lfs_bin is None:
+        return "asset cache download skipped: git-lfs was not found and Docker fallback was unavailable"
+
+    download_root = config.asset_root / "_downloads" / recipe["key"]
+    clone_dir = download_root / "repo"
+    if clone_dir.exists():
+        shutil.rmtree(clone_dir)
+    download_root.mkdir(parents=True, exist_ok=True)
+    repository = str(recipe["repository"])
+    ref = str(recipe.get("ref") or "main")
+    env = os.environ.copy()
+    env["GIT_LFS_SKIP_SMUDGE"] = "1"
+    clone_error = _run_asset_command(
+        [git_bin, "clone", "--depth", "1", "--branch", ref, repository, str(clone_dir)],
+        env=env,
+    )
+    if clone_error is not None:
+        if clone_dir.exists():
+            shutil.rmtree(clone_dir)
+        clone_error = _run_asset_command([git_bin, "clone", "--depth", "1", repository, str(clone_dir)], env=env)
+        if clone_error is not None:
+            return f"asset cache download skipped: {clone_error}"
+    _run_asset_command([git_bin, "-C", str(clone_dir), "lfs", "install", "--local"], env=env)
+    lfs_error = _run_asset_command(
+        [
+            git_bin,
+            "-C",
+            str(clone_dir),
+            "lfs",
+            "pull",
+            "--include",
+            ",".join(str(item) for item in recipe["includes"]),
+            "--exclude",
+            "",
+        ],
+        env=env,
+    )
+    if lfs_error is not None:
+        return f"asset cache download skipped: {lfs_error}"
+
+    copied = 0
+    for subpath in recipe["subpaths"]:
+        source = clone_dir / str(subpath)
+        if not source.exists():
+            continue
+        target = cache_dir / str(subpath)
+        if target.exists():
+            if target.is_dir():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if source.is_dir():
+            shutil.copytree(source, target)
+            copied += sum(1 for path in target.rglob("*") if path.is_file())
+        else:
+            shutil.copy2(source, target)
+            copied += 1
+    if copied == 0:
+        return "asset cache download skipped: no requested asset files were materialized"
+    sentinel.write_text(
+        json.dumps(
+            {
+                "benchmark": task.benchmark["name"],
+                "repository": repository,
+                "ref": ref,
+                "copied_file_count": copied,
+                "subpaths": list(recipe["subpaths"]),
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return None
+
+
+def _prepare_benchmark_asset_cache_with_docker(
+    recipe: dict[str, Any],
+    config: ExternalBenchmarkConfig,
+    launcher_image: str,
+) -> str | None:
+    if shutil.which(config.docker_bin) is None:
+        return "asset cache download skipped: git-lfs was not found and Docker was unavailable"
+    key = str(recipe["key"])
+    cache_dir = config.asset_root / key
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    script = _docker_asset_download_script(recipe)
+    completed = subprocess.run(
+        [
+            config.docker_bin,
+            "run",
+            "--rm",
+            "--network",
+            "host",
+            "-v",
+            f"{config.asset_root.resolve()}:{CONTAINER_ASSET_ROOT}",
+            "--entrypoint",
+            "bash",
+            launcher_image,
+            "-lc",
+            script,
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        output = (completed.stderr or completed.stdout or "").strip()
+        return f"asset cache download skipped: {(output[-1000:] or 'Docker downloader failed')}"
+    if _cache_has_materialized_files(cache_dir):
+        return None
+    return "asset cache download skipped: Docker downloader did not materialize requested files"
+
+
+def _docker_asset_download_script(recipe: dict[str, Any]) -> str:
+    key = shlex.quote(str(recipe["key"]))
+    repository = shlex.quote(str(recipe["repository"]))
+    ref = shlex.quote(str(recipe.get("ref") or "main"))
+    includes = shlex.quote(",".join(str(item) for item in recipe["includes"]))
+    copy_commands = []
+    for subpath in recipe["subpaths"]:
+        quoted = shlex.quote(str(subpath))
+        copy_commands.append(
+            f'if [[ -e "$tmp/{quoted}" ]]; then '
+            f'mkdir -p "$cache/$(dirname {quoted})"; '
+            f'rm -rf "$cache/{quoted}"; '
+            f'cp -a "$tmp/{quoted}" "$cache/{quoted}"; '
+            "fi"
+        )
+    copy_script = "\n".join(copy_commands)
+    return "\n".join(
+        [
+            "set -euo pipefail",
+            f"key={key}",
+            f"repository={repository}",
+            f"ref={ref}",
+            f"includes={includes}",
+            f'cache="{CONTAINER_ASSET_ROOT}/$key"',
+            f'tmp="{CONTAINER_ASSET_ROOT}/_downloads/$key/repo"',
+            'rm -rf "$tmp"',
+            'mkdir -p "$(dirname "$tmp")" "$cache"',
+            "export GIT_LFS_SKIP_SMUDGE=1",
+            'git clone --depth 1 --branch "$ref" "$repository" "$tmp" || { rm -rf "$tmp"; git clone --depth 1 "$repository" "$tmp"; }',
+            'git -C "$tmp" lfs install --local || true',
+            'git -C "$tmp" lfs pull --include "$includes" --exclude ""',
+            copy_script,
+            """printf '{"downloaded":true}\\n' > "$cache/.agent-bench-assets-ready.json" """,
+        ]
+    )
+
+
+def _asset_cache_recipe(benchmark: dict[str, Any]) -> dict[str, Any] | None:
+    key = _asset_cache_key(str(benchmark.get("name") or ""))
+    if key == "gdpval":
+        return {
+            "key": key,
+            "repository": benchmark.get("repository") or "https://huggingface.co/datasets/openai/gdpval",
+            "ref": benchmark.get("ref") or "main",
+            "includes": ("reference_files/**", "deliverable_files/**"),
+            "subpaths": ("reference_files", "deliverable_files"),
+        }
+    if key == "paperbench":
+        return {
+            "key": key,
+            "repository": benchmark.get("repository") or "https://github.com/openai/frontier-evals.git",
+            "ref": benchmark.get("ref") or "main",
+            "includes": ("project/paperbench/data/papers/**",),
+            "subpaths": ("project/paperbench/data/papers",),
+        }
+    return None
+
+
+def _asset_cache_key(value: str) -> str:
+    return _safe_slug(value).lower()
+
+
+def _safe_slug(value: str) -> str:
+    slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in value.strip())
+    while "--" in slug:
+        slug = slug.replace("--", "-")
+    return slug.strip("-") or "benchmark"
+
+
+def _cache_has_materialized_files(path: Path) -> bool:
+    try:
+        return any(child.is_file() for child in path.rglob("*") if child.name != ".agent-bench-assets-ready.json")
+    except OSError:
+        return False
+
+
+def _run_asset_command(command: list[str], *, env: dict[str, str]) -> str | None:
+    completed = subprocess.run(command, text=True, capture_output=True, check=False, env=env)
+    if completed.returncode == 0:
+        return None
+    output = (completed.stderr or completed.stdout or "").strip()
+    return output[-1000:] or f"{command[0]} exited with code {completed.returncode}"
 
 
 def _benchmark_capabilities(benchmark: dict[str, Any]) -> list[str]:
@@ -381,10 +610,14 @@ def _synthetic_result_payload(task: Task, status: str, error: str, score: float 
 
 
 def _synthetic_capability_contract(required_capabilities: list[str]) -> dict[str, dict[str, Any]]:
-    supported = {"chat_answer", "external_data_required"}
+    supported = {
+        "browser_or_gui",
+        "chat_answer",
+        "external_data_required",
+        "office_document_editing",
+        "tool_call",
+    }
     reasons = {
-        "browser_or_gui": "No real desktop/browser environment adapter is implemented",
-        "tool_call": "No benchmark-native stateful tool adapter is implemented",
         "repo_patch": "External benchmark did not complete before repo_patch workspace/grader verification",
         "file_artifact": "External benchmark did not complete before file_artifact asset/output verification",
     }

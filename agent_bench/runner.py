@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import shutil
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -13,7 +14,7 @@ from agent_bench.external import ExternalBenchmarkConfig, ExternalBenchmarkRunne
 from agent_bench.models import GradeResult, ModelResponse, Task
 from agent_bench.reports import update_latest, write_jsonl_line, write_result_artifacts
 from agent_bench.sandbox import make_sandbox
-from agent_bench.tasks import load_tasks
+from agent_bench.tasks import load_task_registry, select_tasks
 from agent_bench.verifiers import grade_task
 
 
@@ -22,7 +23,7 @@ DEFAULT_TASK_TIMEOUT_SECONDS = 60.0
 DEFAULT_EXTERNAL_TIMEOUT_SECONDS = 6 * 60 * 60.0
 DEFAULT_MODEL_REQUEST_TIMEOUT_SECONDS = 30 * 60.0
 DEFAULT_MAX_TOKENS = 16384
-DEFAULT_EXTERNAL_ASSET_ROOT = Path("/tmp/agent-bench-assets")
+DEFAULT_EXTERNAL_ASSET_ROOT = Path("agent-bench-assets")
 
 
 @dataclass(slots=True)
@@ -47,13 +48,22 @@ class RunConfig:
     sandbox_image: str = "agent-bench-python:3.12"
     external_launcher_image: str = "agent-bench-external:python3.12"
     asset_root: Path = DEFAULT_EXTERNAL_ASSET_ROOT
+    profile: str = "full_active"
+    suite_ids: set[str] | None = None
 
 
 async def run_benchmark(config: RunConfig) -> dict[str, Any]:
     run_started = time.perf_counter()
-    tasks = load_tasks(config.tasks_dir, include=config.include, limit=config.limit)
+    registry = load_task_registry(config.tasks_dir)
+    tasks = select_tasks(
+        registry,
+        include=config.include,
+        limit=config.limit,
+        suite_ids=config.suite_ids,
+        profile=config.profile,
+    )
     output_dir, latest_dir = _prepare_output_paths(config.out)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    _reset_output_dir(output_dir)
 
     client = make_client(
         provider=config.provider,
@@ -108,7 +118,13 @@ async def run_benchmark(config: RunConfig) -> dict[str, Any]:
     grades.sort(key=lambda result: _task_order(tasks, result.task_id))
     responses.sort(key=lambda response: _task_order(tasks, response.task_id))
     run_duration_seconds = time.perf_counter() - run_started
-    metadata = _metadata(config, len(tasks), output_dir, run_duration_seconds)
+    metadata = _metadata(
+        config,
+        task_count=len(tasks),
+        registry_count=len(registry),
+        output_dir=output_dir,
+        run_duration_seconds=run_duration_seconds,
+    )
     summary = aggregate_results(grades, metadata)
     write_result_artifacts(output_dir, responses, grades, summary)
     if latest_dir is not None:
@@ -134,7 +150,8 @@ async def _process_task(
 ) -> GradeResult:
     task_started = time.perf_counter()
     if task.is_external_benchmark and config.provider != "mock":
-        response = await _run_external_benchmark(task, external_runner, config, output_dir)
+        async with request_sem:
+            response = await _run_external_benchmark(task, external_runner, config, output_dir)
     else:
         empty_response_count = 0
         while True:
@@ -154,6 +171,8 @@ async def _process_task(
 
     async with eval_sem:
         grade = await grade_task(task, response, sandbox, timeout)
+    if response.usage:
+        grade.details.setdefault("usage", response.usage)
     grade.task_duration_seconds = time.perf_counter() - task_started
     async with graded_lock:
         write_jsonl_line(graded_handle, grade.to_dict())
@@ -217,9 +236,19 @@ def _prepare_output_paths(out: Path) -> tuple[Path, Path | None]:
     return out, None
 
 
+def _reset_output_dir(output_dir: Path) -> None:
+    if output_dir.exists() or output_dir.is_symlink():
+        if output_dir.is_dir() and not output_dir.is_symlink():
+            shutil.rmtree(output_dir)
+        else:
+            output_dir.unlink()
+    output_dir.mkdir(parents=True, exist_ok=False)
+
+
 def _metadata(
     config: RunConfig,
     task_count: int,
+    registry_count: int,
     output_dir: Path,
     run_duration_seconds: float,
 ) -> dict[str, Any]:
@@ -229,6 +258,9 @@ def _metadata(
         "base_url": config.base_url or "",
         "model": config.model or ("mock-perfect" if config.provider == "mock" else ""),
         "task_count": task_count,
+        "known_suite_count": registry_count,
+        "selected_profile": config.profile,
+        "selected_suite_count": task_count,
         "output_dir": str(output_dir),
         "run_duration_seconds": run_duration_seconds,
         "request_concurrency": config.request_concurrency,

@@ -46,6 +46,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--limit", type=int, default=None)
     run.add_argument("--include", default=None, help="Comma-separated category, source file, or task IDs")
+    run.add_argument("--profile", default="full_active", help="Benchmark profile to run; default: full_active")
+    run.add_argument(
+        "--suite",
+        action="append",
+        default=None,
+        help="Suite ID or benchmark name to run; may be passed multiple times or comma-separated",
+    )
     run.add_argument("--temperature", type=float, default=0.0)
     run.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
     run.add_argument("--json-mode", choices=["auto", "on", "off"], default="auto")
@@ -68,7 +75,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 2
     if args.command == "run":
-        include = {item.strip() for item in args.include.split(",")} if args.include else None
+        include = _split_selectors(args.include)
+        suite_ids = _split_selectors(args.suite)
         config = RunConfig(
             provider=args.provider,
             base_url=args.base_url,
@@ -83,6 +91,8 @@ def main(argv: list[str] | None = None) -> int:
             model_request_timeout=args.model_request_timeout,
             limit=args.limit,
             include=include,
+            profile=args.profile,
+            suite_ids=suite_ids,
             temperature=args.temperature,
             max_tokens=args.max_tokens,
             json_mode=args.json_mode,
@@ -93,7 +103,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         summary = asyncio.run(run_benchmark(config))
         print(f"Tasks: {summary['passed_count']} / {summary['task_count']} passed")
-        print(f"Valid score: {summary['score_valid_tasks_only']:.2f}%")
+        print(
+            "Valid judged score: "
+            f"{summary['valid_judged_score'] * 100.0:.2f}% "
+            f"(suite coverage {summary['valid_task_count']}/{summary['task_count']}, "
+            f"item coverage {summary.get('valid_judged_item_count', 0)}/{summary.get('item_count', 0)})"
+        )
+        print(f"Conservative all-suite score: {summary['conservative_all_suite_score'] * 100.0:.2f}%")
         if "model_score_valid_tasks_only" in summary:
             print(f"Model-valid score: {summary['model_score_valid_tasks_only']:.2f}%")
         if summary.get("raw_score_all_tasks") != summary.get("score_valid_tasks_only") or summary.get("skipped_count"):
@@ -114,6 +130,19 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     parser.error(f"Unknown command: {args.command}")
     return 2
+
+
+def _split_selectors(value: str | list[str] | None) -> set[str] | None:
+    if value is None:
+        return None
+    items = value if isinstance(value, list) else [value]
+    parsed = {
+        part.strip()
+        for item in items
+        for part in item.split(",")
+        if part.strip()
+    }
+    return parsed or None
 
 
 if __name__ == "__main__":

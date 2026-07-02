@@ -13,7 +13,19 @@ def load_tasks(
     tasks_dir: str | Path,
     include: set[str] | None = None,
     limit: int | None = None,
+    suite_ids: set[str] | None = None,
+    profile: str = "full_active",
 ) -> list[Task]:
+    return select_tasks(
+        load_task_registry(tasks_dir),
+        include=include,
+        limit=limit,
+        suite_ids=suite_ids,
+        profile=profile,
+    )
+
+
+def load_task_registry(tasks_dir: str | Path) -> list[Task]:
     root = Path(tasks_dir)
     if not root.exists():
         raise TaskLoadError(f"Task directory does not exist: {root}")
@@ -25,25 +37,61 @@ def load_tasks(
         category = path.stem
         tasks.extend(_load_task_file(path, category))
 
-    if include:
-        include_normalized = {item.strip() for item in include if item.strip()}
-        tasks = [
-            task
-            for task in tasks
-            if task.category in include_normalized
-            or task.id in include_normalized
-            or task.source in include_normalized
-            or task.benchmark.get("name") in include_normalized
-        ]
-
-    if limit is not None:
-        if limit < 0:
-            raise TaskLoadError("limit must be non-negative")
-        tasks = tasks[:limit]
-
     if not tasks:
         raise TaskLoadError("No tasks were loaded")
     return tasks
+
+
+def select_tasks(
+    tasks: list[Task],
+    include: set[str] | None = None,
+    limit: int | None = None,
+    suite_ids: set[str] | None = None,
+    profile: str = "full_active",
+) -> list[Task]:
+    if limit is not None and limit < 0:
+        raise TaskLoadError("limit must be non-negative")
+    if profile != "full_active":
+        raise TaskLoadError(f"Unsupported benchmark profile: {profile}")
+
+    include_normalized = _normalized_selector_set(include)
+    suite_normalized = _normalized_selector_set(suite_ids)
+    matched = [
+        task
+        for task in tasks
+        if _matches_include(task, include_normalized)
+        and _matches_suite_selection(task, suite_normalized)
+    ]
+
+    if limit is not None:
+        matched = matched[:limit]
+
+    if not matched:
+        raise TaskLoadError("No tasks were loaded")
+
+    return matched
+
+
+def _normalized_selector_set(values: set[str] | None) -> set[str]:
+    return {item.strip() for item in values or set() if isinstance(item, str) and item.strip()}
+
+
+def _matches_include(task: Task, include: set[str]) -> bool:
+    if not include:
+        return True
+    return (
+        task.category in include
+        or task.id in include
+        or task.source in include
+        or task.benchmark.get("name") in include
+    )
+
+
+def _matches_suite_selection(task: Task, suite_ids: set[str]) -> bool:
+    if not suite_ids:
+        return True
+    name = task.benchmark.get("name") if isinstance(task.benchmark, dict) else None
+    return task.id in suite_ids or name in suite_ids
 
 
 def _load_task_file(path: Path, category: str) -> list[Task]:
