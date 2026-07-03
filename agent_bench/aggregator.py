@@ -135,6 +135,8 @@ def aggregate_results(
     item_count, valid_item_count = _item_coverage_counts(results)
     suite_blockers = _suite_blockers(results)
     blocker_counts = _blocker_counts(results)
+    excluded_suites = _excluded_suites(metadata)
+    excluded_suite_count = _int_metadata(metadata, "excluded_suite_count", len(excluded_suites))
     profile_results = _profile_results(benchmark_results)
     parser_repair_count = _parser_repair_count(results)
     usage_summary = _usage_summary(results)
@@ -144,6 +146,8 @@ def aggregate_results(
         "selected_profile": metadata.get("selected_profile", "full_active"),
         "known_suite_count": known_suite_count,
         "selected_suite_count": task_count,
+        "excluded_suite_count": excluded_suite_count,
+        "excluded_suites": excluded_suites,
         "metadata": metadata,
         "task_count": task_count,
         "valid_task_count": valid_task_count,
@@ -154,6 +158,13 @@ def aggregate_results(
         "passed_count": passed_count,
         "item_passed_count": benchmark_item_passed_count,
         "valid_judged_score": _ratio(total_score, valid_task_count),
+        "valid_judged_suite_score": _ratio(total_score, valid_task_count),
+        "valid_judged_item_score": _ratio(
+            sum(result.score for result in model_valid_results),
+            valid_item_count,
+        ),
+        "model_verified_score": _ratio(model_total_score, model_valid_task_count),
+        "conservative_selected_suite_score": _ratio(raw_total_score, task_count),
         "suite_coverage_rate": _ratio(valid_task_count, task_count),
         "item_coverage_rate": _ratio(valid_item_count, item_count),
         "conservative_all_suite_score": _ratio(raw_total_score, task_count),
@@ -170,10 +181,14 @@ def aggregate_results(
         "harness_health": _harness_health_summary(status_counts, benchmark_item_status_counts),
         "headline": {
             "valid_judged_score": _ratio(total_score, valid_task_count),
+            "valid_judged_suite_score": _ratio(total_score, valid_task_count),
+            "model_verified_score": _ratio(model_total_score, model_valid_task_count),
+            "conservative_selected_suite_score": _ratio(raw_total_score, task_count),
             "suite_coverage_rate": _ratio(valid_task_count, task_count),
             "item_coverage_rate": _ratio(valid_item_count, item_count),
             "conservative_all_suite_score": _ratio(raw_total_score, task_count),
             "selected_suite_count": task_count,
+            "excluded_suite_count": excluded_suite_count,
             "valid_judged_suite_count": valid_task_count,
             "known_suite_count": known_suite_count,
             "coverage": f"{valid_task_count}/{task_count} valid judged suites",
@@ -196,7 +211,15 @@ def aggregate_results(
         "skipped_suites": suite_blockers,
         "blocker_counts": blocker_counts,
         "skipped_count": sum(count for status, count in status_counts.items() if is_skipped_like_status(status)),
-        "missing_asset_count": blocker_counts.get(BLOCKER_MISSING_ASSET, 0),
+        "missing_asset_count": blocker_counts.get(BLOCKER_MISSING_ASSET, 0)
+        + blocker_counts.get(BLOCKER_GIT_LFS_POINTER_STUB, 0),
+        "git_lfs_pointer_stub_count": blocker_counts.get(BLOCKER_GIT_LFS_POINTER_STUB, 0),
+        "missing_reference_dataset_count": blocker_counts.get(BLOCKER_MISSING_REFERENCE_DATASET, 0),
+        "missing_reference_documents_count": blocker_counts.get(BLOCKER_MISSING_REFERENCE_DOCUMENTS, 0),
+        "missing_required_tool_count": blocker_counts.get(BLOCKER_MISSING_REQUIRED_TOOL, 0),
+        "invalid_task_context_count": blocker_counts.get(BLOCKER_INVALID_TASK_CONTEXT, 0),
+        "judge_parse_error_count": blocker_counts.get(BLOCKER_JUDGE_PARSE_ERROR, 0),
+        "repo_patch_harness_setup_count": blocker_counts.get(BLOCKER_REPO_PATCH_HARNESS_SETUP, 0),
         "missing_assets_count": status_counts.get(FAILED_MISSING_ASSETS, 0),
         "unsupported_capability_count": status_counts.get(SKIPPED_UNSUPPORTED_CAPABILITY, 0),
         "missing_grader_count": blocker_counts.get(BLOCKER_MISSING_GRADER, 0),
@@ -268,6 +291,31 @@ def _int_metadata(metadata: dict[str, Any], key: str, default: int) -> int:
     if isinstance(value, int):
         return value
     return default
+
+
+def _excluded_suites(metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = metadata.get("excluded_suites")
+    if not isinstance(raw, list):
+        return []
+    rows: list[dict[str, Any]] = []
+    for row in raw:
+        if not isinstance(row, dict):
+            continue
+        suite_id = row.get("suite_id")
+        name = row.get("name")
+        if not isinstance(suite_id, str) or not suite_id.strip():
+            continue
+        rows.append(
+            {
+                "suite_id": suite_id,
+                "name": str(name or suite_id),
+                "lifecycle_status": str(row.get("lifecycle_status") or "removed"),
+                "exclusion_reason": str(row.get("exclusion_reason") or "removed_from_active_suite"),
+                "included_in_official_score": False,
+                "removal_reason": str(row.get("removal_reason") or ""),
+            }
+        )
+    return sorted(rows, key=lambda row: row["suite_id"])
 
 
 def _valid_items(items: list[GradeResult]) -> list[GradeResult]:

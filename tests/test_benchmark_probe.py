@@ -525,7 +525,7 @@ def test_probe_repo_patch_grading_rejects_reference_diff(monkeypatch):
 
     assert score == 0.0
     assert grade["status"] == "failed_model_answer"
-    assert grade["method"] == "repo_patch_model_judge"
+    assert grade["method"] == "task_compliance_fallback"
     assert grade["official_grader"] is False
     assert calls[0][3] == "task_compliance"
     assert "Model patch:" in calls[0][2]
@@ -1402,7 +1402,8 @@ def test_probe_unparseable_judge_text_is_grader_failure(monkeypatch):
 
     assert score == 0.0
     assert grade["status"] == "failed_grader"
-    assert grade["judge_parser_status"] == "fallback_unparsed"
+    assert grade["judge_parser_status"] == "judge_parse_error"
+    assert grade["judge_retry_count"] == 2
 
 
 def test_probe_accepts_repaired_judge_json(monkeypatch):
@@ -1437,7 +1438,39 @@ def test_probe_accepts_repaired_judge_json(monkeypatch):
     assert grade["judge_parse_repaired"] is True
 
 
-def test_probe_accepts_numeric_prose_judge_score(monkeypatch):
+def test_probe_finmcp_accepts_base_judge_json(monkeypatch):
+    probe = _load_probe_module()
+
+    def fake_post(base_url, payload, headers):
+        return json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"score":1.0,"passed":true,"reason":"complete"}'
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setenv("AGENT_BENCH_BASE_URL", "http://model.test/v1")
+    monkeypatch.setenv("AGENT_BENCH_MODEL", "model")
+    monkeypatch.setattr(probe, "post_chat_completion", fake_post)
+
+    score, grade = probe.judge_answer(
+        "FinMCP-Bench",
+        probe.BenchmarkItem("q", "rubric", "source", metadata={"grading": "task_compliance"}),
+        "answer",
+        "task_compliance",
+    )
+
+    assert score == 1.0
+    assert grade["status"] == "passed"
+    assert grade["judge_parser_status"] == "parsed"
+
+
+def test_probe_accepts_explicit_numeric_prose_judge_score_after_retries(monkeypatch):
     probe = _load_probe_module()
 
     def fake_post(base_url, payload, headers):
@@ -1467,9 +1500,45 @@ def test_probe_accepts_numeric_prose_judge_score(monkeypatch):
     assert score == 0.5
     assert grade["status"] == "failed_model_answer"
     assert grade["judge_parser_status"] == "prose_score"
+    assert grade["judge_retry_count"] == 2
 
 
-def test_probe_accepts_positive_qualitative_prose_judge(monkeypatch):
+def test_probe_accepts_fractional_prose_judge_score(monkeypatch):
+    probe = _load_probe_module()
+
+    def fake_post(base_url, payload, headers):
+        return json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                "The candidate directly satisfies the task. Score: 5/5 (or 1.0). "
+                                "Passed: true. Reason: complete."
+                            )
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setenv("AGENT_BENCH_BASE_URL", "http://model.test/v1")
+    monkeypatch.setenv("AGENT_BENCH_MODEL", "model")
+    monkeypatch.setattr(probe, "post_chat_completion", fake_post)
+
+    score, grade = probe.judge_answer(
+        "ExampleBench",
+        probe.BenchmarkItem("q", "rubric", "source", metadata={"grading": "rubric"}),
+        "answer",
+        "rubric",
+    )
+
+    assert score == 1.0
+    assert grade["status"] == "passed"
+    assert grade["judge_parser_status"] == "prose_score"
+
+
+def test_probe_retries_and_rejects_positive_qualitative_prose_judge(monkeypatch):
     probe = _load_probe_module()
 
     def fake_post(base_url, payload, headers):
@@ -1496,8 +1565,9 @@ def test_probe_accepts_positive_qualitative_prose_judge(monkeypatch):
         "rubric",
     )
 
-    assert score == 0.5
-    assert grade["judge_parser_status"] == "prose_score"
+    assert score == 0.0
+    assert grade["status"] == "failed_grader"
+    assert grade["judge_parser_status"] == "judge_parse_error"
 
 
 def test_probe_rejects_negative_qualitative_prose_judge(monkeypatch):
@@ -1528,7 +1598,8 @@ def test_probe_rejects_negative_qualitative_prose_judge(monkeypatch):
     )
 
     assert score == 0.0
-    assert grade["judge_parser_status"] == "fallback_unparsed"
+    assert grade["status"] == "failed_grader"
+    assert grade["judge_parser_status"] == "judge_parse_error"
 
 
 def test_probe_gives_partial_credit_for_valid_choice_when_judge_scores_zero(monkeypatch):
@@ -1540,7 +1611,11 @@ def test_probe_gives_partial_credit_for_valid_choice_when_judge_scores_zero(monk
                 "choices": [
                     {
                         "message": {
-                            "content": '{"score":0.0,"passed":false,"reason":"missing rationale"}'
+                            "content": (
+                                '{"score":0.0,"passed":false,"label_correct":true,'
+                                '"rationale_present":false,"rationale_quality":"inadequate",'
+                                '"reason":"missing rationale"}'
+                            )
                         }
                     }
                 ]
@@ -1586,7 +1661,7 @@ def test_probe_gives_partial_credit_for_valid_choice_when_judge_unparsed(monkeyp
 
     assert score == 0.0
     assert grade["status"] == "failed_grader"
-    assert grade["judge_parser_status"] == "fallback_unparsed"
+    assert grade["judge_parser_status"] == "judge_parse_error"
 
 
 def test_probe_rejects_placeholder_judge_reason(monkeypatch):
@@ -1826,3 +1901,132 @@ def test_agent_loop_executes_text_tool_requests_when_native_tools_are_unavailabl
     assert "tools" in calls[0]
     assert "tools" not in calls[1]
     assert calls[1]["messages"][-1]["content"].startswith("Tool result for read_file")
+
+
+def test_agent_loop_respects_empty_tool_list_for_static_adapters(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AGENT_BENCH_PROVIDER", "openai-compatible")
+    monkeypatch.setenv("AGENT_BENCH_BASE_URL", "http://model.test/v1")
+    monkeypatch.setenv("AGENT_BENCH_MODEL", "model")
+    calls = []
+
+    def fake_post(base_url, payload, headers):
+        calls.append(payload)
+        return json.dumps({"choices": [{"message": {"content": '{"answer":"done","confidence":1.0}'}}]}), payload
+
+    monkeypatch.setattr(probe, "post_chat_completion_with_variant", fake_post)
+    item = probe.BenchmarkItem(
+        "Answer without tools.",
+        "rubric",
+        "test",
+        metadata={"grading": "task_compliance"},
+    )
+
+    result = probe.run_agent_loop("ExampleBench", item, tools=[])
+
+    assert result["answer"] == "done"
+    assert "tools" not in calls[0]
+    assert "tool_choice" not in calls[0]
+
+
+def test_exploitbench_does_not_extract_spec_markdown(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "ExploitBench")
+    (tmp_path / "benchmarks").mkdir()
+    (tmp_path / "benchmarks" / "v8.yaml").write_text("target_image: ghcr.io/exploitbench/v8:latest\n", encoding="utf-8")
+    (tmp_path / "benchmarks" / "v8-small.yaml").write_text("image: ghcr.io/exploitbench/v8-small:latest\n", encoding="utf-8")
+    (tmp_path / "benchmarks-bench-v8-SPEC.md").write_text("# spec\nThis is methodology.\n", encoding="utf-8")
+
+    items, errors = probe.extract_benchmark_items(tmp_path, limit=3)
+
+    assert errors == []
+    assert items
+    assert all("SPEC.md" not in item.source for item in items)
+    assert all(item.metadata.get("target_image") or item.metadata.get("environment") for item in items)
+
+
+def test_finance_agent_v2_rejects_task_md_only_item(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "Finance Agent v2")
+    item = probe.BenchmarkItem(
+        "TASK.md-only prompt",
+        "requires official evidence",
+        "TASK.md",
+        metadata={"task_md_only": True},
+    )
+
+    result = probe.validate_finance_agent_v2_item(item, tmp_path, probe.agent_tool_schemas())
+
+    assert result is not None
+    assert result[0] == "failed_invalid_task_context"
+    assert result[2]["blocker_type"] == "missing_reference_documents"
+
+
+def test_finance_agent_v2_static_public_item_skips_backend_credentials(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "Finance Agent v2")
+    for key in probe.FINANCE_AGENT_V2_REQUIRED_ENV:
+        monkeypatch.delenv(key, raising=False)
+    item = probe.BenchmarkItem(
+        "Answer from the public prompt.",
+        "rubric",
+        "data/public.csv:record-000001",
+        metadata={
+            "live_tools_required": False,
+            "required_tools": sorted(probe.FINANCE_AGENT_V2_REQUIRED_TOOLS),
+        },
+    )
+
+    result = probe.validate_finance_agent_v2_item(item, tmp_path, probe.agent_tool_schemas())
+
+    assert result is None
+
+
+def test_fintoolbench_missing_required_tool_helper_blocks_model_call():
+    probe = _load_probe_module()
+    item = probe.BenchmarkItem(
+        "Call selected tool.",
+        "Use tool.",
+        "synthetic",
+        metadata={"select_tools": ["companies_balance_sheet_statements"]},
+    )
+    tools = [{"type": "function", "function": {"name": "final_answer"}}]
+
+    assert probe._missing_required_tools(item, tools) == ["companies_balance_sheet_statements"]
+
+
+def test_fintoolbench_static_item_bypasses_required_tool_preflight():
+    probe = _load_probe_module()
+    item = probe.BenchmarkItem(
+        "Answer from static benchmark row.",
+        "$8.70",
+        "synthetic",
+        metadata={
+            "live_tools_required": False,
+            "required_tools": ["companies_balance_sheet_statements"],
+        },
+    )
+    tools = [{"type": "function", "function": {"name": "final_answer"}}]
+
+    assert probe._missing_required_tools(item, tools) == []
+
+
+def test_finmcp_static_item_validation_rejects_live_tool_call_metadata():
+    probe = _load_probe_module()
+    item = probe.BenchmarkItem(
+        "query\ntranscript",
+        "answer",
+        "record",
+        metadata={
+            "source_dataset": "DianJin/FinMCP-Bench",
+            "live_tools_required": False,
+            "required_capabilities": ["tool_call"],
+            "transcript": "tool output",
+        },
+    )
+
+    result = probe.validate_finmcp_static_item(item)
+
+    assert result is not None
+    assert result[0] == "failed_invalid_task_context"

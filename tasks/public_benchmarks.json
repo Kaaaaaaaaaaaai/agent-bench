@@ -27,64 +27,6 @@
     }
   },
   {
-    "id": "PB_002",
-    "type": "external_benchmark",
-    "question": "Run GDPval locally through the Docker-backed public benchmark adapter.",
-    "benchmark": {
-      "name": "GDPval",
-      "group": "Work",
-      "capabilities": [
-        "file_artifact",
-        "external_data_required",
-        "office_document_editing"
-      ],
-      "homepage": "https://huggingface.co/datasets/openai/gdpval",
-      "repository": "https://huggingface.co/datasets/openai/gdpval",
-      "dataset_id": "openai/gdpval",
-      "ref": "main",
-      "subdir": "",
-      "license": "Unspecified on dataset card",
-      "credit": "OpenAI GDPval authors",
-      "citation": "https://huggingface.co/datasets/openai/gdpval",
-      "docker": {
-        "image": "agent-bench-external:python3.12",
-        "setup": [],
-        "command": "agent-bench-probe --benchmark \"GDPval\" --kind public-benchmark",
-        "environment": [],
-        "volumes": []
-      }
-    }
-  },
-  {
-    "id": "PB_003",
-    "type": "external_benchmark",
-    "question": "Run PaperBench locally through the Docker-backed public benchmark adapter.",
-    "benchmark": {
-      "name": "PaperBench",
-      "group": "Research",
-      "capabilities": [
-        "file_artifact"
-      ],
-      "homepage": "https://github.com/openai/frontier-evals/tree/main/project/paperbench",
-      "repository": "https://github.com/openai/frontier-evals.git",
-      "ref": "main",
-      "subdir": "project/paperbench",
-      "license": "MIT",
-      "credit": "OpenAI Frontier Evals PaperBench authors",
-      "citation": "https://github.com/openai/frontier-evals/tree/main/project/paperbench",
-      "docker": {
-        "image": "agent-bench-external:python3.12",
-        "setup": [],
-        "command": "agent-bench-probe --benchmark \"PaperBench\" --kind public-benchmark",
-        "environment": [
-          "AGENT_BENCH_GIT_LFS_SKIP_SMUDGE=0",
-          "AGENT_BENCH_GIT_LFS_PULL=1"
-        ],
-        "volumes": []
-      }
-    }
-  },
-  {
     "id": "PB_004",
     "type": "external_benchmark",
     "question": "Run SWE-Lancer locally through the Docker-backed public benchmark adapter.",
@@ -138,37 +80,6 @@
     }
   },
   {
-    "id": "PB_008",
-    "type": "external_benchmark",
-    "question": "Run BioMystery Bench locally through the Docker-backed public benchmark adapter.",
-    "benchmark": {
-      "name": "BioMystery Bench",
-      "group": "Biosecurity",
-      "capabilities": [
-        "chat_answer",
-        "external_data_required"
-      ],
-      "homepage": "https://huggingface.co/datasets/Anthropic/BioMysteryBench-preview",
-      "repository": "https://huggingface.co/datasets/Anthropic/BioMysteryBench-preview",
-      "dataset_id": "Anthropic/BioMysteryBench-preview",
-      "ref": "main",
-      "subdir": "",
-      "license": "CC-BY-4.0 with upstream terms",
-      "credit": "Anthropic BioMysteryBench authors",
-      "citation": "https://huggingface.co/datasets/Anthropic/BioMysteryBench-preview",
-      "docker": {
-        "image": "agent-bench-external:python3.12",
-        "setup": [],
-        "command": "agent-bench-probe --benchmark \"BioMystery Bench\" --kind public-benchmark",
-        "environment": [
-          "AGENT_BENCH_GIT_LFS_SKIP_SMUDGE=0",
-          "AGENT_BENCH_GIT_LFS_PULL=1"
-        ],
-        "volumes": []
-      }
-    }
-  },
-  {
     "id": "PB_009",
     "type": "external_benchmark",
     "question": "Run ExploitBench locally through the Docker-backed public benchmark adapter.",
@@ -176,15 +87,24 @@
       "name": "ExploitBench",
       "group": "Security",
       "capabilities": [
-        "tool_call"
+        "tool_call",
+        "external_data_required"
       ],
-      "homepage": "https://github.com/exploitbench/exploitbench",
+      "homepage": "https://exploitbench.ai",
       "repository": "https://github.com/exploitbench/exploitbench.git",
-      "ref": "main",
+      "ref": "c0b8a4d0aa5227ac86102dc304e8eb7edbae17bc",
       "subdir": "",
       "license": "MIT",
       "credit": "ExploitBench authors",
       "citation": "https://github.com/exploitbench/exploitbench",
+      "dataset_source": {
+        "kind": "upstream_repository",
+        "required_paths": [
+          "benchmarks/v8.yaml",
+          "benchmarks/v8-small.yaml",
+          "benchmarks/bench-v8"
+        ]
+      },
       "docker": {
         "image": "agent-bench-external:python3.12",
         "setup": [],
@@ -308,8 +228,7 @@
       "name": "FinMCP-Bench",
       "group": "Finance",
       "capabilities": [
-        "tool_call",
-        "external_data_required"
+        "chat_answer"
       ],
       "homepage": "https://huggingface.co/datasets/DianJin/FinMCP-Bench",
       "repository": "https://huggingface.co/datasets/DianJin/FinMCP-Bench",
@@ -319,6 +238,12 @@
       "license": "CC-BY-NC-SA-4.0",
       "credit": "DianJin FinMCP-Bench authors",
       "citation": "https://huggingface.co/datasets/DianJin/FinMCP-Bench",
+      "adapter": "static_transcript_reasoning",
+      "static_conversion": {
+        "source_dataset": "DianJin/FinMCP-Bench",
+        "uses_historical_tool_messages": true,
+        "live_tools_required": false
+      },
       "docker": {
         "image": "agent-bench-external:python3.12",
         "setup": [],
@@ -341,11 +266,18 @@
       ],
       "homepage": "https://github.com/Double-wk/FinToolBench",
       "repository": "https://github.com/Double-wk/FinToolBench.git",
-      "ref": "main",
+      "ref": "0ec7458e0663ba56ee3d50b64aa9f1cb9097b725",
       "subdir": "",
       "license": "Unspecified",
       "credit": "FinToolBench authors",
       "citation": "https://github.com/Double-wk/FinToolBench",
+      "dataset_source": {
+        "kind": "upstream_repository",
+        "required_paths": [
+          "tools/tools_all_annotated.jsonl",
+          "data/question/select_data_real_remove_duplicates.jsonl"
+        ]
+      },
       "docker": {
         "image": "agent-bench-external:python3.12",
         "setup": [],
@@ -366,13 +298,20 @@
         "tool_call",
         "external_data_required"
       ],
-      "homepage": "https://github.com/vals-ai/finance-agent-v2",
+      "homepage": "https://www.vals.ai/benchmarks/fabv2",
       "repository": "https://github.com/vals-ai/finance-agent-v2.git",
-      "ref": "main",
+      "ref": "abae841eadd1467f2865f3699a1dfc0774d44d76",
       "subdir": "",
       "license": "MIT",
       "credit": "Vals AI Finance Agent Benchmark authors",
       "citation": "https://github.com/vals-ai/finance-agent-v2",
+      "required_tools": [
+        "web_search",
+        "edgar_search",
+        "parse_html_page",
+        "retrieve_information",
+        "price_history"
+      ],
       "docker": {
         "image": "agent-bench-external:python3.12",
         "setup": [],

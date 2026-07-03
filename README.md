@@ -120,12 +120,12 @@ External benchmark task shape:
 }
 ```
 
-The descriptor file records 15 public benchmarks: SWE-bench, GDPval, PaperBench, SWE-Lancer, SWE-bench Verified, BioMystery Bench, ExploitBench, codeneedle, StockBench, InvestorBench, QuantCode-Bench, FinMCP-Bench, FinToolBench, Finance Agent v2, and FinanceMath. Upstream credits, license notes, and citation URLs are recorded in `tasks/public_benchmarks.json` and summarized in `tasks/README.md`; license metadata is not used as a loader gate.
+The descriptor file records 12 active public benchmark IDs. Upstream credits, license notes, and citation URLs are recorded in `tasks/public_benchmarks.json` and summarized in `tasks/README.md`; license metadata is not used as a loader gate.
 
 Relevant selection controls:
 
-- `--profile full_active`: all configured suites.
-- `--suite PB_008`: run a specific suite by ID or benchmark name.
+- `--profile full_active`: all active configured suites.
+- `--suite PB_009`: run a specific active suite by ID or benchmark name.
 
 When running a remote provider, Agent Bench starts the benchmark launcher container, clones the upstream benchmark source or dataset inside Docker, extracts real benchmark task records, calls the configured model endpoint for each sampled task, and grades the model's answer. The launcher receives neutral model settings through environment variables:
 
@@ -143,11 +143,11 @@ The bundled descriptors use `agent-bench-probe` to normalize public benchmark fo
 - `collect_outputs(run) -> OutputBundle`
 - `grade(task, outputs) -> GradeResult`
 
-Capabilities are reported only when an adapter can provide the required workspace, tools, output collection, and grader. `tool_call` rows use the stateful agent tool loop, including native OpenAI-compatible tool calls and text tool-call fallbacks for models that emit tagged JSON; rows that name a required tool fail preflight as `failed_missing_required_tool` if that tool is not exposed. Browser/GUI rows are evaluated from extracted task data and repository files when no live display is available. Repo-patch rows require target repository metadata and a checkout/patch/diff canary; when `AGENT_BENCH_REPO_PATCH_GRADER` is set, the official patch/test grader is used, otherwise a model-judge task-compliance fallback grades the produced diff. File-artifact and office-document rows run a read/write/list/collect canary and use isolated per-item workspaces populated only with declared task inputs. Missing, corrupt, or Git LFS pointer-stub assets are marked `failed_missing_assets`. BioMystery extracts `answer_rubric` records and keeps answer rubrics grader-side only.
+Capabilities are reported only when an adapter can provide the required workspace, tools, output collection, and grader. `tool_call` rows use the stateful agent tool loop, including native OpenAI-compatible tool calls and text tool-call fallbacks for models that emit tagged JSON; rows that name a required tool fail preflight as `failed_missing_required_tool` if that tool is not exposed. FinMCP-Bench is evaluated as static transcript reasoning and does not expose live MCP tools. Browser/GUI rows are evaluated from extracted task data and repository files when no live display is available. Repo-patch rows require target repository metadata and a checkout/patch/diff canary; when `AGENT_BENCH_REPO_PATCH_GRADER` is set, the official patch/test grader is used, otherwise a `task_compliance_fallback` grades the produced diff. File-artifact and office-document rows run a read/write/list/collect canary and use isolated per-item workspaces populated only with declared task inputs. Missing, corrupt, or Git LFS pointer-stub assets are marked `failed_missing_assets`.
 
-The default external asset cache is the git-ignored `agent-bench-assets/` directory. GDPval and PaperBench attempt a best-effort Git LFS asset download into that cache before Docker starts; the launcher then copies cached, repository-relative assets into the container checkout before probing.
+The default external asset cache is the git-ignored `agent-bench-assets/` directory. Benchmarks with cache recipes, such as ExploitBench, download upstream data into that cache before Docker starts; the launcher then copies cached, repository-relative assets into the container checkout before probing.
 
-Extracted chat-answer records are graded with deterministic methods when possible and LLM judging only when no deterministic grader exists:
+Extracted chat-answer records are graded with deterministic methods when possible and LLM judging only when no deterministic grader exists. LLM judges must return strict JSON; invalid judge output is retried with a repair prompt and then marked `failed_grader` with `judge_parse_error` rather than counted as a model-answer failure.
 
 - `exact`: deterministic answer, patch, label, or multiple-choice matching.
 - `numeric`: deterministic numeric matching with unit normalization for FinanceMath-style records.

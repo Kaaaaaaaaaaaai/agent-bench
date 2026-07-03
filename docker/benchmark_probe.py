@@ -151,6 +151,52 @@ MAX_CONSECUTIVE_FAILED_TOOL_CALLS = 5
 REPO_PATCH_GRADER_ENV = "AGENT_BENCH_REPO_PATCH_GRADER"
 TARGET_REPO_ROOT_ENV = "AGENT_BENCH_TARGET_REPO_ROOT"
 DEFAULT_ASSET_ROOT = "/tmp/agent-bench-assets"
+FINANCE_AGENT_V2_REQUIRED_TOOLS = {
+    "web_search",
+    "edgar_search",
+    "parse_html_page",
+    "retrieve_information",
+    "price_history",
+}
+FINANCE_AGENT_V2_REQUIRED_ENV = (
+    "VALS_API_KEY",
+    "TAVILY_API_KEY",
+    "SEC_EDGAR_API_KEY",
+    "PRICING_DATA_API_KEY",
+)
+EXPLOITBENCH_REQUIRED_CONFIGS = (
+    "benchmarks/v8.yaml",
+    "benchmarks/v8-small.yaml",
+)
+EXPLOITBENCH_EXCLUDE_PATTERNS = (
+    "/docs/",
+    "/website/",
+    "readme.md",
+    "spec.md",
+    "citation.cff",
+    "contributing.md",
+    "security.md",
+)
+FINMCP_STATIC_PROMPT = """You are answering a static transcript-reasoning benchmark item.
+
+The transcript below may include prior tool calls and tool outputs from the source dataset.
+These tools are not live in this environment.
+Use only the provided transcript and data to produce the final answer.
+
+Return only JSON:
+{
+  "answer": "...",
+  "supporting_evidence": "..."
+}
+"""
+STATIC_FINANCE_PROMPT = """You are answering a local static finance benchmark item.
+
+The upstream benchmark may name external finance tools or hosted retrieval services, but those
+live backends are not available in this local harness. Use only the benchmark prompt and any
+visible record context provided in the task.
+
+Return only compact final-answer JSON.
+"""
 BINARY_SUFFIXES = {
     ".7z",
     ".bin",
@@ -534,6 +580,65 @@ class ToolCallAdapter(ChatAnswerAdapter):
         return support
 
 
+class StaticTranscriptReasoningAdapter(ChatAnswerAdapter):
+    name = "static_transcript_reasoning"
+
+    def available_tools(self, item: BenchmarkItem, workspace: TaskWorkspace) -> list[dict[str, Any]]:
+        return []
+
+    def run_agent_loop(
+        self,
+        benchmark: str,
+        item: BenchmarkItem,
+        workspace: TaskWorkspace,
+        tools: list[dict[str, Any]],
+    ) -> AgentRun:
+        static_item = BenchmarkItem(
+            question=(
+                f"{FINMCP_STATIC_PROMPT}\n\n"
+                f"Benchmark question and transcript:\n{item.question}"
+            ),
+            expected=item.expected,
+            source=item.source,
+            choices=item.choices,
+            metadata={**item.metadata, "live_tools_required": False},
+        )
+        with pushd(workspace.root):
+            return _agent_run_from_dict(run_agent_loop(benchmark, static_item, tools=[]))
+
+
+class StaticFinanceReasoningAdapter(ToolCallAdapter):
+    name = "static_finance_reasoning"
+
+    def available_tools(self, item: BenchmarkItem, workspace: TaskWorkspace) -> list[dict[str, Any]]:
+        return []
+
+    def capability_contract(self, required_capabilities: set[str], items: list[BenchmarkItem]) -> dict[str, Any]:
+        contract = capability_contract_for(required_capabilities, self)
+        for support in contract.values():
+            if isinstance(support, dict) and support.get("supported") is True:
+                support["mode"] = "static_local_finance"
+                support["reason"] = "Live finance tool backends are not available; evaluating extracted public prompt rows statically"
+        return contract
+
+    def run_agent_loop(
+        self,
+        benchmark: str,
+        item: BenchmarkItem,
+        workspace: TaskWorkspace,
+        tools: list[dict[str, Any]],
+    ) -> AgentRun:
+        static_item = BenchmarkItem(
+            question=f"{STATIC_FINANCE_PROMPT}\n\nBenchmark question:\n{item.question}",
+            expected=item.expected,
+            source=item.source,
+            choices=item.choices,
+            metadata={**item.metadata, "live_tools_required": False},
+        )
+        with pushd(workspace.root):
+            return _agent_run_from_dict(run_agent_loop(benchmark, static_item, tools=[]))
+
+
 class BrowserGuiAdapter(ToolCallAdapter):
     name = "browser_or_gui"
 
@@ -804,10 +909,11 @@ class RepoPatchAdapter(ChatAnswerAdapter):
     def grade(self, benchmark: str, item: BenchmarkItem, outputs: OutputBundle) -> tuple[float, dict[str, Any]]:
         if not outputs.patch.strip():
             return 0.0, {
-                "method": "official_patch_tests",
+                "method": "repo_patch_output_presence",
                 "score": 0.0,
                 "status": "failed_model_answer",
                 "reason": "model did not produce a repository patch",
+                "official_grader_configured": bool(os.environ.get(REPO_PATCH_GRADER_ENV, "").strip()),
             }
         grader_command = os.environ.get(REPO_PATCH_GRADER_ENV, "").strip()
         if not grader_command:
@@ -816,9 +922,10 @@ class RepoPatchAdapter(ChatAnswerAdapter):
                 f"Final answer:\n{outputs.answer}"
             )
             score, grade = judge_answer(benchmark, item, patch_answer, "task_compliance")
-            grade["method"] = "repo_patch_model_judge"
+            grade["method"] = "task_compliance_fallback"
             grade.setdefault("output_collection", "git_diff")
             grade["official_grader"] = False
+            grade["official_grader_configured"] = False
             grade["fallback_grader"] = "model_judge_task_compliance"
             return score, grade
         return _run_repo_patch_grader(grader_command, item, outputs)
@@ -849,6 +956,8 @@ class UnsupportedCapabilityAdapter(BenchmarkAdapter):
 
 ADAPTERS: tuple[BenchmarkAdapter, ...] = (
     ChatAnswerAdapter(),
+    StaticTranscriptReasoningAdapter(),
+    StaticFinanceReasoningAdapter(),
     ToolCallAdapter(),
     BrowserGuiAdapter(),
     FileArtifactAdapter(),
@@ -1007,6 +1116,7 @@ def main() -> int:
             "judge_parse_failure_count": sum(
                 1 for item in evaluations if normalize_status(item.get("status")) == "failed_grader"
             ),
+            "judge_retry_count": sum(int(item.get("judge_retry_count") or 0) for item in evaluations),
             "judge_parse_repaired_count": sum(1 for item in evaluations if item.get("judge_parse_repaired")),
             "fallback_task_count": sum(1 for item in items if item.metadata.get("fallback")),
             "extraction_errors": extraction_errors[:20],
@@ -1126,6 +1236,11 @@ def _write_result(output_dir: Path, payload: dict[str, Any]) -> None:
 
 
 def select_adapter(required_capabilities: set[str]) -> BenchmarkAdapter:
+    benchmark = normalize_text(os.environ.get("AGENT_BENCH_BENCHMARK_NAME", "")).replace("-", " ")
+    if benchmark == "finmcp bench":
+        return StaticTranscriptReasoningAdapter()
+    if benchmark in {"fintoolbench", "finance agent v2"}:
+        return StaticFinanceReasoningAdapter()
     if "browser_or_gui" in required_capabilities:
         return BrowserGuiAdapter()
     if "tool_call" in required_capabilities:
@@ -1171,7 +1286,7 @@ def _required_capabilities(benchmark: str) -> set[str]:
         "automationbench": {"tool_call", "external_data_required"},
         "osworld": {"browser_or_gui"},
         "exploitbench": {"tool_call"},
-        "finmcp bench": {"tool_call", "external_data_required"},
+        "finmcp bench": {"chat_answer"},
         "fintoolbench": {"tool_call", "external_data_required"},
         "finance agent v2": {"tool_call", "external_data_required"},
     }
@@ -1217,6 +1332,10 @@ def _specialized_extraction_is_terminal() -> bool:
         "codeneedle",
         "paperbench",
         "stockbench",
+        "exploitbench",
+        "finmcp bench",
+        "fintoolbench",
+        "finance agent v2",
         "swe lancer",
         "quantcode bench",
     }
@@ -1488,6 +1607,14 @@ def extract_specialized_items(root: Path, limit: int) -> tuple[list[BenchmarkIte
         return extract_codeneedle_items(root, limit)
     if benchmark == "StockBench":
         return extract_stockbench_items(root, limit)
+    if benchmark == "ExploitBench":
+        return extract_exploitbench_items(root, limit)
+    if benchmark == "FinMCP-Bench":
+        return extract_finmcp_static_items(root, limit)
+    if benchmark == "FinToolBench":
+        return extract_fintoolbench_items(root, limit)
+    if benchmark == "Finance Agent v2":
+        return extract_finance_agent_v2_items(root, limit)
     if benchmark == "InvestorBench":
         return extract_investorbench_items(root, limit)
     if benchmark == "PaperBench":
@@ -1592,6 +1719,72 @@ def _extend_unique_items(target: list[BenchmarkItem], candidates: list[Benchmark
             continue
         seen.add(key)
         target.append(item)
+
+
+def _data_record_files(root: Path) -> list[Path]:
+    suffixes = {".jsonl", ".json", ".csv"}
+    paths: list[Path] = []
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in suffixes:
+            continue
+        lowered = str(path.relative_to(root)).lower()
+        if any(part in SKIP_DIRS for part in path.parts):
+            continue
+        if any(marker in lowered for marker in ("readme", "package-lock", "pricing", "model_pricing")):
+            continue
+        paths.append(path)
+    return sorted(paths, key=lambda path: (_path_relevance(path), len(path.parts), str(path)))
+
+
+def _records_from_data_file(path: Path) -> list[dict[str, Any]]:
+    suffix = path.suffix.lower()
+    if suffix == ".jsonl":
+        return _records_from_jsonl(path)
+    if suffix == ".json":
+        payload = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        return [record for record in walk_records(payload) if isinstance(record, dict)][:MAX_RECORDS_PER_FILE]
+    if suffix == ".csv":
+        with path.open("r", encoding="utf-8", errors="replace", newline="") as handle:
+            return [dict(row) for row in csv.DictReader(handle)][:MAX_RECORDS_PER_FILE]
+    return []
+
+
+def _records_from_jsonl(path: Path) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            if len(records) >= MAX_RECORDS_PER_FILE:
+                break
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(record, dict):
+                records.append(record)
+    return records
+
+
+def _required_tools_from_record(record: dict[str, Any]) -> list[str]:
+    tools: list[str] = []
+    lower_to_key = {str(key).lower(): key for key in record}
+    for key in (
+        "required_tools",
+        "select_tools",
+        "selected_tools",
+        "selected_tool",
+        "tools",
+        "tool_names",
+        "gold_tools",
+        "api_name",
+        "api_names",
+    ):
+        original = lower_to_key.get(key)
+        if original is not None:
+            tools.extend(_flatten_string_values(record.get(original)))
+    return sorted({tool.strip() for tool in tools if tool.strip()})
 
 
 def extract_paperbench_items(root: Path, limit: int) -> tuple[list[BenchmarkItem], list[str]]:
@@ -1752,6 +1945,209 @@ def extract_stockbench_items(root: Path, limit: int) -> tuple[list[BenchmarkItem
     if not items:
         errors.append("StockBench concrete cached financial records were not found")
     return items, errors[:20]
+
+
+def extract_exploitbench_items(root: Path, limit: int) -> tuple[list[BenchmarkItem], list[str]]:
+    errors: list[str] = []
+    missing_configs = [relative for relative in EXPLOITBENCH_REQUIRED_CONFIGS if not (root / relative).is_file()]
+    if missing_configs:
+        return [], [
+            "ExploitBench upstream challenge environment/configuration was not fully materialized",
+            f"missing required config(s): {', '.join(missing_configs)}",
+        ]
+    items: list[BenchmarkItem] = []
+    for relative in EXPLOITBENCH_REQUIRED_CONFIGS:
+        path = root / relative
+        text = path.read_text(encoding="utf-8", errors="replace")
+        target_images = _container_images_from_text(text)
+        if not target_images:
+            errors.append(f"{relative}: no target container/image reference found")
+            continue
+        items.append(
+            BenchmarkItem(
+                question=truncate(
+                    "ExploitBench upstream V8 capability-ladder challenge configuration.\n"
+                    "Use the upstream ExploitBench runner and deterministic oracle for this target; "
+                    "do not answer from documentation or benchmark methodology text.\n\n"
+                    f"Config: {relative}\n"
+                    f"Target images: {', '.join(target_images[:5])}\n"
+                    f"Config excerpt:\n{truncate(text, 3200)}"
+                ),
+                expected="Use the upstream ExploitBench deterministic capability/oracle outputs for grading.",
+                source=relative,
+                metadata={
+                    "grading": "task_compliance",
+                    "expected_key": "upstream_deterministic_oracle",
+                    "benchmark_config": relative,
+                    "target_image": target_images[0],
+                    "target_images": target_images,
+                    "grader": "upstream_deterministic_oracle",
+                    "oracle": "upstream_capability_oracle",
+                    "capability_flags": ["v8_capability_ladder"],
+                },
+            )
+        )
+        if len(items) >= limit:
+            break
+    if not items and not errors:
+        errors.append("ExploitBench concrete upstream challenge configs were not found")
+    return items[:limit], errors[:20]
+
+
+def _container_images_from_text(text: str) -> list[str]:
+    images: set[str] = set()
+    for match in re.finditer(r"(?:ghcr\.io|docker\.io|quay\.io)/[A-Za-z0-9._/@:-]+", text):
+        images.add(match.group(0).rstrip("',\")]}"))
+    for match in re.finditer(r"\b(?:image|target_image|docker_image)\s*:\s*['\"]?([^'\"\s]+)", text):
+        value = match.group(1).strip().rstrip(",")
+        if "/" in value and ":" in value:
+            images.add(value)
+    return sorted(images)
+
+
+def extract_finmcp_static_items(root: Path, limit: int) -> tuple[list[BenchmarkItem], list[str]]:
+    items: list[BenchmarkItem] = []
+    errors: list[str] = []
+    for path in _data_record_files(root):
+        if len(items) >= limit:
+            break
+        try:
+            records = _records_from_data_file(path)
+        except Exception as exc:
+            errors.append(f"{path.relative_to(root)}: {exc}")
+            continue
+        for index, record in enumerate(records, 1):
+            if len(items) >= limit:
+                break
+            if not isinstance(record, dict):
+                continue
+            transcript = _finmcp_transcript(record)
+            question = _first_text(record, QUESTION_KEYS)
+            if not question or not transcript:
+                continue
+            expected_key, expected_value = _first_value_with_key(record, ANSWER_KEYS)
+            expected = stringify_expected(expected_value, preserve_rubric=True) if expected_value is not None else (
+                "Answer should use only the supplied historical transcript and data."
+            )
+            items.append(
+                BenchmarkItem(
+                    question=truncate(f"User query:\n{question}\n\nStatic transcript:\n{transcript}", 9000),
+                    expected=truncate(expected, 3000),
+                    source=f"{path.relative_to(root)}:record-{index:06d}",
+                    metadata={
+                        "grading": "task_compliance" if expected_value is None else "rubric",
+                        "expected_key": expected_key or "static_transcript_answer",
+                        "source_dataset": "DianJin/FinMCP-Bench",
+                        "live_tools_required": False,
+                        "required_capabilities": ["chat_answer"],
+                        "messages": record.get("messages"),
+                        "transcript": transcript,
+                    },
+                )
+            )
+    if not items:
+        errors.append("FinMCP-Bench records with static transcript/messages were not found")
+    return items[:limit], errors[:20]
+
+
+def _finmcp_transcript(record: dict[str, Any]) -> str:
+    for key in ("messages", "transcript", "conversation", "trajectory", "dialogue"):
+        value = record.get(key)
+        if not value:
+            continue
+        text = _visible_value_to_text(value)
+        if text and ("tool" in text.lower() or len(text) >= 80):
+            return truncate(text, 7000)
+    return ""
+
+
+def extract_fintoolbench_items(root: Path, limit: int) -> tuple[list[BenchmarkItem], list[str]]:
+    question_path = root / "data" / "question" / "select_data_real_remove_duplicates.jsonl"
+    tool_path = root / "tools" / "tools_all_annotated.jsonl"
+    errors: list[str] = []
+    if not question_path.is_file():
+        errors.append("FinToolBench question set data/question/select_data_real_remove_duplicates.jsonl was not found")
+    if not tool_path.is_file():
+        errors.append("FinToolBench tool manifest tools/tools_all_annotated.jsonl was not found")
+    if errors:
+        return [], errors
+    tool_manifest = _fintoolbench_tool_manifest(tool_path)
+    items: list[BenchmarkItem] = []
+    for index, record in enumerate(_records_from_jsonl(question_path), 1):
+        if len(items) >= limit:
+            break
+        item = item_from_record(record, f"{question_path.relative_to(root)}:{index}")
+        if item is None:
+            continue
+        required_tools = _required_tools_from_record(record)
+        item.metadata.update(
+            {
+                "expected_key": item.metadata.get("expected_key") or "fintoolbench_tool_required_query",
+                "required_tools": required_tools,
+                "live_tools_required": False,
+                "local_evaluation_mode": "static_gold_answer",
+                "tool_manifest": str(tool_path.relative_to(root)),
+                "tool_manifest_count": len(tool_manifest),
+            }
+        )
+        items.append(item)
+    if not items:
+        errors.append("FinToolBench concrete tool-required questions were not found")
+    return items, errors[:20]
+
+
+def _fintoolbench_tool_manifest(path: Path) -> dict[str, dict[str, Any]]:
+    manifest: dict[str, dict[str, Any]] = {}
+    for record in _records_from_jsonl(path):
+        if not isinstance(record, dict):
+            continue
+        name = _first_text(record, ("name", "tool_name", "api_name", "function_name"))
+        if name:
+            manifest[name] = record
+    return manifest
+
+
+def extract_finance_agent_v2_items(root: Path, limit: int) -> tuple[list[BenchmarkItem], list[str]]:
+    data_files = [path for path in _data_record_files(root) if "task.md" not in path.name.lower()]
+    task_md_files = sorted(path for path in root.rglob("TASK.md") if path.is_file())
+    items: list[BenchmarkItem] = []
+    errors: list[str] = []
+    for path in data_files:
+        if len(items) >= limit:
+            break
+        try:
+            records = _records_from_data_file(path)
+        except Exception as exc:
+            errors.append(f"{path.relative_to(root)}: {exc}")
+            continue
+        for index, record in enumerate(records, 1):
+            if len(items) >= limit:
+                break
+            item = item_from_record(record, f"{path.relative_to(root)}:record-{index:06d}")
+            if item is None:
+                continue
+            item.metadata.setdefault("required_tools", sorted(FINANCE_AGENT_V2_REQUIRED_TOOLS))
+            item.metadata["live_tools_required"] = False
+            item.metadata["local_evaluation_mode"] = "static_public_prompt"
+            items.append(item)
+    if not items and task_md_files:
+        path = task_md_files[0]
+        text = path.read_text(encoding="utf-8", errors="replace")
+        items.append(
+            BenchmarkItem(
+                question=truncate(text, 6000),
+                expected="Finance Agent v2 requires official data/platform evidence, not TASK.md-only prompts.",
+                source=str(path.relative_to(root)),
+                metadata={
+                    "grading": "task_compliance",
+                    "task_md_only": True,
+                    "required_tools": sorted(FINANCE_AGENT_V2_REQUIRED_TOOLS),
+                },
+            )
+        )
+    if not items:
+        errors.append("Finance Agent v2 official data records or evidence packets were not found")
+    return items[:limit], errors[:20]
 
 
 def extract_swelancer_items(root: Path, limit: int) -> tuple[list[BenchmarkItem], list[str]]:
@@ -2679,6 +3075,20 @@ def _item_preflight_failure(
             details,
         )
 
+    benchmark = normalize_text(os.environ.get("AGENT_BENCH_BENCHMARK_NAME", "")).replace("-", " ")
+    if benchmark == "finance agent v2":
+        finance_error = validate_finance_agent_v2_item(item, Path.cwd(), agent_tool_schemas())
+        if finance_error is not None:
+            return finance_error
+    if benchmark == "finmcp bench":
+        finmcp_error = validate_finmcp_static_item(item)
+        if finmcp_error is not None:
+            return finmcp_error
+    if benchmark == "exploitbench":
+        exploit_error = validate_exploitbench_item(item)
+        if exploit_error is not None:
+            return exploit_error
+
     missing_refs = _missing_referenced_paths(item, Path.cwd())
     if missing_refs:
         details["missing_references"] = missing_refs
@@ -2702,6 +3112,109 @@ def _item_preflight_failure(
         return "failed_grader", "exact-answer grader canary failed on the gold answer", details
 
     return "", "", {}
+
+
+def validate_exploitbench_item(item: BenchmarkItem) -> tuple[str, str, dict[str, Any]] | None:
+    details = {"blocker_type": "missing_reference_dataset", "item_id": _item_id(item), "source": item.source}
+    source_lower = item.source.lower()
+    if item.source.endswith((".yaml", ".yml", ".json", ".toml")) is False:
+        return "failed_invalid_task_context", "ExploitBench scored item must come from a real upstream config", details
+    if any(pattern in source_lower for pattern in EXPLOITBENCH_EXCLUDE_PATTERNS):
+        return "failed_invalid_task_context", "ExploitBench docs/spec files are not valid scored items", details
+    metadata = item.metadata if isinstance(item.metadata, dict) else {}
+    if not (metadata.get("target_image") or metadata.get("environment")):
+        return "failed_invalid_task_context", "ExploitBench item has no target image/environment", details
+    if not (metadata.get("grader") or metadata.get("oracle")):
+        return "failed_invalid_task_context", "ExploitBench item has no upstream grader/oracle", details
+    if not _exploitbench_upstream_ready(item):
+        return (
+            "failed_dataset_extraction",
+            "ExploitBench upstream challenge environment/configuration was not fully materialized",
+            {
+                "blocker_type": "missing_reference_dataset",
+                "item_id": _item_id(item),
+                "target_image": metadata.get("target_image"),
+            },
+        )
+    return None
+
+
+def _exploitbench_upstream_ready(item: BenchmarkItem) -> bool:
+    if os.environ.get("AGENT_BENCH_EXPLOITBENCH_UPSTREAM_READY", "").strip().lower() in {"1", "true", "yes"}:
+        return True
+    root = Path.cwd()
+    return all((root / relative).is_file() for relative in EXPLOITBENCH_REQUIRED_CONFIGS) and (
+        root / "benchmarks" / "bench-v8"
+    ).exists()
+
+
+def validate_finmcp_static_item(item: BenchmarkItem) -> tuple[str, str, dict[str, Any]] | None:
+    metadata = item.metadata if isinstance(item.metadata, dict) else {}
+    details = {"blocker_type": "invalid_task_context", "item_id": _item_id(item)}
+    if metadata.get("source_dataset") != "DianJin/FinMCP-Bench":
+        return "failed_invalid_task_context", "FinMCP-Bench static item missing source dataset provenance", details
+    if metadata.get("live_tools_required") is not False:
+        return "failed_invalid_task_context", "FinMCP-Bench static item must not require live MCP tools", details
+    capabilities = metadata.get("required_capabilities", [])
+    if isinstance(capabilities, list) and "tool_call" in capabilities:
+        return "failed_invalid_task_context", "FinMCP-Bench static item still advertises tool_call", details
+    if not item.question.strip():
+        return "failed_invalid_task_context", "FinMCP-Bench static item has no user query", details
+    if not (metadata.get("transcript") or metadata.get("messages")):
+        return "failed_invalid_task_context", "FinMCP-Bench static item lacks transcript/messages", details
+    return None
+
+
+def validate_finance_agent_v2_item(
+    item: BenchmarkItem,
+    workspace: Path,
+    tools: list[dict[str, Any]],
+) -> tuple[str, str, dict[str, Any]] | None:
+    metadata = item.metadata if isinstance(item.metadata, dict) else {}
+    if metadata.get("live_tools_required") is False and not metadata.get("task_md_only"):
+        return None
+    missing_env = [key for key in FINANCE_AGENT_V2_REQUIRED_ENV if not os.environ.get(key)]
+    documents = metadata.get("required_documents")
+    has_documents = False
+    if isinstance(documents, list) and documents:
+        has_documents = all(
+            isinstance(doc, dict)
+            and isinstance(doc.get("path"), str)
+            and (workspace / doc["path"]).is_file()
+            for doc in documents
+        )
+    exposed_tools = set(_tool_schema_names(tools))
+    has_retrieval_tools = FINANCE_AGENT_V2_REQUIRED_TOOLS.issubset(exposed_tools)
+    if metadata.get("task_md_only") and not has_documents:
+        return (
+            "failed_invalid_task_context",
+            "Finance Agent v2 item has neither required source documents nor retrieval tools",
+            {
+                "blocker_type": "missing_reference_documents",
+                "item_id": _item_id(item),
+            },
+        )
+    if missing_env and not has_documents:
+        return (
+            "failed_missing_required_tool",
+            "Finance Agent v2 requires upstream platform/tool credentials",
+            {
+                "blocker_type": "missing_required_tool_backend",
+                "missing_environment": missing_env,
+                "required_tools": sorted(FINANCE_AGENT_V2_REQUIRED_TOOLS),
+            },
+        )
+    if not has_documents and not has_retrieval_tools:
+        return (
+            "failed_invalid_task_context",
+            "Finance Agent v2 item has neither required source documents nor retrieval tools",
+            {
+                "blocker_type": "missing_reference_documents",
+                "item_id": _item_id(item),
+                "exposed_tools": sorted(exposed_tools),
+            },
+        )
+    return None
 
 
 def _artifact_asset_validation_errors(item: BenchmarkItem, root: Path) -> list[dict[str, str]]:
@@ -2920,7 +3433,8 @@ def run_agent_loop(
             ),
         },
     ]
-    tools = tools or agent_tool_schemas()
+    if tools is None:
+        tools = agent_tool_schemas()
     tool_trace: list[dict[str, Any]] = []
     usage: dict[str, Any] = {}
     native_tools: bool | None = None
@@ -2940,7 +3454,7 @@ def run_agent_loop(
         }
         if direct_answer:
             payload["response_format"] = {"type": "json_object"}
-        elif native_tools is not False:
+        elif native_tools is not False and tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
         budget_failure = _token_budget_failure(payload)
@@ -2996,6 +3510,16 @@ def run_agent_loop(
                 if answer and not first_final_answer:
                     first_final_answer = answer
                 return _agent_loop_result(first_final_answer or answer, content, usage, tool_trace, final_answer_count)
+            if not tools:
+                return _agent_loop_result(
+                    "",
+                    content,
+                    usage,
+                    tool_trace,
+                    final_answer_count,
+                    status="failed_model_tool_use",
+                    reason=f"model requested unavailable tool: {tool_name}",
+                )
             result = execute_agent_tool(tool_name, arguments)
             tool_trace.append(
                 {
@@ -3700,10 +4224,12 @@ def _item_required_tools(item: BenchmarkItem) -> list[str]:
     metadata = item.metadata if isinstance(item.metadata, dict) else {}
     for key in (
         "required_tools",
+        "select_tools",
         "selected_tools",
         "selected_tool",
         "tool_name",
         "tool_names",
+        "gold_tools",
         "api_name",
         "api_names",
     ):
@@ -3727,6 +4253,9 @@ def _item_required_tools(item: BenchmarkItem) -> list[str]:
 
 
 def _missing_required_tools(item: BenchmarkItem, tools: list[dict[str, Any]]) -> list[str]:
+    metadata = item.metadata if isinstance(item.metadata, dict) else {}
+    if metadata.get("live_tools_required") is False:
+        return []
     exposed = set(_tool_schema_names(tools))
     required = set(_item_required_tools(item))
     if not required:
@@ -5055,6 +5584,28 @@ def _looks_like_patch_task(item: BenchmarkItem) -> bool:
 
 def grade_answer(benchmark: str, item: BenchmarkItem, answer: str) -> tuple[float, dict[str, Any]]:
     grading = item.metadata.get("grading", "exact")
+    if normalize_text(benchmark).replace("-", " ") == "stockbench":
+        extracted, extraction_status, extraction_error = _extract_stockbench_model_answer(answer)
+        if extracted is None:
+            return 0.0, {
+                "method": "stockbench_label_rationale",
+                "score": 0.0,
+                "status": "failed_model_format",
+                "reason": extraction_error,
+                "raw_model_response": answer,
+                "extracted_answer": {},
+                "extraction_status": extraction_status,
+            }
+        score, grade = judge_answer(
+            benchmark,
+            item,
+            json.dumps(extracted, ensure_ascii=False, sort_keys=True),
+            "stockbench_label_rationale",
+        )
+        grade["raw_model_response"] = answer
+        grade["extracted_answer"] = extracted
+        grade["extraction_status"] = extraction_status
+        return score, grade
     if grading in {"exact", "numeric"}:
         if _contains_tool_syntax(answer):
             return 0.0, {
@@ -5070,6 +5621,22 @@ def grade_answer(benchmark: str, item: BenchmarkItem, answer: str) -> tuple[floa
             "status": "passed" if score >= 1.0 else "failed_model_answer",
         }
     return judge_answer(benchmark, item, answer, str(grading))
+
+
+def _extract_stockbench_model_answer(answer: str) -> tuple[dict[str, str] | None, str, str]:
+    try:
+        parsed = json.loads(strip_thinking_blocks(answer).strip())
+    except json.JSONDecodeError:
+        parsed = None
+    if not isinstance(parsed, dict):
+        return None, "failed", "StockBench answer must be JSON with label and rationale"
+    label = str(parsed.get("label") or "").strip().lower()
+    rationale = str(parsed.get("rationale") or "").strip()
+    if label not in {"stronger", "weaker", "mixed"}:
+        return None, "failed", "StockBench JSON is missing a valid label"
+    if not rationale:
+        return None, "failed", "StockBench JSON is missing rationale"
+    return {"label": label, "rationale": rationale}, "parsed", ""
 
 
 def judge_answer(benchmark: str, item: BenchmarkItem, answer: str, method: str) -> tuple[float, dict[str, Any]]:
@@ -5131,74 +5698,104 @@ def judge_answer(benchmark: str, item: BenchmarkItem, answer: str, method: str) 
             "reason": str(budget_failure["reason"]),
             "token_budget": budget_failure,
         }
-    try:
-        response_body = post_chat_completion(base_url, payload, headers)
-    except ChatCompletionTimeoutError as exc:
-        return 0.0, {
-            "method": method,
-            "score": 0.0,
-            "status": "timed_out",
-            "reason": str(exc),
-            "timed_out": True,
-        }
-    except ChatCompletionHTTPError as exc:
-        status = "failed_token_budget" if _looks_like_context_error(exc.body) else "failed_harness_setup"
-        return 0.0, {
-            "method": method,
-            "score": 0.0,
-            "status": status,
-            "reason": f"judge request failed: HTTP {exc.code}: {exc.body[-500:]}",
-        }
-    except Exception as exc:
-        return 0.0, {
-            "method": method,
-            "score": 0.0,
-            "status": "failed_harness_setup",
-            "reason": f"judge request failed: {exc}",
-        }
-    try:
-        parsed = json.loads(response_body)
-    except json.JSONDecodeError:
-        return 0.0, {
-            "method": method,
-            "score": 0.0,
-            "status": "failed_harness_setup",
-            "reason": "judge response was not JSON",
-        }
-    content = extract_openai_content(parsed)
-    judge_text = content or response_body
-    try:
-        grade, repaired = parse_judge_json_with_repair(judge_text)
-    except ValueError:
-        prose_grade = parse_prose_judge_grade(judge_text)
-        if prose_grade is not None:
+    schema = _judge_schema_for(benchmark, method)
+    attempts: list[dict[str, Any]] = []
+    max_retries = _bounded_int(os.environ.get("AGENT_BENCH_JUDGE_MAX_RETRIES"), 2, 0, 5)
+    parsed_response: dict[str, Any] = {}
+    grade: dict[str, Any] | None = None
+    repaired = False
+    judge_text = ""
+    for attempt in range(max_retries + 1):
+        request_payload = payload if attempt == 0 else _judge_repair_payload(payload, attempts[-1]["raw"], schema)
+        try:
+            response_body = post_chat_completion(base_url, request_payload, headers)
+        except ChatCompletionTimeoutError as exc:
+            return 0.0, {
+                "method": method,
+                "score": 0.0,
+                "status": "timed_out",
+                "reason": str(exc),
+                "timed_out": True,
+                "judge_retry_count": attempt,
+            }
+        except ChatCompletionHTTPError as exc:
+            status = "failed_token_budget" if _looks_like_context_error(exc.body) else "failed_harness_setup"
+            return 0.0, {
+                "method": method,
+                "score": 0.0,
+                "status": status,
+                "reason": f"judge request failed: HTTP {exc.code}: {exc.body[-500:]}",
+                "judge_retry_count": attempt,
+            }
+        except Exception as exc:
+            return 0.0, {
+                "method": method,
+                "score": 0.0,
+                "status": "failed_harness_setup",
+                "reason": f"judge request failed: {exc}",
+                "judge_retry_count": attempt,
+            }
+        try:
+            parsed_response = json.loads(response_body)
+            content = extract_openai_content(parsed_response)
+            judge_text = content or response_body
+            candidate, repaired = parse_judge_json_with_repair(judge_text)
+            error_message = _judge_schema_error(candidate, schema)
+            if error_message:
+                raise ValueError(error_message)
+            grade = candidate
+            attempts.append({"raw": judge_text, "error": ""})
+            break
+        except (json.JSONDecodeError, ValueError) as exc:
+            raw = response_body
+            if isinstance(parsed_response, dict):
+                raw = extract_openai_content(parsed_response) or response_body
+            attempts.append({"raw": raw, "error": str(exc)})
+            judge_text = raw
+    if grade is None:
+        for attempt_entry in reversed(attempts):
+            raw = str(attempt_entry.get("raw") or "")
+            prose_grade = parse_prose_judge_grade(raw)
+            if prose_grade is None:
+                continue
             score = coerce_unit_score(prose_grade.get("score"))
             score, choice_reason = _apply_choice_task_partial_credit(method, item, answer, score)
             passed = bool(prose_grade.get("passed")) if "passed" in prose_grade else score >= 1.0
+            status = "passed" if passed else "failed_model_answer"
+            reason = (choice_reason or str(prose_grade.get("reason", "")))[:500]
             return score, {
                 "method": method,
                 "score": score,
                 "passed": passed,
-                "status": "passed" if passed else "failed_model_answer",
-                "reason": (choice_reason or str(prose_grade.get("reason", "")))[:500],
-                "judge_raw_text": judge_text,
+                "status": status,
+                "reason": reason,
+                "judge_raw_text": raw,
                 "judge_parsed_json": prose_grade,
                 "judge_parse_repaired": True,
                 "judge_parser_status": "prose_score",
-                "judge_sample": judge_text[:500],
-                "usage": parsed.get("usage") if isinstance(parsed.get("usage"), dict) else {},
+                "judge_sample": raw[:500],
+                "judge_attempts": attempts,
+                "judge_retry_count": max(0, len(attempts) - 1),
+                "usage": parsed_response.get("usage") if isinstance(parsed_response.get("usage"), dict) else {},
             }
         return 0.0, {
             "method": method,
             "score": 0.0,
             "passed": False,
             "status": "failed_grader",
-            "reason": "judge content was not a valid JSON object after repair attempts",
+            "reason": "judge_parse_error: judge did not return valid JSON after retries",
+            "setup_details": {
+                "blocker_type": "judge_parse_error",
+                "judge_attempts": attempts,
+                "judge_retry_count": max(0, len(attempts) - 1),
+            },
             "judge_raw_text": judge_text,
             "judge_parsed_json": {},
-            "judge_parser_status": "fallback_unparsed",
+            "judge_parser_status": "judge_parse_error",
             "judge_sample": judge_text[:300],
-            "usage": parsed.get("usage") if isinstance(parsed.get("usage"), dict) else {},
+            "judge_attempts": attempts,
+            "judge_retry_count": max(0, len(attempts) - 1),
+            "usage": parsed_response.get("usage") if isinstance(parsed_response.get("usage"), dict) else {},
         }
     score = coerce_unit_score(grade.get("score"))
     score, choice_reason = _apply_choice_task_partial_credit(method, item, answer, score)
@@ -5219,9 +5816,11 @@ def judge_answer(benchmark: str, item: BenchmarkItem, answer: str, method: str) 
         "judge_raw_text": judge_text,
         "judge_parsed_json": grade,
         "judge_parse_repaired": repaired,
-        "judge_parser_status": "repaired" if repaired else "parsed",
+        "judge_parser_status": "parsed_after_retry" if len(attempts) > 1 else ("repaired" if repaired else "parsed"),
         "judge_sample": judge_text[:500],
-        "usage": parsed.get("usage") if isinstance(parsed.get("usage"), dict) else {},
+        "judge_attempts": attempts,
+        "judge_retry_count": max(0, len(attempts) - 1),
+        "usage": parsed_response.get("usage") if isinstance(parsed_response.get("usage"), dict) else {},
     }
 
 
@@ -5237,6 +5836,67 @@ def _apply_choice_task_partial_credit(
     if not label:
         return score, ""
     return 0.5, f"candidate provided a valid choice label: {label} ({item.choices[label]})"
+
+
+def _judge_schema_for(benchmark: str, method: str) -> dict[str, Any]:
+    normalized = normalize_text(benchmark).replace("-", " ")
+    required = {"score": (int, float), "passed": bool, "reason": str}
+    if normalized == "stockbench" or method == "stockbench_label_rationale":
+        required.update(
+            {
+                "label_correct": bool,
+                "rationale_present": bool,
+                "rationale_quality": str,
+            }
+        )
+    return {"required": required}
+
+
+def _judge_schema_error(grade: dict[str, Any], schema: dict[str, Any]) -> str:
+    required = schema.get("required") if isinstance(schema, dict) else {}
+    if not isinstance(required, dict):
+        return ""
+    for key, expected_type in required.items():
+        if key not in grade:
+            return f"judge JSON missing required key: {key}"
+        value = grade.get(key)
+        if expected_type is bool and not isinstance(value, bool):
+            return f"judge JSON key {key} must be boolean"
+        if expected_type is str and not isinstance(value, str):
+            return f"judge JSON key {key} must be string"
+        if expected_type == (int, float) and not isinstance(value, (int, float)):
+            return f"judge JSON key {key} must be numeric"
+    return ""
+
+
+def _judge_repair_payload(payload: dict[str, Any], previous_raw: str, schema: dict[str, Any]) -> dict[str, Any]:
+    required = schema.get("required") if isinstance(schema, dict) else {}
+    required_keys = ", ".join(str(key) for key in required) if isinstance(required, dict) else "score, passed, reason"
+    repaired = json.loads(json.dumps(payload))
+    original_messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+    original_prompt = ""
+    if len(original_messages) > 1 and isinstance(original_messages[1], dict):
+        original_prompt = str(original_messages[1].get("content") or "")
+    repaired["messages"] = [
+        {
+            "role": "system",
+            "content": (
+                "Return valid compact JSON only. No prose, markdown, code fences, or hidden reasoning. "
+                f"The object must include these keys: {required_keys}."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "The previous judge response was invalid for the required schema.\n\n"
+                f"Original grading request:\n{truncate_middle(original_prompt, 7000)}\n\n"
+                f"Previous response:\n{truncate(previous_raw, 2000)}\n\n"
+                "Re-grade the original candidate and return only a valid JSON object."
+            ),
+        },
+    ]
+    repaired["response_format"] = {"type": "json_object"}
+    return repaired
 
 
 def _judge_visible_choices(item: BenchmarkItem) -> str:
@@ -5447,6 +6107,7 @@ def summarize_evaluations(evaluations: list[dict[str, Any]]) -> dict[str, Any]:
         "status_counts": _status_counts(evaluations),
         "grader_failure_count": sum(1 for item in evaluations if normalize_status(item.get("status")) == "failed_grader"),
         "judge_parse_failure_count": sum(1 for item in evaluations if normalize_status(item.get("status")) == "failed_grader"),
+        "judge_retry_count": sum(int(item.get("judge_retry_count") or 0) for item in evaluations),
         "judge_parse_repaired_count": sum(1 for item in evaluations if item.get("judge_parse_repaired")),
         "usage": first.get("usage", {}),
         "error": "" if passed == total else f"{passed}/{total} benchmark records passed",
@@ -5737,21 +6398,44 @@ def parse_judge_json(text: str) -> dict[str, Any]:
 
 def parse_prose_judge_grade(text: str) -> dict[str, Any] | None:
     cleaned = strip_thinking_blocks(text).strip()
-    score_match = re.search(r"\bscore\s*(?:is|=|:)?\s*([01](?:\.\d+)?|100(?:\.0+)?|\d{1,2}(?:\.\d+)?)\b", cleaned, re.IGNORECASE)
-    if not score_match:
-        qualitative = _qualitative_prose_judge_grade(cleaned)
-        if qualitative is not None:
-            return qualitative
-        return None
-    raw_score = score_match.group(1)
-    score = coerce_unit_score(raw_score)
+    score_match = re.search(
+        r"\bscore\s*(?:is|=|:)?\s*"
+        r"(?P<numerator>\d+(?:\.\d+)?)\s*/\s*(?P<denominator>\d+(?:\.\d+)?)\b",
+        cleaned,
+        re.IGNORECASE,
+    )
+    score_index = -1
+    if score_match:
+        numerator = float(score_match.group("numerator"))
+        denominator = float(score_match.group("denominator"))
+        score = 0.0 if denominator <= 0 else max(0.0, min(1.0, numerator / denominator))
+        score_index = score_match.start()
+    else:
+        score_match = re.search(
+            r"\bscore\s*(?:is|=|:)?\s*([01](?:\.\d+)?|100(?:\.0+)?|\d{1,2}(?:\.\d+)?)\b",
+            cleaned,
+            re.IGNORECASE,
+        )
+        if not score_match:
+            return None
+        raw_score = score_match.group(1)
+        score = coerce_unit_score(raw_score)
+        score_index = score_match.start()
     passed_match = re.search(r"\bpassed?\s*(?:is|=|:)?\s*(true|false|yes|no)\b", cleaned, re.IGNORECASE)
     if passed_match:
         passed = passed_match.group(1).lower() in {"true", "yes"}
     else:
         passed = score >= 1.0
-    reason = _prose_judge_reason(cleaned, score_match.start())
+    reason = _prose_judge_reason(cleaned, score_index)
     return {"score": score, "passed": passed, "reason": reason}
+
+
+def parse_qualitative_prose_judge_grade(text: str) -> dict[str, Any] | None:
+    cleaned = strip_thinking_blocks(text).strip()
+    qualitative = _qualitative_prose_judge_grade(cleaned)
+    if qualitative is not None:
+        return qualitative
+    return None
 
 
 def _qualitative_prose_judge_grade(text: str) -> dict[str, Any] | None:
@@ -5861,6 +6545,17 @@ def truncate(value: str, limit: int = MAX_FIELD_CHARS) -> str:
     if len(value) <= limit:
         return value
     return value[: limit - 20].rstrip() + " ...[truncated]"
+
+
+def truncate_middle(value: str, limit: int, marker: str = "\n...[truncated middle]...\n") -> str:
+    value = value.strip()
+    if len(value) <= limit:
+        return value
+    if limit <= len(marker) + 2:
+        return truncate(value, limit)
+    head = (limit - len(marker)) // 2
+    tail = limit - len(marker) - head
+    return f"{value[:head].rstrip()}{marker}{value[-tail:].lstrip()}"
 
 
 def _sample_limit() -> int:

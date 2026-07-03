@@ -259,6 +259,8 @@ def _metadata(
         "model": config.model or ("mock-perfect" if config.provider == "mock" else ""),
         "task_count": task_count,
         "known_suite_count": registry_count,
+        "excluded_suites": [],
+        "excluded_suite_count": 0,
         "selected_profile": config.profile,
         "selected_suite_count": task_count,
         "output_dir": str(output_dir),
@@ -270,7 +272,6 @@ def _metadata(
         "max_tokens": config.max_tokens,
         "json_mode": config.json_mode,
     }
-
 
 def _task_order(tasks: list[Task], task_id: str) -> int:
     for index, task in enumerate(tasks):

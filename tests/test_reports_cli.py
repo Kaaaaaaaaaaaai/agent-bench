@@ -162,17 +162,18 @@ def test_cli_mock_smoke_runs_all_bundled_benchmarks(tmp_path):
     assert exit_code == 0
     summary = json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))
     html = (out_dir / "summary.html").read_text(encoding="utf-8")
-    assert summary["task_count"] == 15
-    assert summary["selected_suite_count"] == 15
-    assert summary["known_suite_count"] == 15
-    assert len(summary["benchmark_results"]) == 15
+    assert summary["task_count"] == 12
+    assert summary["selected_suite_count"] == 12
+    assert summary["known_suite_count"] == 12
+    assert summary["excluded_suite_count"] == 0
+    assert summary["excluded_suites"] == []
+    assert len(summary["benchmark_results"]) == 12
     assert summary["suite_coverage_rate"] == 1.0
     assert summary["conservative_all_suite_score"] == 1.0
     assert "public_benchmarks" not in html
     assert "SWE-bench" in html
-    assert "GDPval" in html
+    assert "Excluded Suites" in html
     assert "Humanity&#x27;s Last Exam" not in html
-    assert "BioMystery Bench" in html
     assert "EDINET-Bench" not in html
     assert "MLE-bench" not in html
     assert "Benchmark Citations" in html
@@ -327,8 +328,8 @@ def test_aggregate_results_surfaces_nested_lfs_blocker_type():
     summary = aggregate_results(
         [
             GradeResult(
-                task_id="PB_003",
-                category="Research",
+                task_id="ASSET_001",
+                category="Artifact",
                 kind="external_benchmark",
                 score=0.0,
                 max_score=1.0,
@@ -338,8 +339,8 @@ def test_aggregate_results_surfaces_nested_lfs_blocker_type():
                 status="failed_missing_assets",
                 error="All benchmark record evaluations were invalid: failed missing assets",
                 details={
-                    "benchmark": "PaperBench",
-                    "group": "Research",
+                    "benchmark": "AssetBench",
+                    "group": "Artifact",
                     "result": {
                         "status": "failed_missing_assets",
                         "status_counts": {"failed_missing_assets": 1},
@@ -451,7 +452,7 @@ def test_aggregate_results_counts_nested_passed_items():
     summary = aggregate_results(
         [
             GradeResult(
-                task_id="PB_008",
+                task_id="STATIC_001",
                 category="Science",
                 kind="external_benchmark",
                 score=0.5,
@@ -460,7 +461,7 @@ def test_aggregate_results_counts_nested_passed_items():
                 json_valid=True,
                 latency_seconds=0.1,
                 details={
-                    "benchmark": "BioMystery",
+                    "benchmark": "StaticBench",
                     "group": "Science",
                     "result": {
                         "status": "completed",

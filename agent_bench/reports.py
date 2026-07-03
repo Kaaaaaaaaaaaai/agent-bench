@@ -66,6 +66,7 @@ RESULT_FIELDS = [
     "extracted_answer",
     "extraction_status",
     "judge_parser_status",
+    "judge_retry_count",
     "judge_parse_repaired_count",
 ]
 
@@ -174,6 +175,10 @@ def render_summary_html(summary: dict[str, Any], results: list[GradeResult]) -> 
       {_profile_table(summary.get("profile_results"))}
     </section>
     <section>
+      <h2>Excluded Suites</h2>
+      {_excluded_suite_table(summary.get("excluded_suites"))}
+    </section>
+    <section>
       <h2>Skipped Suites</h2>
       {_skipped_suite_table(summary.get("skipped_suites"))}
     </section>
@@ -231,6 +236,7 @@ def _result_csv_row(result: GradeResult) -> dict[str, Any]:
     row["extracted_answer"] = _json_cell(details.get("extracted_answer"))
     row["extraction_status"] = details.get("extraction_status")
     row["judge_parser_status"] = payload.get("judge_parser_status")
+    row["judge_retry_count"] = payload.get("judge_retry_count")
     row["judge_parse_repaired_count"] = payload.get("judge_parse_repaired_count")
     return row
 
@@ -334,6 +340,28 @@ def _skipped_suite_table(value: Any) -> str:
     return (
         "<table><thead><tr><th>Suite</th><th>Category</th><th>Run</th><th>Status</th>"
         f"<th>Blocker</th><th>Reason</th></tr></thead><tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def _excluded_suite_table(value: Any) -> str:
+    if not isinstance(value, list) or not value:
+        return "<table><tbody><tr><td>No excluded suites were recorded.</td></tr></tbody></table>"
+    rows = []
+    for row in value:
+        if not isinstance(row, dict):
+            continue
+        rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(row.get('suite_id', '')))}</td>"
+            f"<td>{html.escape(str(row.get('name', '')))}</td>"
+            f"<td>{html.escape(str(row.get('lifecycle_status', '')))}</td>"
+            f"<td>{html.escape(str(row.get('exclusion_reason', '')))}</td>"
+            f"<td>{html.escape(str(row.get('removal_reason', '')))}</td>"
+            "</tr>"
+        )
+    return (
+        "<table><thead><tr><th>Suite</th><th>Name</th><th>Lifecycle</th><th>Exclusion</th><th>Reason</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
     )
 
 

@@ -13,8 +13,10 @@ if [[ ! -d "${repo_dir}/.git" ]]; then
   repository_ref="${AGENT_BENCH_REPOSITORY_REF:-main}"
   if ! git clone --depth 1 --branch "${repository_ref}" "${AGENT_BENCH_REPOSITORY}" "${repo_dir}"; then
     rm -rf "${repo_dir}"
-    echo "Unable to clone ${AGENT_BENCH_REPOSITORY} at ${repository_ref}; retrying repository default branch." >&2
+    echo "Unable to clone ${AGENT_BENCH_REPOSITORY} branch/tag ${repository_ref}; retrying default branch plus exact checkout." >&2
     git clone --depth 1 "${AGENT_BENCH_REPOSITORY}" "${repo_dir}"
+    git -C "${repo_dir}" fetch --depth 1 origin "${repository_ref}"
+    git -C "${repo_dir}" checkout --detach "${repository_ref}"
   fi
 fi
 

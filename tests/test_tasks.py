@@ -103,7 +103,7 @@ def test_load_tasks_supports_text_recall(tmp_path):
 def test_bundled_public_benchmarks_are_external_tasks_with_credits():
     tasks = json.loads((REPO_TASKS_DIR / "public_benchmarks.json").read_text(encoding="utf-8"))
 
-    assert len(tasks) == 15
+    assert len(tasks) == 12
     assert {task["type"] for task in tasks} == {"external_benchmark"}
     assert all(task["benchmark"].get("license") for task in tasks)
     assert all(task["benchmark"].get("credit") for task in tasks)
@@ -111,11 +111,8 @@ def test_bundled_public_benchmarks_are_external_tasks_with_credits():
     assert all(task["benchmark"].get("group") for task in tasks)
     assert [task["id"] for task in tasks] == [
         "PB_001",
-        "PB_002",
-        "PB_003",
         "PB_004",
         "PB_005",
-        "PB_008",
         "PB_009",
         "PB_010",
         "PB_011",
@@ -128,11 +125,8 @@ def test_bundled_public_benchmarks_are_external_tasks_with_credits():
     ]
     assert [task["benchmark"]["name"] for task in tasks] == [
         "SWE-bench",
-        "GDPval",
-        "PaperBench",
         "SWE-Lancer",
         "SWE-bench Verified",
-        "BioMystery Bench",
         "ExploitBench",
         "codeneedle",
         "StockBench",
@@ -146,18 +140,45 @@ def test_bundled_public_benchmarks_are_external_tasks_with_credits():
 
     registry = load_task_registry(REPO_TASKS_DIR)
     loaded = load_tasks(REPO_TASKS_DIR)
-    assert len(registry) == 15
-    assert len(loaded) == 15
+    loaded_ids = [task.id for task in loaded]
+    assert len(registry) == 12
+    assert len(loaded) == 12
+    assert loaded_ids == [task["id"] for task in tasks]
     assert "public_benchmarks" not in {task.category for task in loaded}
     assert {task.category for task in loaded} == {
-        "Biosecurity",
         "Coding",
         "Finance",
         "Long Context",
-        "Research",
         "Security",
-        "Work",
     }
+
+
+def test_full_active_profile_selects_all_current_public_benchmarks():
+    loaded = load_tasks(REPO_TASKS_DIR, profile="full_active")
+
+    assert len(loaded) == 12
+    assert [task.id for task in loaded] == [
+        "PB_001",
+        "PB_004",
+        "PB_005",
+        "PB_009",
+        "PB_010",
+        "PB_011",
+        "PB_012",
+        "PB_013",
+        "PB_014",
+        "PB_015",
+        "PB_016",
+        "PB_017",
+    ]
+
+
+def test_finmcp_descriptor_is_static_not_live_tool_call():
+    tasks = json.loads((REPO_TASKS_DIR / "public_benchmarks.json").read_text(encoding="utf-8"))
+    descriptor = next(task for task in tasks if task["id"] == "PB_014")
+
+    assert "tool_call" not in descriptor["benchmark"]["capabilities"]
+    assert descriptor["benchmark"]["adapter"] == "static_transcript_reasoning"
 
 
 def test_load_tasks_supports_external_benchmark(tmp_path):

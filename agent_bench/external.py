@@ -348,11 +348,12 @@ def _prepare_benchmark_asset_cache(
         return None
     git_bin = shutil.which("git")
     git_lfs_bin = shutil.which("git-lfs")
-    if (git_bin is None or git_lfs_bin is None) and launcher_image:
+    requires_lfs = bool(recipe.get("requires_git_lfs", True))
+    if (git_bin is None or (requires_lfs and git_lfs_bin is None)) and launcher_image:
         return _prepare_benchmark_asset_cache_with_docker(recipe, config, launcher_image)
     if git_bin is None:
         return "asset cache download skipped: git was not found and Docker fallback was unavailable"
-    if git_lfs_bin is None:
+    if requires_lfs and git_lfs_bin is None:
         return "asset cache download skipped: git-lfs was not found and Docker fallback was unavailable"
 
     download_root = config.asset_root / "_downloads" / recipe["key"]
@@ -364,33 +365,27 @@ def _prepare_benchmark_asset_cache(
     ref = str(recipe.get("ref") or "main")
     env = os.environ.copy()
     env["GIT_LFS_SKIP_SMUDGE"] = "1"
-    clone_error = _run_asset_command(
-        [git_bin, "clone", "--depth", "1", "--branch", ref, repository, str(clone_dir)],
-        env=env,
-    )
+    clone_error = _clone_repository_at_ref(git_bin, repository, ref, clone_dir, env=env)
     if clone_error is not None:
-        if clone_dir.exists():
-            shutil.rmtree(clone_dir)
-        clone_error = _run_asset_command([git_bin, "clone", "--depth", "1", repository, str(clone_dir)], env=env)
-        if clone_error is not None:
-            return f"asset cache download skipped: {clone_error}"
-    _run_asset_command([git_bin, "-C", str(clone_dir), "lfs", "install", "--local"], env=env)
-    lfs_error = _run_asset_command(
-        [
-            git_bin,
-            "-C",
-            str(clone_dir),
-            "lfs",
-            "pull",
-            "--include",
-            ",".join(str(item) for item in recipe["includes"]),
-            "--exclude",
-            "",
-        ],
-        env=env,
-    )
-    if lfs_error is not None:
-        return f"asset cache download skipped: {lfs_error}"
+        return f"asset cache download skipped: {clone_error}"
+    if requires_lfs:
+        _run_asset_command([git_bin, "-C", str(clone_dir), "lfs", "install", "--local"], env=env)
+        lfs_error = _run_asset_command(
+            [
+                git_bin,
+                "-C",
+                str(clone_dir),
+                "lfs",
+                "pull",
+                "--include",
+                ",".join(str(item) for item in recipe["includes"]),
+                "--exclude",
+                "",
+            ],
+            env=env,
+        )
+        if lfs_error is not None:
+            return f"asset cache download skipped: {lfs_error}"
 
     copied = 0
     for subpath in recipe["subpaths"]:
@@ -427,6 +422,33 @@ def _prepare_benchmark_asset_cache(
         encoding="utf-8",
     )
     return None
+
+
+def _clone_repository_at_ref(
+    git_bin: str,
+    repository: str,
+    ref: str,
+    clone_dir: Path,
+    *,
+    env: dict[str, str],
+) -> str | None:
+    if clone_dir.exists():
+        shutil.rmtree(clone_dir)
+    clone_error = _run_asset_command(
+        [git_bin, "clone", "--depth", "1", "--branch", ref, repository, str(clone_dir)],
+        env=env,
+    )
+    if clone_error is None:
+        return None
+    if clone_dir.exists():
+        shutil.rmtree(clone_dir)
+    clone_error = _run_asset_command([git_bin, "clone", "--depth", "1", repository, str(clone_dir)], env=env)
+    if clone_error is not None:
+        return clone_error
+    fetch_error = _run_asset_command([git_bin, "-C", str(clone_dir), "fetch", "--depth", "1", "origin", ref], env=env)
+    if fetch_error is not None:
+        return fetch_error
+    return _run_asset_command([git_bin, "-C", str(clone_dir), "checkout", "--detach", ref], env=env)
 
 
 def _prepare_benchmark_asset_cache_with_docker(
@@ -472,6 +494,7 @@ def _docker_asset_download_script(recipe: dict[str, Any]) -> str:
     repository = shlex.quote(str(recipe["repository"]))
     ref = shlex.quote(str(recipe.get("ref") or "main"))
     includes = shlex.quote(",".join(str(item) for item in recipe["includes"]))
+    requires_lfs = "1" if recipe.get("requires_git_lfs", True) else "0"
     copy_commands = []
     for subpath in recipe["subpaths"]:
         quoted = shlex.quote(str(subpath))
@@ -490,14 +513,14 @@ def _docker_asset_download_script(recipe: dict[str, Any]) -> str:
             f"repository={repository}",
             f"ref={ref}",
             f"includes={includes}",
+            f"requires_lfs={requires_lfs}",
             f'cache="{CONTAINER_ASSET_ROOT}/$key"',
             f'tmp="{CONTAINER_ASSET_ROOT}/_downloads/$key/repo"',
             'rm -rf "$tmp"',
             'mkdir -p "$(dirname "$tmp")" "$cache"',
             "export GIT_LFS_SKIP_SMUDGE=1",
-            'git clone --depth 1 --branch "$ref" "$repository" "$tmp" || { rm -rf "$tmp"; git clone --depth 1 "$repository" "$tmp"; }',
-            'git -C "$tmp" lfs install --local || true',
-            'git -C "$tmp" lfs pull --include "$includes" --exclude ""',
+            'git clone --depth 1 --branch "$ref" "$repository" "$tmp" || { rm -rf "$tmp"; git clone --depth 1 "$repository" "$tmp"; git -C "$tmp" fetch --depth 1 origin "$ref"; git -C "$tmp" checkout --detach "$ref"; }',
+            'if [[ "$requires_lfs" == "1" ]]; then git -C "$tmp" lfs install --local || true; git -C "$tmp" lfs pull --include "$includes" --exclude ""; fi',
             copy_script,
             """printf '{"downloaded":true}\\n' > "$cache/.agent-bench-assets-ready.json" """,
         ]
@@ -521,6 +544,25 @@ def _asset_cache_recipe(benchmark: dict[str, Any]) -> dict[str, Any] | None:
             "ref": benchmark.get("ref") or "main",
             "includes": ("project/paperbench/data/papers/**",),
             "subpaths": ("project/paperbench/data/papers",),
+        }
+    if key == "exploitbench":
+        return {
+            "key": key,
+            "repository": benchmark.get("repository") or "https://github.com/exploitbench/exploitbench.git",
+            "ref": benchmark.get("ref") or "main",
+            "requires_git_lfs": False,
+            "includes": (),
+            "subpaths": (
+                "benchmarks",
+                "data",
+                "docs",
+                "exploitbench",
+                "scripts",
+                "testenvs",
+                "pyproject.toml",
+                "README.md",
+                "Makefile",
+            ),
         }
     return None
 
