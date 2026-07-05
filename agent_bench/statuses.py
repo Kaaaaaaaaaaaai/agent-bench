@@ -319,6 +319,12 @@ STATUS_CATALOG: dict[str, StatusInfo] = {
         failure_class="benchmark_setup",
         explanation="A benchmark-required external tool is unavailable.",
     ),
+    FAILED_MISSING_REQUIRED_TOOL: _status_info(
+        FAILED_MISSING_REQUIRED_TOOL,
+        score=False,
+        failure_class="benchmark_setup",
+        explanation="A benchmark-required tool schema, backend, or fixture is unavailable.",
+    ),
     FAILED_JUDGE_UNAVAILABLE: _status_info(
         FAILED_JUDGE_UNAVAILABLE,
         score=False,

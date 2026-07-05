@@ -46,7 +46,6 @@ from agent_bench.statuses import (
     is_skipped_like_status,
     normalize_status,
     status_catalog_dict,
-    status_info,
 )
 
 
@@ -148,8 +147,11 @@ def aggregate_results(
     item_count, valid_item_count = _item_coverage_counts(results)
     suite_blockers = _suite_blockers(results)
     blocker_counts = _blocker_counts(results)
-    excluded_suites = _excluded_suites(metadata)
-    excluded_suite_count = _int_metadata(metadata, "excluded_suite_count", len(excluded_suites))
+    excluded_suites = _merged_excluded_suites(_excluded_suites(metadata), _result_excluded_suites(results))
+    excluded_suite_count = len(excluded_suites)
+    summary_metadata = dict(metadata)
+    summary_metadata["excluded_suites"] = excluded_suites
+    summary_metadata["excluded_suite_count"] = excluded_suite_count
     profile_results = _profile_results(benchmark_results)
     parser_repair_count = _parser_repair_count(results)
     usage_summary = _usage_summary(results)
@@ -162,7 +164,7 @@ def aggregate_results(
         "selected_suite_count": task_count,
         "excluded_suite_count": excluded_suite_count,
         "excluded_suites": excluded_suites,
-        "metadata": metadata,
+        "metadata": summary_metadata,
         "task_count": task_count,
         "valid_task_count": valid_task_count,
         "valid_judged_suite_count": valid_task_count,
@@ -236,14 +238,14 @@ def aggregate_results(
         "judge_parse_error_count": blocker_counts.get(BLOCKER_JUDGE_PARSE_ERROR, 0),
         "repo_patch_harness_setup_count": blocker_counts.get(BLOCKER_REPO_PATCH_HARNESS_SETUP, 0),
         "missing_assets_count": status_counts.get(FAILED_MISSING_ASSETS, 0),
-        "unsupported_capability_count": status_counts.get(SKIPPED_UNSUPPORTED_CAPABILITY, 0),
+        "unsupported_capability_count": _unsupported_capability_count(results, status_counts),
         "missing_grader_count": blocker_counts.get(BLOCKER_MISSING_GRADER, 0),
         "judge_error_count": grader_failure_count,
         "parser_repair_count": parser_repair_count,
         "dataset_extraction_failed_count": status_counts.get(FAILED_DATASET_EXTRACTION, 0),
         "token_budget_failed_count": status_counts.get(FAILED_TOKEN_BUDGET, 0),
         "skipped_missing_assets_count": status_counts.get(FAILED_MISSING_ASSETS, 0),
-        "skipped_unsupported_capability_count": status_counts.get(SKIPPED_UNSUPPORTED_CAPABILITY, 0),
+        "skipped_unsupported_capability_count": _unsupported_capability_count(results, status_counts),
         "benchmark_item_skipped_count": benchmark_item_skipped_count,
         "setup_failed_count": status_counts.get(FAILED_HARNESS_SETUP, 0),
         "harness_setup_failure_count": status_counts.get(FAILED_HARNESS_SETUP, 0),
@@ -338,16 +340,62 @@ def _excluded_suites(metadata: dict[str, Any]) -> list[dict[str, Any]]:
     return sorted(rows, key=lambda row: row["suite_id"])
 
 
+def _result_excluded_suites(results: list[GradeResult]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for result in results:
+        status = _result_status(result)
+        if _is_valid_result(result):
+            continue
+        rows.append(
+            {
+                "suite_id": result.task_id,
+                "name": _benchmark_name(result),
+                "lifecycle_status": "score_excluded",
+                "exclusion_reason": _blocker_type(result) or status,
+                "included_in_official_score": False,
+                "status": status,
+                "run_status": _run_status(result),
+                "error": _result_error_reason(result),
+            }
+        )
+    return rows
+
+
+def _merged_excluded_suites(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for group in groups:
+        for row in group:
+            suite_id = row.get("suite_id")
+            if not isinstance(suite_id, str) or not suite_id:
+                continue
+            existing = merged.get(suite_id, {})
+            merged[suite_id] = {**existing, **row}
+    return sorted(merged.values(), key=lambda row: str(row.get("suite_id", "")))
+
+
 def _valid_items(items: list[GradeResult]) -> list[GradeResult]:
     return [item for item in items if _is_valid_result(item)]
+
+
+def _benchmark_name(result: GradeResult) -> str:
+    payload = _benchmark_payload(result)
+    details = result.details if isinstance(result.details, dict) else {}
+    return str(payload.get("benchmark") or details.get("benchmark") or result.task_id)
 
 
 def _is_valid_result(result: GradeResult) -> bool:
     if _result_status(result) in INVALID_EVALUATION_STATUSES:
         return False
+    if _explicitly_excluded_from_official(result):
+        return False
     if result.kind == "external_benchmark" and not _capabilities_verified(result):
         return False
     return True
+
+
+def _explicitly_excluded_from_official(result: GradeResult) -> bool:
+    payload = _benchmark_payload(result)
+    return payload.get("included_in_official_score") is False
 
 
 def _capabilities_verified(result: GradeResult) -> bool:
@@ -430,7 +478,11 @@ def _run_status(result: GradeResult) -> str:
 
 def _score_status(result: GradeResult) -> str:
     status = _result_status(result)
-    if status in INVALID_EVALUATION_STATUSES or (result.kind == "external_benchmark" and not _capabilities_verified(result)):
+    if (
+        status in INVALID_EVALUATION_STATUSES
+        or _explicitly_excluded_from_official(result)
+        or (result.kind == "external_benchmark" and not _capabilities_verified(result))
+    ):
         return SCORE_NOT_APPLICABLE if _run_status(result) == RUN_SKIPPED else SCORE_UNGRADED
     if result.passed:
         return SCORE_PASSED
@@ -453,6 +505,8 @@ def _blocker_type(result: GradeResult) -> str:
     explicit_blocker = _explicit_blocker_type(result, payload)
     if explicit_blocker:
         return explicit_blocker
+    if _uses_smoke_score_mode(payload):
+        return BLOCKER_MISSING_GRADER
     unsupported = payload.get("unsupported_capabilities")
     unsupported_values = {str(item) for item in unsupported} if isinstance(unsupported, list) else set()
     contract = payload.get("capability_contract")
@@ -483,6 +537,17 @@ def _blocker_type(result: GradeResult) -> str:
     if status in {FAILED_MODEL_FORMAT, FAILED_DATASET_EXTRACTION}:
         return BLOCKER_OUTPUT_PARSE_ERROR
     return ""
+
+
+def _uses_smoke_score_mode(payload: dict[str, Any]) -> bool:
+    modes: set[str] = set()
+    mode = payload.get("score_mode")
+    if isinstance(mode, str) and mode.strip():
+        modes.add(mode.strip())
+    score_modes = payload.get("score_modes")
+    if isinstance(score_modes, list):
+        modes.update(str(item).strip() for item in score_modes if str(item).strip())
+    return payload.get("official_equivalent") is False or any(mode.startswith("smoke") for mode in modes)
 
 
 def _explicit_blocker_type(result: GradeResult, payload: dict[str, Any]) -> str:
@@ -615,7 +680,7 @@ def _coverage_summary(
     task_count = len(results)
     valid_count = sum(1 for result in results if _is_valid_result(result))
     item_count, valid_item_count = _item_coverage_counts(results)
-    unsupported_count = status_counts.get(SKIPPED_UNSUPPORTED_CAPABILITY, 0)
+    unsupported_count = _unsupported_capability_count(results, status_counts)
     missing_assets_count = status_counts.get(FAILED_MISSING_ASSETS, 0)
     dataset_failed_count = status_counts.get(FAILED_DATASET_EXTRACTION, 0)
     return {
@@ -644,6 +709,16 @@ def _coverage_summary(
     }
 
 
+def _unsupported_capability_count(results: list[GradeResult], status_counts: dict[str, int]) -> int:
+    explicit_count = 0
+    for result in results:
+        payload = _benchmark_payload(result)
+        unsupported = payload.get("unsupported_capabilities")
+        if isinstance(unsupported, list):
+            explicit_count += len({str(item) for item in unsupported if str(item)})
+    return max(status_counts.get(SKIPPED_UNSUPPORTED_CAPABILITY, 0), explicit_count)
+
+
 def _official_coverage_summary(
     results: list[GradeResult],
     category_counts: dict[str, dict[str, Any]],
@@ -651,17 +726,12 @@ def _official_coverage_summary(
     total = len(results)
     scored = sum(1 for result in results if _is_valid_result(result))
     failed = total - scored
-    excluded = sum(
-        1
-        for result in results
-        if not status_info(_result_status(result)).counts_toward_official_score
-    )
     return {
         "total_configured_benchmarks": total,
         "attempted_benchmarks": total,
         "successfully_scored_benchmarks": scored,
         "failed_benchmarks": failed,
-        "excluded_from_score_benchmarks": excluded,
+        "excluded_from_score_benchmarks": failed,
         "coverage_rate": _ratio(scored, total),
         "per_category": {
             category: {
@@ -993,6 +1063,9 @@ def _benchmark_results(results: list[GradeResult]) -> list[dict[str, Any]]:
                 "status": _result_status(result),
                 "run_status": _run_status(result),
                 "score_status": _score_status(result),
+                "official_equivalent": benchmark_payload.get("official_equivalent", details.get("official_equivalent")),
+                "score_mode": benchmark_payload.get("score_mode", details.get("score_mode", "")),
+                "score_modes": benchmark_payload.get("score_modes", details.get("score_modes", [])),
                 "duration_seconds": result.task_duration_seconds,
                 "blocker_type": _blocker_type(result),
                 "error": error,
@@ -1008,6 +1081,14 @@ def _benchmark_results(results: list[GradeResult]) -> list[dict[str, Any]]:
                 "docker_socket_mount": benchmark_payload.get("docker_socket_mount", details.get("docker_socket_mount", external_setup.get("docker_socket_mount", {}))),
                 "output_mount": benchmark_payload.get("output_mount", details.get("output_mount", external_setup.get("output_mount", {}))),
                 "asset_cache_mount": benchmark_payload.get("asset_cache_mount", details.get("asset_cache_mount", external_setup.get("asset_cache_mount", {}))),
+                "catalog_checkout_path": benchmark_payload.get(
+                    "catalog_checkout_path",
+                    details.get("catalog_checkout_path", external_setup.get("catalog_checkout_path", "")),
+                ),
+                "target_checkout_path": benchmark_payload.get(
+                    "target_checkout_path",
+                    details.get("target_checkout_path", external_setup.get("target_checkout_path", "")),
+                ),
                 "benchmark_checkout_path": benchmark_payload.get("benchmark_checkout_path", details.get("benchmark_checkout_path", external_setup.get("benchmark_checkout_path", ""))),
                 "output_dir": details.get("output_dir", ""),
                 "manifest": manifest,

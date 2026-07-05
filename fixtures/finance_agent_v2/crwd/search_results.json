@@ -1,0 +1,18 @@
+[
+  {
+    "rank": 1,
+    "title": "CrowdStrike Holdings, Inc. FY2025 Form 10-K",
+    "url": "https://www.sec.gov/Archives/edgar/data/1535527/000153552725000009/crwd-20250131.htm",
+    "source": "SEC EDGAR",
+    "report_date": "2025-01-31",
+    "snippet": "The FY2025 10-K describes the AI-native CrowdStrike Falcon platform, Charlotte AI as generative AI for security operations, securing generative AI workloads, AI adoption as a demand driver, and AI-related risks including adversarial AI, regulation, compliance, and rapid AI evolution."
+  },
+  {
+    "rank": 2,
+    "title": "CrowdStrike Holdings, Inc. Q3 FY2026 Form 10-Q",
+    "url": "https://www.sec.gov/Archives/edgar/data/1535527/000153552725000033/crwd-20251031.htm",
+    "source": "SEC EDGAR",
+    "report_date": "2025-10-31",
+    "snippet": "The Q3 FY2026 10-Q updates the period ended October 31, 2025, repeats the AI-native Falcon platform framing, and discloses the September 26, 2025 Pangea acquisition for AI Detection and Response solutions."
+  }
+]

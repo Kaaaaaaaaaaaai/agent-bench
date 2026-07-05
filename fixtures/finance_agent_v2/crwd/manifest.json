@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "ticker": "CRWD",
+  "company": "CrowdStrike Holdings, Inc.",
+  "fixture_scope": "PB_016 smoke fixture for AI tailwind and AI risk disclosures",
+  "source_documents": [
+    "SEC Form 10-K for fiscal year ended January 31, 2025",
+    "SEC Form 10-Q for period ended October 31, 2025"
+  ],
+  "documents": [
+    {
+      "form": "10-K",
+      "report_date": "2025-01-31",
+      "accession": "0001535527-25-000009",
+      "primary_document": "crwd-20250131.htm",
+      "url": "https://www.sec.gov/Archives/edgar/data/1535527/000153552725000009/crwd-20250131.htm",
+      "html_path": "filings/2025-01-31_10k.html",
+      "parsed_path": "parsed/2025-01-31_10k.txt"
+    },
+    {
+      "form": "10-Q",
+      "report_date": "2025-10-31",
+      "accession": "0001535527-25-000033",
+      "primary_document": "crwd-20251031.htm",
+      "url": "https://www.sec.gov/Archives/edgar/data/1535527/000153552725000033/crwd-20251031.htm",
+      "html_path": "filings/2025-10-31_10q.html",
+      "parsed_path": "parsed/2025-10-31_10q.txt"
+    }
+  ],
+  "files": {
+    "search_results.json": {"sha256": "fc5c5bdf3bca822b67b0c3557259a71887aebe7ce43d00ea8a6318af4f4cf1a4"},
+    "edgar_filings_index.json": {"sha256": "de0b531e019c5023fbf142a2e4a8a561e7259dbd238edae36cc27a1db5b00f8d"},
+    "retrieval_index.json": {"sha256": "f584000777d5601535a9f18139cba4fcb3cf3e9fb674d0c624db626fd4fbc992"},
+    "price_history.json": {"sha256": "c46ee73a9d8ce3cfbf7e23bab6b674ac6b2c2d31c4cce143fc4e70192f840a7c"},
+    "filings/2025-01-31_10k.html": {"sha256": "c859dbb4c762d2c830fdf0f67aa2fda7395387e27bcfd75acb3a15de98e81883"},
+    "filings/2025-10-31_10q.html": {"sha256": "573113d90a494952ade6979cf1050bf887ae2ab16dba4318d1451d8e8d47b464"},
+    "parsed/2025-01-31_10k.txt": {"sha256": "c0cd1ac9bdbe432d5c5ecf0fa770d4182eaa5643911efd4da321d0ebb8ccb37f"},
+    "parsed/2025-10-31_10q.txt": {"sha256": "13d745f944df47b1c9613785f413116c429dc0907cd0aacc3a278c470660e422"}
+  }
+}

@@ -371,6 +371,15 @@ def _launcher_image_fingerprint(config: ExternalBenchmarkConfig) -> str:
         if path.is_file():
             digest.update(path.read_bytes())
         digest.update(b"\0")
+    for fixture_name in ("fintoolbench", "finance_agent_v2"):
+        fixture_root = config.source_root / "fixtures" / fixture_name
+        if fixture_root.exists():
+            for path in sorted(item for item in fixture_root.rglob("*") if item.is_file()):
+                relative = path.relative_to(config.source_root)
+                digest.update(str(relative).encode("utf-8"))
+                digest.update(b"\0")
+                digest.update(path.read_bytes())
+                digest.update(b"\0")
     return digest.hexdigest()
 
 
@@ -546,11 +555,18 @@ def _external_setup_details(
         for asset in manifest.assets
         if asset.required and asset.expected_local_path
     ]
-    validation = _asset_validation_details(cache_dir, required_asset_paths, asset_cache_error)
-    checkout_path = "/workspace/repo"
+    cache_required_paths = [path for path in required_asset_paths if path not in {".", ""}]
+    cache_recipe = _asset_cache_recipe(task.benchmark)
+    validation = _asset_validation_details(
+        cache_dir,
+        required_asset_paths,
+        asset_cache_error,
+        cache_required=bool(cache_recipe or cache_required_paths),
+    )
+    catalog_checkout_path = "/workspace/repo"
     subdir = manifest.source.subdir or env.get("AGENT_BENCH_SUBDIR", "")
     if subdir:
-        checkout_path = f"{checkout_path}/{subdir.strip('/')}"
+        catalog_checkout_path = f"{catalog_checkout_path}/{subdir.strip('/')}"
     return {
         "container_name": container_name,
         "image": launcher_image,
@@ -573,13 +589,19 @@ def _external_setup_details(
             "readonly": True,
             "cache_key": asset_cache_key,
             "cache_path": str(cache_dir),
+            "cache_required": validation["cache_required"],
+            "cache_used": validation["cache_used"],
+            "direct_clone_used": validation["direct_clone_used"],
+            "cache_status": validation["cache_status"],
         },
-        "benchmark_checkout_path": checkout_path,
+        "catalog_checkout_path": catalog_checkout_path,
+        "benchmark_checkout_path": catalog_checkout_path,
+        "target_checkout_path": "",
         "required_asset_paths": required_asset_paths,
         "copied_asset_paths": copied_asset_paths,
         "missing_assets_count": int(validation.get("missing_count", 0)),
         "validation_result": validation,
-        "cache_recipe": _asset_cache_recipe(task.benchmark) or {},
+        "cache_recipe": cache_recipe or {},
     }
 
 
@@ -590,7 +612,9 @@ def _attach_external_setup_details(payload: dict[str, Any], setup_details: dict[
     payload["docker_socket_mount"] = setup_details["docker_socket_mount"]
     payload["output_mount"] = setup_details["output_mount"]
     payload["asset_cache_mount"] = setup_details["asset_cache_mount"]
+    payload["catalog_checkout_path"] = setup_details["catalog_checkout_path"]
     payload["benchmark_checkout_path"] = setup_details["benchmark_checkout_path"]
+    payload.setdefault("target_checkout_path", setup_details["target_checkout_path"])
     payload["required_asset_paths"] = setup_details["required_asset_paths"]
     payload["copied_asset_paths"] = setup_details["copied_asset_paths"]
     payload["missing_assets_count"] = setup_details["missing_assets_count"]
@@ -621,6 +645,8 @@ def _asset_validation_details(
     cache_dir: Path,
     required_asset_paths: list[str],
     asset_cache_error: str | None,
+    *,
+    cache_required: bool,
 ) -> dict[str, Any]:
     missing = []
     for relative in required_asset_paths:
@@ -629,14 +655,32 @@ def _asset_validation_details(
         if not (cache_dir / relative).exists():
             missing.append(relative)
     sentinel = cache_dir / ".agent-bench-assets-ready.json"
+    materialized_count = len(_relative_file_sample(cache_dir, limit=10_000)) if cache_dir.exists() else 0
+    cache_used = materialized_count > 0
+    if asset_cache_error:
+        cache_status = "warning"
+    elif missing:
+        cache_status = "missing_required"
+    elif sentinel.is_file() and cache_used:
+        cache_status = "ready"
+    elif cache_used:
+        cache_status = "materialized_unverified"
+    elif cache_required:
+        cache_status = "empty"
+    else:
+        cache_status = "not_required"
     return {
-        "ok": not asset_cache_error and not missing,
+        "ok": not asset_cache_error and not missing and (cache_used or not cache_required),
         "warning": asset_cache_error or "",
+        "cache_required": cache_required,
+        "cache_used": cache_used,
+        "direct_clone_used": not cache_used,
+        "cache_status": cache_status,
         "cache_dir_exists": cache_dir.exists(),
         "ready_sentinel": sentinel.is_file(),
         "missing_required_asset_paths": missing,
         "missing_count": len(missing),
-        "materialized_file_count": len(_relative_file_sample(cache_dir, limit=10_000)) if cache_dir.exists() else 0,
+        "materialized_file_count": materialized_count,
     }
 
 
@@ -851,6 +895,16 @@ def _asset_cache_recipe(benchmark: dict[str, Any]) -> dict[str, Any] | None:
             "ref": benchmark.get("ref") or "main",
             "includes": ("project/paperbench/data/papers/**",),
             "subpaths": ("project/paperbench/data/papers",),
+        }
+    if key == "swe-lancer":
+        subdir = str(benchmark.get("subdir") or "project/swelancer").strip("/") or "project/swelancer"
+        return {
+            "key": key,
+            "repository": benchmark.get("repository") or "https://github.com/openai/frontier-evals.git",
+            "ref": benchmark.get("ref") or "main",
+            "requires_git_lfs": False,
+            "includes": (),
+            "subpaths": (subdir,),
         }
     if key == "exploitbench":
         return {

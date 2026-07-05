@@ -151,19 +151,19 @@ def main(argv: list[str] | None = None) -> int:
         summary = asyncio.run(run_benchmark(config))
         print(f"Tasks: {summary['passed_count']} / {summary['task_count']} passed")
         print(
-            "Valid judged score: "
+            "Scored-suite score: "
             f"{summary['valid_judged_score'] * 100.0:.2f}% "
             f"(suite coverage {summary['valid_task_count']}/{summary['task_count']}, "
             f"item coverage {summary.get('valid_judged_item_count', 0)}/{summary.get('item_count', 0)})"
         )
-        print(f"Conservative all-suite score: {summary['conservative_all_suite_score'] * 100.0:.2f}%")
+        print(f"Conservative selected-suite score: {summary['conservative_all_suite_score'] * 100.0:.2f}%")
         if "model_score_valid_tasks_only" in summary:
             print(f"Model-valid score: {summary['model_score_valid_tasks_only']:.2f}%")
         if summary.get("raw_score_all_tasks") != summary.get("score_valid_tasks_only") or summary.get("skipped_count"):
             print(f"Raw score: {summary['raw_score_all_tasks']:.2f}%")
             print(
                 "Coverage/setup/grader: "
-                f"{summary.get('skipped_count', 0)} coverage gaps, "
+                f"{summary.get('excluded_suite_count', summary.get('skipped_count', 0))} score exclusions, "
                 f"{summary.get('setup_failed_count', 0)} setup failed, "
                 f"{summary.get('grader_failure_count', summary.get('judge_parse_failed_count', 0))} "
                 "grader failed"

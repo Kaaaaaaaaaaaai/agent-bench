@@ -536,11 +536,11 @@
       "license": "MIT",
       "credit": "Vals AI Finance Agent Benchmark authors",
       "citation": "https://github.com/vals-ai/finance-agent-v2",
-      "adapter": "finance_agent_v2_live_tools",
+      "adapter": "finance_agent_v2_fixture_tools",
       "official_conditions": {
         "official_split": "public benchmark tasks",
         "official_scoring_method": "agent-bench public adapter normalized score",
-        "official_prompt_format": "live finance-agent prompts with web_search, edgar_search, parse_html_page, retrieve_information, and price_history exposed when backend credentials are configured",
+        "official_prompt_format": "finance-agent prompts with deterministic CRWD fixture-backed web_search, edgar_search, parse_html_page, retrieve_information, and price_history exposed when fixture canaries pass",
         "official_grader_command": "agent-bench-probe --benchmark \"Finance Agent v2\" --kind public-benchmark",
         "official_evaluation_config": "tasks/public_benchmarks.json#PB_016",
         "container_requirements": "agent-bench-external:python3.12 launcher image"
@@ -569,7 +569,7 @@
         "retrieve_information",
         "price_history"
       ],
-      "required_environment": [
+      "optional_live_environment": [
         "VALS_API_KEY",
         "TAVILY_API_KEY",
         "SEC_EDGAR_API_KEY",

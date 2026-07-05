@@ -1,0 +1,26 @@
+[
+  {
+    "date": "2020-12-31",
+    "symbol": "MMM",
+    "reportedCurrency": "USD",
+    "calendarYear": "2020",
+    "period": "FY",
+    "propertyPlantEquipmentNet": 8764000000
+  },
+  {
+    "date": "2019-12-31",
+    "symbol": "MMM",
+    "reportedCurrency": "USD",
+    "calendarYear": "2019",
+    "period": "FY",
+    "propertyPlantEquipmentNet": 8836000000
+  },
+  {
+    "date": "2018-12-31",
+    "symbol": "MMM",
+    "reportedCurrency": "USD",
+    "calendarYear": "2018",
+    "period": "FY",
+    "propertyPlantEquipmentNet": 8700000000
+  }
+]

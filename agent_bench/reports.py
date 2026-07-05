@@ -60,6 +60,9 @@ RESULT_FIELDS = [
     "status",
     "run_status",
     "score_status",
+    "official_equivalent",
+    "score_mode",
+    "score_modes",
     "included_in_official_score",
     "coverage_status",
     "required_capabilities",
@@ -77,6 +80,8 @@ RESULT_FIELDS = [
     "docker_socket_mount",
     "output_mount",
     "asset_cache_mount",
+    "catalog_checkout_path",
+    "target_checkout_path",
     "benchmark_checkout_path",
     "homepage",
     "license",
@@ -195,8 +200,9 @@ def render_summary_html(summary: dict[str, Any], results: list[GradeResult]) -> 
         <div class="muted">Judge {html.escape(str(judge.get("model") or judge.get("provider") or "none"))} · fallback {html.escape("yes" if judge.get("fallback_used") else "no")} · commit {html.escape(str(metadata.get("git_commit", ""))[:12])}</div>
       </div>
       <div class="headline-score">
-        <span class="muted">Overall Score</span>
-        <strong>{_format_percent(summary.get("overall_score", summary.get("total_score")))}</strong>
+        <span class="muted">Scored-Suite Score</span>
+        <strong>{_format_percent(summary.get("score_valid_tasks_only", summary.get("total_score")))}</strong>
+        <span class="muted">Conservative selected-suite {_format_rate(summary.get("conservative_all_suite_score"))}</span>
         <span class="muted">{html.escape(_coverage_label(coverage))}</span>
       </div>
     </div>
@@ -251,7 +257,7 @@ def _report_metric_cards(summary: dict[str, Any]) -> str:
     metadata = summary.get("metadata", {})
     judge = metadata.get("judge") if isinstance(metadata.get("judge"), dict) else {}
     cards = [
-        ("Overall", _format_percent(summary.get("overall_score", summary.get("total_score")))),
+        ("Scored-Suite", _format_percent(summary.get("score_valid_tasks_only", summary.get("total_score")))),
         ("Official Valid", f"{coverage.get('successfully_scored_benchmarks', summary.get('valid_task_count', 0))}"),
         ("Coverage", _format_rate(coverage.get("coverage_rate", summary.get("suite_coverage_rate")))),
         ("Failed", f"{coverage.get('failed_benchmarks', 0)}"),
@@ -548,6 +554,9 @@ def _result_csv_row(result: GradeResult) -> dict[str, Any]:
     row["task_group"] = details.get("group", result.category)
     row["run_status"] = _run_status(result)
     row["score_status"] = _score_status(result)
+    row["official_equivalent"] = payload.get("official_equivalent", details.get("official_equivalent"))
+    row["score_mode"] = payload.get("score_mode", details.get("score_mode"))
+    row["score_modes"] = _json_cell(payload.get("score_modes", details.get("score_modes", [])))
     row["included_in_official_score"] = _included_in_official_score(result)
     row["coverage_status"] = "scored" if row["included_in_official_score"] else "excluded"
     row["required_capabilities"] = _json_cell(payload.get("required_capabilities", details.get("required_capabilities", [])))
@@ -574,6 +583,14 @@ def _result_csv_row(result: GradeResult) -> dict[str, Any]:
     )
     row["asset_cache_mount"] = _json_cell(
         payload.get("asset_cache_mount", details.get("asset_cache_mount", external_setup.get("asset_cache_mount")))
+    )
+    row["catalog_checkout_path"] = payload.get(
+        "catalog_checkout_path",
+        details.get("catalog_checkout_path", external_setup.get("catalog_checkout_path")),
+    )
+    row["target_checkout_path"] = payload.get(
+        "target_checkout_path",
+        details.get("target_checkout_path", external_setup.get("target_checkout_path")),
     )
     row["benchmark_checkout_path"] = payload.get(
         "benchmark_checkout_path",
@@ -638,10 +655,10 @@ def _is_status_token(value: Any) -> bool:
 
 def _metric_cards(summary: dict[str, Any]) -> str:
     cards = [
-        ("Valid Judged Score", _format_rate(summary.get("valid_judged_score"))),
+        ("Scored-Suite Score", _format_rate(summary.get("valid_judged_score"))),
         ("Suite Coverage", _format_rate(summary.get("suite_coverage_rate"))),
         ("Item Coverage", _format_rate(summary.get("item_coverage_rate"))),
-        ("Conservative Score", _format_rate(summary.get("conservative_all_suite_score"))),
+        ("Conservative Selected-Suite", _format_rate(summary.get("conservative_all_suite_score"))),
         ("Model Score", _format_percent(summary.get("model_score_valid_tasks_only"))),
         ("Raw Score", _format_percent(summary.get("raw_score_all_tasks", summary.get("raw_score")))),
         ("Valid Tasks", _format_integer(summary.get("valid_task_count"))),
@@ -1020,9 +1037,16 @@ def _result_status(result: GradeResult) -> str:
 def _included_in_official_score(result: GradeResult) -> bool:
     if _result_status(result) in INVALID_EVALUATION_STATUSES:
         return False
+    if _explicitly_excluded_from_official(result):
+        return False
     if result.kind == "external_benchmark" and not _capabilities_verified(result):
         return False
     return True
+
+
+def _explicitly_excluded_from_official(result: GradeResult) -> bool:
+    payload = _benchmark_payload(result)
+    return payload.get("included_in_official_score") is False
 
 
 def _capabilities_verified(result: GradeResult) -> bool:
@@ -1092,7 +1116,11 @@ def _run_status(result: GradeResult) -> str:
 
 def _score_status(result: GradeResult) -> str:
     status = _result_status(result)
-    if status in INVALID_EVALUATION_STATUSES or (result.kind == "external_benchmark" and not _capabilities_verified(result)):
+    if (
+        status in INVALID_EVALUATION_STATUSES
+        or _explicitly_excluded_from_official(result)
+        or (result.kind == "external_benchmark" and not _capabilities_verified(result))
+    ):
         return SCORE_NOT_APPLICABLE if _run_status(result) == RUN_SKIPPED else SCORE_UNGRADED
     if result.passed:
         return SCORE_PASSED
@@ -1116,6 +1144,8 @@ def _blocker_type(result: GradeResult) -> str:
     explicit = _explicit_blocker_type(details, payload, error)
     if explicit:
         return explicit
+    if _uses_smoke_score_mode(payload):
+        return "missing_grader"
     unsupported = payload.get("unsupported_capabilities")
     unsupported_values = {str(item) for item in unsupported} if isinstance(unsupported, list) else set()
     contract = payload.get("capability_contract")
@@ -1146,6 +1176,17 @@ def _blocker_type(result: GradeResult) -> str:
     if status in {FAILED_MODEL_FORMAT, FAILED_DATASET_EXTRACTION}:
         return "output_parse_error"
     return ""
+
+
+def _uses_smoke_score_mode(payload: dict[str, Any]) -> bool:
+    modes: set[str] = set()
+    mode = payload.get("score_mode")
+    if isinstance(mode, str) and mode.strip():
+        modes.add(mode.strip())
+    score_modes = payload.get("score_modes")
+    if isinstance(score_modes, list):
+        modes.update(str(item).strip() for item in score_modes if str(item).strip())
+    return payload.get("official_equivalent") is False or any(mode.startswith("smoke") for mode in modes)
 
 
 def _explicit_blocker_type(details: dict[str, Any], payload: dict[str, Any], error: str) -> str:

@@ -152,8 +152,12 @@ MAX_REPEATED_IDENTICAL_TOOL_CALLS = 3
 DEFAULT_MAX_TOTAL_TOOL_CALLS = 40
 MAX_CONSECUTIVE_FAILED_TOOL_CALLS = 5
 REPO_PATCH_GRADER_ENV = "AGENT_BENCH_REPO_PATCH_GRADER"
+SWELANCER_TEST_COMMAND_ENV = "AGENT_BENCH_SWELANCER_TEST_COMMAND"
+SWELANCER_GRADER_TIMEOUT_ENV = "AGENT_BENCH_SWELANCER_GRADER_TIMEOUT"
 TARGET_REPO_ROOT_ENV = "AGENT_BENCH_TARGET_REPO_ROOT"
 FINTOOLBENCH_EXECUTABLE_TOOLS_ENV = "AGENT_BENCH_FINTOOLBENCH_EXECUTABLE_TOOLS"
+FINTOOLBENCH_FIXTURE_ROOT_ENV = "AGENT_BENCH_FINTOOLBENCH_FIXTURE_ROOT"
+FINANCE_AGENT_V2_FIXTURE_ROOT_ENV = "AGENT_BENCH_FINANCE_AGENT_V2_FIXTURE_ROOT"
 DEFAULT_ASSET_ROOT = "/tmp/agent-bench-assets"
 FINANCE_AGENT_V2_REQUIRED_TOOLS = {
     "web_search",
@@ -168,6 +172,26 @@ FINANCE_AGENT_V2_REQUIRED_ENV = (
     "SEC_EDGAR_API_KEY",
     "PRICING_DATA_API_KEY",
 )
+FINANCE_AGENT_V2_CANARY_TERMS = (
+    ("ai_native_falcon", ("ai-native", "falcon")),
+    ("charlotte_ai", ("charlotte ai", "generative ai")),
+    ("aidr", ("ai detection and response",)),
+    ("ai_adoption_tailwind", ("ai adoption", "demand")),
+    ("adversarial_ai", ("threat actors", "ai")),
+    ("ai_regulatory_compliance", ("regulatory", "compliance", "ai")),
+    ("rapid_ai_evolution", ("rapidly evolving", "ai")),
+)
+FINTOOLBENCH_NET_PPE_KEYS = (
+    "propertyPlantEquipmentNet",
+    "netPropertyPlantEquipment",
+    "propertyPlantAndEquipmentNet",
+    "netPPE",
+    "netPpne",
+    "netPPNE",
+)
+FINTOOLBENCH_REQUIRED_CANARY_ARGS = {
+    "companies_balance_sheet_statements": {"symbol": "MMM"},
+}
 EXPLOITBENCH_REQUIRED_CONFIGS = (
     "benchmarks/v8.yaml",
     "benchmarks/v8-small.yaml",
@@ -184,6 +208,13 @@ EXPLOITBENCH_EXCLUDE_PATTERNS = (
     "contributing.md",
     "security.md",
 )
+SWELANCER_EXPENSIFY_REPOSITORY = "https://github.com/Expensify/App.git"
+SWELANCER_OFFICIAL_PUBLIC_REPOSITORY = "https://github.com/openai/SWELancer-Benchmark.git"
+SWELANCER_OFFICIAL_PUBLIC_REF = "3d719bbd5a8cb41295357abc6304fcd29fe68c93"
+SWELANCER_CWD_TARGET_REPOS = {
+    "/app/expensify": SWELANCER_EXPENSIFY_REPOSITORY,
+    "expensify": SWELANCER_EXPENSIFY_REPOSITORY,
+}
 FINMCP_STATIC_PROMPT = """You are answering a static transcript-reasoning benchmark item.
 
 The transcript below may include prior tool calls and tool outputs from the source dataset.
@@ -687,7 +718,9 @@ class FinToolBenchAdapter(ToolCallAdapter):
 
     def available_tools(self, item: BenchmarkItem, workspace: TaskWorkspace) -> list[dict[str, Any]]:
         required = set(_item_required_tools(item))
-        return _fintoolbench_tool_schemas(Path.cwd(), required_tools=required)
+        schemas = _fintoolbench_tool_schemas(Path.cwd(), required_tools=required)
+        valid_tools = _fintoolbench_valid_backend_tools(Path.cwd(), required)
+        return [schema for schema in schemas if _tool_schema_name(schema) in valid_tools]
 
     def run_agent_loop(
         self,
@@ -711,60 +744,83 @@ class FinToolBenchAdapter(ToolCallAdapter):
         required_tools = sorted({tool for item in items for tool in _item_required_tools(item)})
         tool_manifest_path = Path.cwd() / "tools" / "tools_all_annotated.jsonl"
         tool_manifest_count = len(_fintoolbench_tool_manifest(tool_manifest_path)) if tool_manifest_path.is_file() else 0
-        available_tools = set(_tool_schema_names(_fintoolbench_tool_schemas(Path.cwd(), required_tools=set(required_tools))))
-        missing_tools = sorted(set(required_tools) - available_tools)
+        schema_tools = set(_tool_schema_names(_fintoolbench_tool_schemas(Path.cwd(), required_tools=set(required_tools))))
+        backend_canaries = _fintoolbench_backend_canaries(Path.cwd(), set(required_tools))
+        invalid_backend_tools = sorted(
+            tool
+            for tool, canary in backend_canaries.items()
+            if tool in schema_tools and canary.get("passed") is not True
+        )
+        available_tools = schema_tools - set(invalid_backend_tools)
+        missing_schema_tools = sorted(set(required_tools) - schema_tools)
+        missing_tools = sorted(set(missing_schema_tools) | set(invalid_backend_tools))
         backend_available = not missing_tools and bool(available_tools)
         support = contract.get("tool_call")
         if isinstance(support, dict):
             support["mode"] = "live_financial_tools"
             support["tool_manifest"] = "tools/tools_all_annotated.jsonl"
             support["tool_manifest_count"] = tool_manifest_count
-            support["backend"] = "agent_bench_local_deterministic"
+            support["backend"] = "agent_bench_fixture_deterministic"
             support["backend_available"] = backend_available
             support["required_benchmark_tools"] = required_tools
+            support["schema_tools"] = sorted(schema_tools)
             support["exposed_tools"] = sorted(available_tools)
             support["executable_tools"] = sorted(available_tools) if backend_available else []
             support["missing_tools"] = missing_tools
+            support["missing_schema_tools"] = missing_schema_tools
+            support["missing_tool_backends"] = invalid_backend_tools
+            support["backend_canaries"] = backend_canaries
             support["benchmark_required_tools_available"] = backend_available
-            if not available_tools:
+            if not schema_tools:
                 support["supported"] = False
                 support["tools"] = False
                 support["reason"] = "FinToolBench tool manifest tools/tools_all_annotated.jsonl did not expose callable schemas"
-            elif missing_tools:
+            elif missing_schema_tools:
                 support["supported"] = False
                 support["tools"] = False
                 support["reason"] = "FinToolBench required tool schemas are missing: " + ", ".join(missing_tools)
+            elif invalid_backend_tools:
+                support["supported"] = False
+                support["tools"] = False
+                support["reason"] = (
+                    "FinToolBench required tool backend failed semantic canary: "
+                    + ", ".join(invalid_backend_tools)
+                )
         return contract
 
 
 class FinanceAgentV2Adapter(ToolCallAdapter):
-    name = "finance_agent_v2_live_tools"
+    name = "finance_agent_v2_fixture_tools"
 
     def available_tools(self, item: BenchmarkItem, workspace: TaskWorkspace) -> list[dict[str, Any]]:
-        if _finance_agent_v2_missing_environment():
-            return []
-        return _finance_agent_v2_tool_schemas()
+        return _finance_agent_v2_available_tool_schemas(workspace.root)
 
     def capability_contract(self, required_capabilities: set[str], items: list[BenchmarkItem]) -> dict[str, Any]:
         contract = capability_contract_for(required_capabilities, self)
+        backend = _finance_agent_v2_backend_status(Path.cwd())
         missing_env = _finance_agent_v2_missing_environment()
-        exposed_tools = _tool_schema_names([] if missing_env else _finance_agent_v2_tool_schemas())
+        exposed_tools = _tool_schema_names(_finance_agent_v2_tool_schemas() if backend["ready"] else [])
         missing_tools = sorted(FINANCE_AGENT_V2_REQUIRED_TOOLS - set(exposed_tools))
         for capability in ("tool_call", "external_data_required"):
             support = contract.get(capability)
             if not isinstance(support, dict):
                 continue
-            support["mode"] = "live_finance_agent_v2_tools"
+            support["mode"] = "deterministic_fixture_finance_agent_v2_tools"
+            support["backend"] = "agent_bench_fixture_deterministic"
+            support["backend_available"] = bool(backend["ready"])
+            support["backend_canary"] = backend
             support["required_benchmark_tools"] = sorted(FINANCE_AGENT_V2_REQUIRED_TOOLS)
-            support["required_environment"] = list(FINANCE_AGENT_V2_REQUIRED_ENV)
-            support["missing_environment"] = missing_env
+            support["required_environment"] = [] if backend["ready"] else list(FINANCE_AGENT_V2_REQUIRED_ENV)
+            support["optional_live_environment"] = list(FINANCE_AGENT_V2_REQUIRED_ENV)
+            support["missing_environment"] = [] if backend["ready"] else missing_env
+            support["missing_optional_live_environment"] = missing_env
             support["exposed_tools"] = exposed_tools
             support["missing_tools"] = missing_tools
             support["benchmark_required_tools_available"] = not missing_tools
             if missing_tools:
                 support["supported"] = False
                 support["tools"] = False
-                support["reason"] = "Finance Agent v2 required tool backend is unavailable: " + ", ".join(missing_tools)
+                support["reason"] = _finance_agent_v2_backend_unavailable_reason(backend, missing_tools, missing_env)
         return contract
 
 
@@ -972,6 +1028,7 @@ class RepoPatchAdapter(ChatAnswerAdapter):
             support["required_item_count"] = len(items)
             support["missing_metadata_sources"] = missing_metadata[:20]
             grader_command = os.environ.get(REPO_PATCH_GRADER_ENV, "").strip()
+            swelancer_grader = _swelancer_official_grader_for_items(items)
             if missing_metadata:
                 support["supported"] = False
                 support["workspace"] = False
@@ -984,8 +1041,21 @@ class RepoPatchAdapter(ChatAnswerAdapter):
                     f"set {TARGET_REPO_ROOT_ENV} or AGENT_BENCH_ALLOW_TARGET_CHECKOUT=1"
                 )
             else:
-                if not grader_command:
+                if grader_command:
+                    support["official_grader"] = True
+                    support["official_equivalent"] = True
+                    support["score_mode"] = "official_repo_patch_grader"
+                    support["official_grader_command"] = grader_command
+                elif swelancer_grader.get("available"):
+                    support["official_grader"] = True
+                    support["official_equivalent"] = True
+                    support["score_mode"] = "official_swelancer_task_tests"
+                    support["official_grader_command"] = swelancer_grader.get("command", "")
+                    support["swelancer_task_tests"] = swelancer_grader
+                else:
                     support["official_grader"] = False
+                    support["official_equivalent"] = False
+                    support["score_mode"] = "smoke_fallback"
                     support["fallback_grader"] = "model_judge_task_compliance"
                     support["reason"] = (
                         "repo_patch official patch/test grader is not configured; "
@@ -1023,6 +1093,7 @@ class RepoPatchAdapter(ChatAnswerAdapter):
             metadata={
                 "target_repo": target_repo,
                 "base_commit": base_commit,
+                "target_checkout_path": str(root),
                 "instance_id": str(item.metadata.get("instance_id", "")),
             },
         )
@@ -1041,41 +1112,54 @@ class RepoPatchAdapter(ChatAnswerAdapter):
                 "content_sample": run.content[:500],
                 "target_repo": workspace.metadata.get("target_repo", ""),
                 "base_commit": workspace.metadata.get("base_commit", ""),
+                "target_checkout_path": workspace.metadata.get("target_checkout_path", ""),
                 "patch_path": str(patch_path),
             },
         )
 
     def grade(self, benchmark: str, item: BenchmarkItem, outputs: OutputBundle) -> tuple[float, dict[str, Any]]:
+        official_grader = _repo_patch_official_grader_config(benchmark, item)
         if not outputs.patch.strip():
             return 0.0, {
-                "method": "repo_patch_output_presence",
                 "score": 0.0,
                 "status": "failed_model_missing_artifact",
                 "reason": "empty file: model.patch contains no repository diff",
-                "official_grader_configured": bool(os.environ.get(REPO_PATCH_GRADER_ENV, "").strip()),
+                **_repo_patch_artifact_check_grade_fields(
+                    official_grader,
+                    fallback_score_mode="smoke_patch_presence",
+                    not_run_reason="empty_patch",
+                ),
             }
         if not _looks_like_unified_diff(outputs.patch):
             return 0.0, {
-                "method": "repo_patch_output_presence",
                 "score": 0.0,
                 "status": "failed_model_missing_artifact",
                 "reason": "invalid patch format: model.patch is not a unified diff",
-                "official_grader_configured": bool(os.environ.get(REPO_PATCH_GRADER_ENV, "").strip()),
+                **_repo_patch_artifact_check_grade_fields(
+                    official_grader,
+                    fallback_score_mode="smoke_patch_presence",
+                    not_run_reason="invalid_patch_format",
+                ),
             }
         grader_command = os.environ.get(REPO_PATCH_GRADER_ENV, "").strip()
-        if not grader_command:
-            patch_answer = (
-                f"Model patch:\n{outputs.patch}\n\n"
-                f"Final answer:\n{outputs.answer}"
-            )
-            score, grade = judge_answer(benchmark, item, patch_answer, "task_compliance")
-            grade["method"] = "task_compliance_fallback"
-            grade.setdefault("output_collection", "git_diff")
-            grade["official_grader"] = False
-            grade["official_grader_configured"] = False
-            grade["fallback_grader"] = "model_judge_task_compliance"
-            return score, grade
-        return _run_repo_patch_grader(grader_command, item, outputs)
+        if grader_command:
+            return _run_repo_patch_grader(grader_command, item, outputs)
+        if official_grader.get("kind") == "swelancer_task_tests":
+            return _run_swelancer_official_grader(item, outputs, official_grader)
+        patch_answer = (
+            f"Model patch:\n{outputs.patch}\n\n"
+            f"Final answer:\n{outputs.answer}"
+        )
+        score, grade = judge_answer(benchmark, item, patch_answer, "task_compliance")
+        grade["method"] = "task_compliance_fallback"
+        grade.setdefault("output_collection", "git_diff")
+        grade["official_grader"] = False
+        grade["official_grader_configured"] = False
+        grade["official_equivalent"] = False
+        grade["score_mode"] = "smoke_task_compliance_fallback"
+        grade["included_in_official_score"] = False
+        grade["fallback_grader"] = "model_judge_task_compliance"
+        return score, grade
 
 
 class UnsupportedCapabilityAdapter(BenchmarkAdapter):
@@ -1286,9 +1370,12 @@ def main() -> int:
     if error_message:
         payload["error"] = error_message
     _promote_evaluation_tool_fields(payload, evaluations)
+    _promote_evaluation_workspace_fields(payload, evaluations)
+    _promote_evaluation_official_score_fields(payload, evaluations)
     payload["included_in_official_score"] = (
         normalize_status(status) not in INVALID_EVALUATION_STATUSES
         and bool(payload.get("capabilities_verified"))
+        and not _evaluation_excluded_from_official_score(evaluations)
     )
 
     _write_result(output_dir, payload)
@@ -1308,6 +1395,51 @@ def _promote_evaluation_tool_fields(payload: dict[str, Any], evaluations: list[d
                     if isinstance(details, dict):
                         values.extend(_flatten_string_values(details.get(key)))
         payload[key] = sorted({value for value in values if value})
+
+
+def _promote_evaluation_workspace_fields(payload: dict[str, Any], evaluations: list[dict[str, Any]]) -> None:
+    for key in ("target_checkout_path", "target_repo", "base_commit"):
+        if payload.get(key):
+            continue
+        for evaluation in evaluations:
+            if not isinstance(evaluation, dict):
+                continue
+            output_bundle = evaluation.get("output_bundle")
+            metadata = output_bundle.get("metadata") if isinstance(output_bundle, dict) else None
+            if isinstance(metadata, dict) and metadata.get(key):
+                payload[key] = metadata[key]
+                break
+            item_metadata = evaluation.get("metadata")
+            if isinstance(item_metadata, dict) and item_metadata.get(key):
+                payload[key] = item_metadata[key]
+                break
+
+
+def _promote_evaluation_official_score_fields(payload: dict[str, Any], evaluations: list[dict[str, Any]]) -> None:
+    score_modes = sorted(
+        {
+            str(evaluation.get("score_mode"))
+            for evaluation in evaluations
+            if isinstance(evaluation, dict) and str(evaluation.get("score_mode") or "").strip()
+        }
+    )
+    if score_modes:
+        payload["score_modes"] = score_modes
+        payload["score_mode"] = score_modes[0] if len(score_modes) == 1 else "mixed"
+    official_equivalent_values = [
+        evaluation.get("official_equivalent")
+        for evaluation in evaluations
+        if isinstance(evaluation, dict) and isinstance(evaluation.get("official_equivalent"), bool)
+    ]
+    if official_equivalent_values:
+        payload["official_equivalent"] = all(official_equivalent_values)
+
+
+def _evaluation_excluded_from_official_score(evaluations: list[dict[str, Any]]) -> bool:
+    return any(
+        isinstance(evaluation, dict) and evaluation.get("included_in_official_score") is False
+        for evaluation in evaluations
+    )
 
 
 def _base_result_payload(
@@ -2540,8 +2672,8 @@ def extract_finance_agent_v2_items(root: Path, limit: int) -> tuple[list[Benchma
 
 
 def extract_swelancer_items(root: Path, limit: int) -> tuple[list[BenchmarkItem], list[str]]:
-    csv_path = root / "all_swelancer_tasks.csv"
-    if not csv_path.is_file():
+    csv_path = _swelancer_task_csv(root)
+    if csv_path is None:
         return [], ["SWE-Lancer task CSV was not found"]
     items: list[BenchmarkItem] = []
     with csv_path.open("r", encoding="utf-8", errors="replace", newline="") as handle:
@@ -2554,8 +2686,10 @@ def extract_swelancer_items(root: Path, limit: int) -> tuple[list[BenchmarkItem]
             prompt_parts = [
                 str(row.get("title") or "").strip(),
                 str(row.get("description") or "").strip(),
+                _text_from_value(row.get("prompt")),
                 _text_from_value(issue_data.get("problem_statement")),
                 _text_from_value(issue_data.get("issue")),
+                _text_from_value(issue_data.get("issue_repo_steps")),
             ]
             question = "\n\n".join(part for part in prompt_parts if part).strip()
             if not question:
@@ -2567,14 +2701,14 @@ def extract_swelancer_items(root: Path, limit: int) -> tuple[list[BenchmarkItem]
                 "instance_id": issue_id,
                 "issue_dir": str(issue_dir.relative_to(root)) if issue_dir and issue_dir.exists() else "",
                 "catalog_root": str(root),
+                "upstream_public_repository": SWELANCER_OFFICIAL_PUBLIC_REPOSITORY,
+                "upstream_public_ref": SWELANCER_OFFICIAL_PUBLIC_REF,
             }
             metadata.update(target_context)
             if not target_context.get("target_repo") or not target_context.get("base_commit"):
                 metadata["invalid_task_context_reason"] = (
                     "SWE-Lancer public catalog row did not expose target_repo/base_commit metadata"
                 )
-            if issue_dir and (issue_dir / "commit_id.txt").is_file():
-                metadata["issue_commit_id"] = (issue_dir / "commit_id.txt").read_text(encoding="utf-8", errors="replace").strip()
             items.append(
                 BenchmarkItem(
                     question=truncate(question),
@@ -2586,6 +2720,14 @@ def extract_swelancer_items(root: Path, limit: int) -> tuple[list[BenchmarkItem]
     if not items:
         return [], ["SWE-Lancer CSV did not contain concrete issue tasks"]
     return items, []
+
+
+def _swelancer_task_csv(root: Path) -> Path | None:
+    for relative in ("all_swelancer_tasks.csv", "swelancer_tasks.csv", "swelancer_tasks_lite.csv"):
+        path = root / relative
+        if path.is_file():
+            return path
+    return None
 
 
 def _swelancer_target_context(
@@ -2618,20 +2760,53 @@ def _swelancer_target_context(
             "revision",
         ),
     )
+    cwd = _first_keyed_text(containers, ("cwd", "workdir", "working_directory", "workspace"))
+    issue_commit_id = ""
+    target_repo_source = "record_metadata" if target_repo else ""
+    base_commit_source = "record_metadata" if base_commit else ""
     if issue_dir is not None:
-        target_repo = target_repo or _first_existing_file_text(
+        file_target_repo = _first_existing_file_text(
             issue_dir,
             ("target_repo.txt", "target_repository.txt", "repo.txt", "repository.txt"),
         )
-        base_commit = base_commit or _first_existing_file_text(
+        if file_target_repo and not target_repo:
+            target_repo = file_target_repo
+            target_repo_source = f"{issue_dir.name}/target_repo.txt"
+        file_base_commit = _first_existing_file_text(
             issue_dir,
             ("base_commit.txt", "base_sha.txt", "base_revision.txt"),
         )
+        if file_base_commit and not base_commit:
+            base_commit = file_base_commit
+            base_commit_source = f"{issue_dir.name}/base_commit.txt"
+        issue_commit_id = _first_existing_file_text(issue_dir, ("commit_id.txt",))
+        if issue_commit_id and not base_commit:
+            base_commit = issue_commit_id
+            base_commit_source = f"{issue_dir.name}/commit_id.txt"
+    inferred_target_repo = _swelancer_target_repo_from_cwd(cwd)
+    if inferred_target_repo and not target_repo:
+        target_repo = inferred_target_repo
+        target_repo_source = f"cwd:{cwd}"
+    if cwd:
+        context["official_workspace_cwd"] = cwd
     if target_repo:
         context["target_repo"] = target_repo
+        if target_repo_source:
+            context["target_repo_source"] = target_repo_source
     if base_commit:
         context["base_commit"] = base_commit
+        if base_commit_source:
+            context["base_commit_source"] = base_commit_source
+    if issue_commit_id:
+        context["issue_commit_id"] = issue_commit_id
+    if inferred_target_repo:
+        context["metadata_association"] = "official_swelancer_workspace"
     return context
+
+
+def _swelancer_target_repo_from_cwd(cwd: str) -> str:
+    normalized = cwd.strip().replace("\\", "/").rstrip("/").lower()
+    return SWELANCER_CWD_TARGET_REPOS.get(normalized, "")
 
 
 def _first_keyed_text(containers: list[dict[str, Any]], keys: tuple[str, ...]) -> str:
@@ -3586,7 +3761,7 @@ def _item_preflight_failure(
 
     benchmark = normalize_text(os.environ.get("AGENT_BENCH_BENCHMARK_NAME", "")).replace("-", " ")
     if benchmark == "finance agent v2":
-        finance_tools = [] if _finance_agent_v2_missing_environment() else _finance_agent_v2_tool_schemas()
+        finance_tools = _finance_agent_v2_available_tool_schemas(Path.cwd())
         finance_error = validate_finance_agent_v2_item(item, Path.cwd(), finance_tools)
         if finance_error is not None:
             return finance_error
@@ -3682,7 +3857,7 @@ def _exploitbench_upstream_error(item: BenchmarkItem) -> tuple[str, str, dict[st
     if not runner:
         return (
             "failed_missing_required_tool",
-            "ExploitBench upstream runner is not installed or not on PATH",
+            "ExploitBench upstream runner/oracle backend is not installed or not on PATH",
             {
                 **details,
                 "blocker_type": "missing_required_tool_backend",
@@ -3702,7 +3877,7 @@ def _exploitbench_upstream_error(item: BenchmarkItem) -> tuple[str, str, dict[st
     if completed.returncode != 0:
         return (
             "failed_missing_required_tool",
-            "ExploitBench upstream runner failed its readiness check",
+            "ExploitBench upstream runner/oracle backend failed its readiness check",
             {
                 **details,
                 "blocker_type": "missing_required_tool_backend",
@@ -3758,6 +3933,7 @@ def validate_finance_agent_v2_item(
     exposed_tools = set(_tool_schema_names(tools))
     has_retrieval_tools = FINANCE_AGENT_V2_REQUIRED_TOOLS.issubset(exposed_tools)
     missing_tools = sorted(FINANCE_AGENT_V2_REQUIRED_TOOLS - exposed_tools)
+    backend = _finance_agent_v2_backend_status(workspace)
     if metadata.get("task_md_only") and not has_documents:
         return (
             "failed_missing_required_tool",
@@ -3770,28 +3946,43 @@ def validate_finance_agent_v2_item(
                 "exposed_tools": sorted(exposed_tools),
             },
         )
-    if missing_env and not has_documents:
+    if has_retrieval_tools and not backend["ready"]:
         return (
             "failed_missing_required_tool",
-            "Finance Agent v2 requires upstream platform/tool credentials",
+            _finance_agent_v2_backend_unavailable_reason(backend, missing_tools, missing_env),
+            {
+                "blocker_type": "missing_required_tool_backend",
+                "missing_environment": missing_env,
+                "required_tools": sorted(FINANCE_AGENT_V2_REQUIRED_TOOLS),
+                "missing_tools": missing_tools,
+                "exposed_tools": sorted(exposed_tools),
+                "backend_canary": backend,
+            },
+        )
+    if missing_env and not has_documents and not backend["ready"]:
+        return (
+            "failed_missing_required_tool",
+            _finance_agent_v2_backend_unavailable_reason(backend, sorted(FINANCE_AGENT_V2_REQUIRED_TOOLS), missing_env),
             {
                 "blocker_type": "missing_required_tool_backend",
                 "missing_environment": missing_env,
                 "required_tools": sorted(FINANCE_AGENT_V2_REQUIRED_TOOLS),
                 "missing_tools": sorted(FINANCE_AGENT_V2_REQUIRED_TOOLS),
                 "exposed_tools": sorted(exposed_tools),
+                "backend_canary": backend,
             },
         )
     if not has_documents and not has_retrieval_tools:
         return (
             "failed_missing_required_tool",
-            "Finance Agent v2 required tools are not exposed: " + ", ".join(missing_tools),
+            _finance_agent_v2_backend_unavailable_reason(backend, missing_tools, missing_env),
             {
                 "blocker_type": "missing_required_tool_backend",
                 "item_id": _item_id(item),
                 "required_tools": sorted(FINANCE_AGENT_V2_REQUIRED_TOOLS),
                 "missing_tools": missing_tools,
                 "exposed_tools": sorted(exposed_tools),
+                "backend_canary": backend,
             },
         )
     return None
@@ -4389,6 +4580,13 @@ def _tool_result_failed(tool_name: str, result: str) -> bool:
         return True
     if tool_name == "run_command" and re.search(r"\bexit_code=(?!0\b)\d+", result):
         return True
+    parsed = parse_json_object(result)
+    if isinstance(parsed, dict):
+        payload = parsed.get("result")
+        if isinstance(payload, dict) and payload.get("fixture_valid") is False:
+            return True
+        if isinstance(payload, dict) and payload.get("error"):
+            return True
     return any(
         prefix.startswith(marker)
         for marker in (
@@ -4554,6 +4752,10 @@ def _finance_agent_v2_missing_environment() -> list[str]:
     return [key for key in FINANCE_AGENT_V2_REQUIRED_ENV if not os.environ.get(key)]
 
 
+def _finance_agent_v2_available_tool_schemas(root: Path | None = None) -> list[dict[str, Any]]:
+    return _finance_agent_v2_tool_schemas() if _finance_agent_v2_backend_status(root)["ready"] else []
+
+
 def _finance_agent_v2_tool_schemas() -> list[dict[str, Any]]:
     descriptions = {
         "web_search": "Search the local/upstream finance evidence corpus for public web information.",
@@ -4583,6 +4785,234 @@ def _finance_agent_v2_tool_schemas() -> list[dict[str, Any]]:
         }
         for name in sorted(FINANCE_AGENT_V2_REQUIRED_TOOLS)
     ]
+
+
+def _finance_agent_v2_backend_unavailable_reason(
+    backend: dict[str, Any],
+    missing_tools: list[str],
+    missing_env: list[str],
+) -> str:
+    reason = str(backend.get("reason") or "Finance Agent v2 fixture backend is unavailable")
+    details: list[str] = [reason]
+    if missing_tools:
+        details.append("missing benchmark tools: " + ", ".join(missing_tools))
+    if missing_env:
+        details.append("live credentials absent: " + ", ".join(missing_env))
+    details.append("live service backend is not implemented/configured")
+    return "; ".join(details)
+
+
+def _finance_agent_v2_backend_status(root: Path | None = None) -> dict[str, Any]:
+    store = _finance_agent_v2_fixture_store(root)
+    searched = [str(path) for path in _finance_agent_v2_fixture_roots(root)]
+    if store is None:
+        return {
+            "ready": False,
+            "mode": "deterministic_fixture_finance_agent_v2_tools",
+            "reason": "Finance Agent v2 deterministic fixture store was not found",
+            "searched_roots": searched,
+        }
+    manifest = _read_json_payload(store / "manifest.json")
+    errors: list[str] = []
+    if not isinstance(manifest, dict):
+        errors.append("manifest.json is missing or malformed")
+        manifest = {}
+    ticker = str(manifest.get("ticker") or "").upper()
+    if ticker != "CRWD":
+        errors.append("manifest ticker must be CRWD")
+    validated_files, file_errors = _finance_agent_v2_validate_manifest_files(store, manifest)
+    errors.extend(file_errors)
+    fixture_payload = _finance_agent_v2_fixture_payload(store)
+    errors.extend(_finance_agent_v2_validate_fixture_payload(fixture_payload))
+    canaries = _finance_agent_v2_fixture_canaries(fixture_payload)
+    failed_canaries = [name for name, passed in canaries.items() if not passed]
+    if failed_canaries:
+        errors.append("fixture canaries failed: " + ", ".join(failed_canaries))
+    status = {
+        "ready": not errors,
+        "mode": "deterministic_fixture_finance_agent_v2_tools",
+        "fixture_root": str(store),
+        "symbol": ticker or "CRWD",
+        "manifest_version": manifest.get("version"),
+        "validated_files": validated_files,
+        "canaries": canaries,
+        "searched_roots": searched,
+    }
+    if errors:
+        status["reason"] = errors[0]
+        status["errors"] = errors
+    return status
+
+
+def _finance_agent_v2_fixture_roots(root: Path | None = None) -> list[Path]:
+    candidates: list[Path] = []
+    env_root = os.environ.get(FINANCE_AGENT_V2_FIXTURE_ROOT_ENV)
+    if env_root:
+        return [Path(env_root).expanduser()]
+    if root is not None:
+        candidates.append(root / "fixtures" / "finance_agent_v2")
+    candidates.append(Path.cwd() / "fixtures" / "finance_agent_v2")
+    try:
+        candidates.append(Path(__file__).resolve().parents[1] / "fixtures" / "finance_agent_v2")
+    except IndexError:
+        pass
+    candidates.append(Path("/opt/agent-bench/fixtures/finance_agent_v2"))
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key not in seen:
+            unique.append(candidate)
+            seen.add(key)
+    return unique
+
+
+def _finance_agent_v2_fixture_store(root: Path | None = None) -> Path | None:
+    for fixture_root in _finance_agent_v2_fixture_roots(root):
+        for candidate in (fixture_root / "crwd", fixture_root):
+            if (candidate / "manifest.json").is_file():
+                return candidate
+    return None
+
+
+def _read_json_payload(path: Path) -> Any:
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return None
+
+
+def _finance_agent_v2_validate_manifest_files(
+    store: Path,
+    manifest: dict[str, Any],
+) -> tuple[list[dict[str, str]], list[str]]:
+    files = manifest.get("files")
+    if not isinstance(files, dict) or not files:
+        return [], ["manifest files map is missing"]
+    validated: list[dict[str, str]] = []
+    errors: list[str] = []
+    for relative, expected in sorted(files.items()):
+        path = store / str(relative)
+        if not path.is_file():
+            errors.append(f"fixture file is missing: {relative}")
+            continue
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        expected_hash = expected.get("sha256") if isinstance(expected, dict) else expected
+        if isinstance(expected_hash, str) and expected_hash and digest != expected_hash:
+            errors.append(f"fixture checksum mismatch: {relative}")
+        validated.append({"path": str(relative), "sha256": digest})
+    return validated, errors
+
+
+def _finance_agent_v2_fixture_payload(store: Path) -> dict[str, Any]:
+    return {
+        "manifest": _read_json_payload(store / "manifest.json") or {},
+        "search_results": _read_json_payload(store / "search_results.json") or [],
+        "edgar_filings": _read_json_payload(store / "edgar_filings_index.json") or [],
+        "retrieval_index": _read_json_payload(store / "retrieval_index.json") or [],
+        "price_history": _read_json_payload(store / "price_history.json") or {},
+        "documents": _finance_agent_v2_documents(store),
+    }
+
+
+def _finance_agent_v2_documents(store: Path) -> list[dict[str, Any]]:
+    manifest = _read_json_payload(store / "manifest.json")
+    documents = manifest.get("documents") if isinstance(manifest, dict) else []
+    if not isinstance(documents, list):
+        return []
+    loaded: list[dict[str, Any]] = []
+    for document in documents:
+        if not isinstance(document, dict):
+            continue
+        parsed_path = str(document.get("parsed_path") or "")
+        html_path = str(document.get("html_path") or "")
+        parsed_text = ""
+        if parsed_path and (store / parsed_path).is_file():
+            parsed_text = (store / parsed_path).read_text(encoding="utf-8", errors="replace")
+        html_text = ""
+        if html_path and (store / html_path).is_file():
+            html_text = (store / html_path).read_text(encoding="utf-8", errors="replace")
+        loaded.append({**document, "parsed_text": parsed_text, "html_text": html_text})
+    return loaded
+
+
+def _finance_agent_v2_validate_fixture_payload(payload: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(payload.get("search_results"), list) or not payload["search_results"]:
+        errors.append("search_results.json must contain at least one result")
+    filings = payload.get("edgar_filings")
+    if not isinstance(filings, list) or not filings:
+        errors.append("edgar_filings_index.json must contain filing records")
+    else:
+        required = {("10-K", "2025-01-31"), ("10-Q", "2025-10-31")}
+        present = {
+            (str(filing.get("form") or ""), str(filing.get("report_date") or ""))
+            for filing in filings
+            if isinstance(filing, dict)
+        }
+        missing = sorted(required - present)
+        if missing:
+            errors.append("edgar filings missing required periods: " + ", ".join(f"{form} {date}" for form, date in missing))
+    if not isinstance(payload.get("retrieval_index"), list) or not payload["retrieval_index"]:
+        errors.append("retrieval_index.json must contain evidence snippets")
+    if not isinstance(payload.get("price_history"), dict) or "CRWD" not in payload["price_history"]:
+        errors.append("price_history.json must contain CRWD history")
+    documents = payload.get("documents")
+    if not isinstance(documents, list) or len(documents) < 2:
+        errors.append("manifest must define the FY2025 10-K and October 2025 10-Q documents")
+    elif any(not str(document.get("parsed_text") or "").strip() for document in documents):
+        errors.append("all Finance Agent v2 fixture documents must have parsed text")
+    return errors
+
+
+def _finance_agent_v2_fixture_canaries(payload: dict[str, Any]) -> dict[str, bool]:
+    evidence_texts = [
+        _text_from_value(payload.get("search_results")),
+        _text_from_value(payload.get("edgar_filings")),
+        _text_from_value(payload.get("retrieval_index")),
+    ]
+    for document in payload.get("documents", []):
+        if isinstance(document, dict):
+            evidence_texts.append(str(document.get("parsed_text") or ""))
+    combined = normalize_text("\n".join(evidence_texts))
+    return {
+        name: all(term in combined for term in terms)
+        for name, terms in FINANCE_AGENT_V2_CANARY_TERMS
+    }
+
+
+def _finance_agent_v2_matching_records(records: Any, query: str, *, max_results: int) -> list[dict[str, Any]]:
+    if not isinstance(records, list):
+        return []
+    terms = [term for term in re.findall(r"[A-Za-z0-9.$_-]{3,}", normalize_text(query)) if term not in {"the", "and"}]
+    scored: list[tuple[int, int, dict[str, Any]]] = []
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            continue
+        text = normalize_text(_text_from_value(record))
+        score = sum(1 for term in terms if term in text)
+        if score or not terms:
+            scored.append((score, -index, record))
+    scored.sort(reverse=True)
+    return [record for _, _, record in scored[:max_results]]
+
+
+def _finance_agent_v2_document_for_argument(documents: list[dict[str, Any]], arguments: dict[str, Any]) -> dict[str, Any] | None:
+    needle = normalize_text(" ".join(_flatten_string_values(arguments)))
+    if not needle and documents:
+        return documents[0]
+    for document in documents:
+        haystack = normalize_text(
+            " ".join(
+                str(document.get(key) or "")
+                for key in ("url", "html_path", "parsed_path", "primary_document", "form", "report_date")
+            )
+        )
+        if needle and (needle in haystack or any(part and part in haystack for part in needle.split())):
+            return document
+    return documents[0] if documents else None
 
 
 def _looks_like_intermediate_agent_message(content: str) -> bool:
@@ -5058,27 +5488,249 @@ def _fintoolbench_executable_tool_names() -> set[str]:
     return set(_tool_schema_names(_fintoolbench_tool_schemas(Path.cwd())))
 
 
+def _fintoolbench_valid_backend_tools(root: Path, required_tools: set[str]) -> set[str]:
+    canaries = _fintoolbench_backend_canaries(root, required_tools)
+    return {tool for tool, canary in canaries.items() if canary.get("passed") is True}
+
+
+def _fintoolbench_backend_canaries(root: Path, required_tools: set[str]) -> dict[str, dict[str, Any]]:
+    tools = sorted(required_tools or FINTOOLBENCH_REQUIRED_CANARY_ARGS)
+    canaries: dict[str, dict[str, Any]] = {}
+    for tool in tools:
+        args = FINTOOLBENCH_REQUIRED_CANARY_ARGS.get(tool)
+        if args is None:
+            canaries[tool] = {
+                "passed": False,
+                "reason": "no deterministic fixture canary is defined for this FinToolBench tool",
+            }
+            continue
+        fixture = _load_fintoolbench_fixture(tool, args, root)
+        if fixture.get("error"):
+            canaries[tool] = {
+                "passed": False,
+                "reason": fixture["error"],
+                "fixture_path": fixture.get("fixture_path", ""),
+            }
+            continue
+        canaries[tool] = _validate_fintoolbench_fixture(tool, fixture.get("payload"), args)
+        canaries[tool]["fixture_path"] = fixture.get("fixture_path", "")
+    return canaries
+
+
+def _load_fintoolbench_fixture(name: str, arguments: dict[str, Any], root: Path | None = None) -> dict[str, Any]:
+    fixture_key = _fintoolbench_fixture_key(arguments)
+    if not fixture_key:
+        return {"error": "FinToolBench fixture lookup requires a symbol/ticker argument"}
+    for fixture_root in _fintoolbench_fixture_roots(root):
+        path = fixture_root / name / f"{fixture_key}.json"
+        if not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            return {"error": f"FinToolBench fixture is unreadable: {exc}", "fixture_path": str(path)}
+        return {"payload": payload, "fixture_path": str(path)}
+    searched = [str(path / name / f"{fixture_key}.json") for path in _fintoolbench_fixture_roots(root)]
+    return {"error": "FinToolBench fixture was not found", "searched_paths": searched}
+
+
+def _fintoolbench_fixture_roots(root: Path | None = None) -> list[Path]:
+    candidates: list[Path] = []
+    explicit = os.environ.get(FINTOOLBENCH_FIXTURE_ROOT_ENV, "").strip()
+    if explicit:
+        return [Path(explicit).expanduser()]
+    if root is not None:
+        candidates.append(root / "fixtures" / "fintoolbench")
+    candidates.append(Path.cwd() / "fixtures" / "fintoolbench")
+    try:
+        candidates.append(Path(__file__).resolve().parents[1] / "fixtures" / "fintoolbench")
+    except IndexError:
+        pass
+    candidates.append(Path("/opt/agent-bench/fixtures/fintoolbench"))
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key not in seen:
+            seen.add(key)
+            unique.append(candidate)
+    return unique
+
+
+def _fintoolbench_fixture_key(arguments: dict[str, Any]) -> str:
+    for key in ("symbol", "ticker", "company", "query"):
+        value = arguments.get(key)
+        if isinstance(value, str) and value.strip():
+            token = value.strip().split()[0].upper()
+            return "".join(ch for ch in token if ch.isalnum() or ch in {"_", "-"})
+    return ""
+
+
+def _validate_fintoolbench_fixture(name: str, payload: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+    if name != "companies_balance_sheet_statements":
+        return {"passed": False, "reason": f"no semantic validator is implemented for {name}"}
+    if isinstance(payload, dict) and "matching_records" in payload:
+        return {"passed": False, "reason": "fixture contains retrieval snippets, not structured statement records"}
+    records = _fintoolbench_fixture_records(payload)
+    if not records:
+        return {"passed": False, "reason": "fixture does not contain structured statement records"}
+    symbol = _fintoolbench_fixture_key(arguments)
+    if symbol and not any(str(record.get("symbol") or "").upper() == symbol for record in records):
+        return {"passed": False, "reason": f"fixture records do not contain symbol {symbol}"}
+    fy2018 = [record for record in records if _fintoolbench_record_year(record) == "2018"]
+    if not fy2018:
+        return {"passed": False, "reason": "fixture does not contain an FY2018 annual record"}
+    for record in fy2018:
+        value = _fintoolbench_first_numeric(record, FINTOOLBENCH_NET_PPE_KEYS)
+        if value is None:
+            continue
+        billions = value / 1_000_000_000 if abs(value) > 10_000 else value
+        if abs(billions - 8.70) <= 0.01:
+            return {
+                "passed": True,
+                "validated_symbol": symbol,
+                "validated_year": "2018",
+                "validated_field": _fintoolbench_first_present_key(record, FINTOOLBENCH_NET_PPE_KEYS),
+                "validated_value": value,
+                "validated_value_billions": round(billions, 4),
+            }
+    return {"passed": False, "reason": "fixture FY2018 record lacks net PP&E value 8.70B"}
+
+
+def _fintoolbench_fixture_records(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        for key in ("records", "data", "statements", "balance_sheet_statements", "annualReports", "result"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+        return [payload]
+    return []
+
+
+def _fintoolbench_record_year(record: dict[str, Any]) -> str:
+    for key in ("calendarYear", "fiscalYear", "year"):
+        value = record.get(key)
+        if isinstance(value, (str, int)) and str(value).strip():
+            return str(value).strip()[:4]
+    for key in ("date", "fiscalDateEnding", "periodEndDate", "reportedDate"):
+        value = record.get(key)
+        if isinstance(value, str):
+            match = re.search(r"\b(20\d{2}|19\d{2})\b", value)
+            if match:
+                return match.group(1)
+    return ""
+
+
+def _fintoolbench_first_numeric(record: dict[str, Any], keys: tuple[str, ...]) -> float | None:
+    for key in keys:
+        value = record.get(key)
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            cleaned = value.replace(",", "").replace("$", "").strip()
+            try:
+                return float(cleaned)
+            except ValueError:
+                continue
+    return None
+
+
+def _fintoolbench_first_present_key(record: dict[str, Any], keys: tuple[str, ...]) -> str:
+    for key in keys:
+        if key in record:
+            return key
+    return ""
+
+
 def _execute_finance_agent_v2_tool(name: str, arguments: dict[str, Any]) -> str:
-    if name == "price_history":
-        return _json_tool_result(name, arguments, _local_price_history(arguments))
+    status = _finance_agent_v2_backend_status(Path.cwd())
+    if not status["ready"]:
+        return _json_tool_result(
+            name,
+            arguments,
+            {
+                "tool": name,
+                "mode": "deterministic_fixture_finance_agent_v2_tools",
+                "fixture_valid": False,
+                "error": status.get("reason", "Finance Agent v2 fixture backend is unavailable"),
+                "backend_canary": status,
+            },
+        )
+    store = Path(str(status["fixture_root"]))
+    fixture = _finance_agent_v2_fixture_payload(store)
+    result: dict[str, Any] = {
+        "tool": name,
+        "mode": "deterministic_fixture_finance_agent_v2_tools",
+        "fixture_valid": True,
+        "fixture_root": str(store),
+        "canary_passed": True,
+    }
+    query = " ".join(_flatten_string_values(arguments))
+    if name == "web_search":
+        result["results"] = _finance_agent_v2_matching_records(fixture.get("search_results"), query, max_results=5)
+        return _json_tool_result(name, arguments, result)
+    if name == "edgar_search":
+        result["results"] = _finance_agent_v2_matching_records(fixture.get("edgar_filings"), query or "CRWD 2025", max_results=5)
+        return _json_tool_result(name, arguments, result)
     if name == "parse_html_page":
-        path = _first_argument_path(arguments)
-        if path:
-            text = _safe_read_local_text(path, 6000)
-            return _json_tool_result(name, arguments, {"text": text})
-        return _json_tool_result(name, arguments, {"text": ""})
-    snippets = _local_retrieval_snippets(arguments, max_results=5)
-    return _json_tool_result(name, arguments, {"results": snippets})
+        document = _finance_agent_v2_document_for_argument(fixture.get("documents", []), arguments)
+        result["document"] = {
+            key: document.get(key)
+            for key in ("form", "report_date", "accession", "url", "html_path", "parsed_path")
+        } if isinstance(document, dict) else {}
+        result["text"] = str(document.get("parsed_text") or "")[:12000] if isinstance(document, dict) else ""
+        return _json_tool_result(name, arguments, result)
+    if name == "retrieve_information":
+        result["results"] = _finance_agent_v2_matching_records(fixture.get("retrieval_index"), query, max_results=8)
+        return _json_tool_result(name, arguments, result)
+    if name == "price_history":
+        symbol = str(arguments.get("symbol") or arguments.get("ticker") or "CRWD").upper()
+        result["symbol"] = symbol
+        result["history"] = fixture.get("price_history", {}).get(symbol, [])
+        return _json_tool_result(name, arguments, result)
+    result["error"] = f"Unknown Finance Agent v2 fixture tool: {name}"
+    return _json_tool_result(name, arguments, result)
 
 
 def _execute_fintoolbench_tool(name: str, arguments: dict[str, Any]) -> str:
+    fixture = _load_fintoolbench_fixture(name, arguments, Path.cwd())
+    if fixture.get("error"):
+        return _json_tool_result(
+            name,
+            arguments,
+            {
+                "tool": name,
+                "mode": "deterministic_fixture_finance_backend",
+                "fixture_valid": False,
+                "error": fixture["error"],
+                "searched_paths": fixture.get("searched_paths", []),
+            },
+        )
+    validation = _validate_fintoolbench_fixture(name, fixture.get("payload"), arguments)
+    if validation.get("passed") is not True:
+        return _json_tool_result(
+            name,
+            arguments,
+            {
+                "tool": name,
+                "mode": "deterministic_fixture_finance_backend",
+                "fixture_valid": False,
+                "error": validation.get("reason", "fixture failed semantic validation"),
+                "fixture_path": fixture.get("fixture_path", ""),
+            },
+        )
     return _json_tool_result(
         name,
         arguments,
         {
             "tool": name,
-            "mode": "deterministic_local_finance_backend",
-            "matching_records": _local_retrieval_snippets(arguments, max_results=3),
+            "mode": "deterministic_fixture_finance_backend",
+            "fixture_valid": True,
+            "fixture_path": fixture.get("fixture_path", ""),
+            "records": _fintoolbench_fixture_records(fixture.get("payload")),
+            "canary": validation,
         },
     )
 
@@ -5177,14 +5829,21 @@ def _canonical_tool_name(name: str) -> str:
 def _tool_schema_names(tools: list[dict[str, Any]]) -> list[str]:
     names: set[str] = set()
     for tool in tools:
-        if not isinstance(tool, dict):
-            continue
-        function = tool.get("function")
-        if isinstance(function, dict) and isinstance(function.get("name"), str):
-            names.add(function["name"])
-        elif isinstance(tool.get("name"), str):
-            names.add(tool["name"])
+        name = _tool_schema_name(tool)
+        if name:
+            names.add(name)
     return sorted(names)
+
+
+def _tool_schema_name(tool: dict[str, Any]) -> str:
+    if not isinstance(tool, dict):
+        return ""
+    function = tool.get("function")
+    if isinstance(function, dict) and isinstance(function.get("name"), str):
+        return function["name"]
+    if isinstance(tool.get("name"), str):
+        return tool["name"]
+    return ""
 
 
 def _item_required_tools(item: BenchmarkItem) -> list[str]:
@@ -6473,6 +7132,312 @@ def _git_diff(root: Path) -> str:
     return completed.stdout
 
 
+def _repo_patch_official_grader_config(benchmark: str, item: BenchmarkItem) -> dict[str, Any]:
+    grader_command = os.environ.get(REPO_PATCH_GRADER_ENV, "").strip()
+    if grader_command:
+        return {
+            "configured": True,
+            "kind": "external_repo_patch_grader",
+            "official_equivalent": True,
+            "score_mode": "official_repo_patch_grader",
+            "command": grader_command,
+        }
+    swelancer = _swelancer_official_grader_for_item(item, benchmark=benchmark)
+    if swelancer.get("available"):
+        return {
+            "configured": True,
+            "kind": "swelancer_task_tests",
+            "official_equivalent": True,
+            "score_mode": "official_swelancer_task_tests",
+            **swelancer,
+        }
+    return {
+        "configured": False,
+        "kind": "",
+        "official_equivalent": False,
+        "score_mode": "",
+    }
+
+
+def _repo_patch_official_grade_fields(config: dict[str, Any], *, fallback_score_mode: str) -> dict[str, Any]:
+    configured = bool(config.get("configured"))
+    return {
+        "official_grader": configured,
+        "official_grader_configured": configured,
+        "official_equivalent": bool(config.get("official_equivalent")) if configured else False,
+        "score_mode": str(config.get("score_mode") or fallback_score_mode),
+        "included_in_official_score": configured,
+    }
+
+
+def _repo_patch_artifact_check_grade_fields(
+    config: dict[str, Any],
+    *,
+    fallback_score_mode: str,
+    not_run_reason: str,
+) -> dict[str, Any]:
+    fields = _repo_patch_official_grade_fields(config, fallback_score_mode=fallback_score_mode)
+    if fields["official_grader_configured"]:
+        fields["method"] = "pre_grader_artifact_check"
+        fields["official_grader_not_run_reason"] = not_run_reason
+    else:
+        fields["method"] = "repo_patch_output_presence"
+    return fields
+
+
+def _swelancer_official_grader_for_items(items: list[BenchmarkItem]) -> dict[str, Any]:
+    if not items:
+        return {"available": False, "reason": "no SWE-Lancer items were extracted"}
+    infos = [_swelancer_official_grader_for_item(item) for item in items]
+    missing = [info for info in infos if not info.get("available")]
+    if missing:
+        return {
+            "available": False,
+            "reason": "SWE-Lancer official task tests are missing for one or more items",
+            "missing_count": len(missing),
+            "missing_sources": [info.get("source", "") for info in missing[:20]],
+            "missing_reasons": [info.get("reason", "") for info in missing[:20]],
+        }
+    commands = sorted({str(info.get("command", "")) for info in infos if str(info.get("command", ""))})
+    return {
+        "available": True,
+        "mode": "builtin_swelancer_task_tests",
+        "command": commands[0] if len(commands) == 1 else "per-item SWE-Lancer task test",
+        "item_count": len(items),
+        "issue_ids": [str(info.get("issue_id", "")) for info in infos],
+    }
+
+
+def _swelancer_official_grader_for_item(item: BenchmarkItem, *, benchmark: str = "") -> dict[str, Any]:
+    if not _is_swelancer_item(item, benchmark=benchmark):
+        return {"available": False, "source": item.source, "reason": "item is not a SWE-Lancer task"}
+    issue_dir = _swelancer_issue_dir(item, Path.cwd())
+    if issue_dir is None:
+        return {
+            "available": False,
+            "source": item.source,
+            "reason": "SWE-Lancer item does not identify an issue directory",
+        }
+    test_path = issue_dir / "test.py"
+    if not test_path.is_file():
+        return {
+            "available": False,
+            "source": item.source,
+            "issue_dir": str(issue_dir),
+            "reason": "SWE-Lancer issue test.py was not found",
+        }
+    issue_id = str(item.metadata.get("instance_id") or issue_dir.name)
+    command = os.environ.get(SWELANCER_TEST_COMMAND_ENV, "").strip()
+    if not command:
+        command = f"python -m pytest {shlex.quote(str(test_path))}"
+    return {
+        "available": True,
+        "source": item.source,
+        "mode": "builtin_swelancer_task_tests",
+        "issue_id": issue_id,
+        "issue_dir": str(issue_dir),
+        "test_path": str(test_path),
+        "command": command,
+    }
+
+
+def _is_swelancer_item(item: BenchmarkItem, *, benchmark: str = "") -> bool:
+    values = [
+        benchmark,
+        os.environ.get("AGENT_BENCH_BENCHMARK_NAME", ""),
+        str(item.metadata.get("benchmark", "")),
+        str(item.metadata.get("metadata_association", "")),
+        str(item.metadata.get("upstream_public_repository", "")),
+        str(item.source),
+    ]
+    for value in values:
+        normalized = normalize_text(value).replace("-", " ")
+        if "swe lancer" in normalized or "swelancer" in normalized:
+            return True
+    return False
+
+
+def _swelancer_issue_dir(item: BenchmarkItem, catalog_root: Path) -> Path | None:
+    raw_issue_dir = item.metadata.get("issue_dir")
+    raw_instance_id = item.metadata.get("instance_id")
+    raw_catalog_root = item.metadata.get("catalog_root")
+    root = Path(str(raw_catalog_root)).expanduser() if isinstance(raw_catalog_root, str) and raw_catalog_root else catalog_root
+    if isinstance(raw_issue_dir, str) and raw_issue_dir.strip():
+        issue_dir = Path(raw_issue_dir.strip()).expanduser()
+        if not issue_dir.is_absolute():
+            issue_dir = root / issue_dir
+        return issue_dir
+    if isinstance(raw_instance_id, str) and raw_instance_id.strip():
+        return root / "issues" / raw_instance_id.strip()
+    return None
+
+
+def _run_swelancer_official_grader(
+    item: BenchmarkItem,
+    outputs: OutputBundle,
+    grader: dict[str, Any],
+) -> tuple[float, dict[str, Any]]:
+    patch_path = Path(str(outputs.metadata.get("patch_path") or "")).expanduser()
+    source_checkout = Path(str(outputs.metadata.get("target_checkout_path") or "")).expanduser()
+    base_commit = str(outputs.metadata.get("base_commit") or _repo_patch_base_commit(item))
+    if not patch_path.is_file():
+        return 0.0, _swelancer_official_harness_failure(
+            "model patch file was not found for SWE-Lancer official grading",
+            grader,
+            {"patch_path": str(patch_path)},
+        )
+    if not (source_checkout / ".git").exists():
+        return 0.0, _swelancer_official_harness_failure(
+            "target checkout was not found for SWE-Lancer official grading",
+            grader,
+            {"target_checkout_path": str(source_checkout)},
+        )
+    grader_root = patch_path.parent / "official_swelancer_grader_checkout"
+    if grader_root.exists():
+        shutil.rmtree(grader_root)
+    clone = subprocess.run(
+        ["git", "clone", str(source_checkout), str(grader_root)],
+        text=True,
+        capture_output=True,
+        timeout=_git_timeout_seconds(),
+        check=False,
+    )
+    if clone.returncode != 0:
+        return 0.0, _swelancer_official_harness_failure(
+            "unable to create SWE-Lancer official grader checkout",
+            grader,
+            {"stderr": (clone.stderr or clone.stdout)[-2000:]},
+        )
+    checkout = subprocess.run(
+        ["git", "-C", str(grader_root), "checkout", "--detach", base_commit],
+        text=True,
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+    if checkout.returncode != 0:
+        return 0.0, _swelancer_official_harness_failure(
+            "unable to checkout SWE-Lancer base commit for official grading",
+            grader,
+            {"base_commit": base_commit, "stderr": (checkout.stderr or checkout.stdout)[-2000:]},
+        )
+    apply = subprocess.run(
+        ["git", "-C", str(grader_root), "apply", "--binary", "--whitespace=nowarn", str(patch_path)],
+        text=True,
+        capture_output=True,
+        timeout=120,
+        check=False,
+    )
+    if apply.returncode != 0:
+        return 0.0, {
+            "method": "official_swelancer_task_tests",
+            "score": 0.0,
+            "status": "failed_model_tool_use",
+            "reason": "model.patch did not apply cleanly to the SWE-Lancer base checkout",
+            "patch_apply_exit_code": apply.returncode,
+            "patch_apply_output": (apply.stderr or apply.stdout)[-2000:],
+            "grader_checkout_path": str(grader_root),
+            **_repo_patch_official_grade_fields(grader, fallback_score_mode="official_swelancer_task_tests"),
+        }
+    completed = _run_swelancer_task_test_command(item, grader, grader_root, patch_path)
+    if completed.get("launch_error"):
+        return 0.0, _swelancer_official_harness_failure(
+            str(completed["launch_error"]),
+            grader,
+            {"grader_checkout_path": str(grader_root)},
+        )
+    passed = completed.get("exit_code") == 0
+    return (1.0 if passed else 0.0), {
+        "method": "official_swelancer_task_tests",
+        "score": 1.0 if passed else 0.0,
+        "status": "passed" if passed else "failed_model_answer",
+        "reason": "" if passed else "SWE-Lancer official task tests failed",
+        "grader_checkout_path": str(grader_root),
+        "issue_id": grader.get("issue_id", item.metadata.get("instance_id", "")),
+        "test_path": grader.get("test_path", ""),
+        "official_test_command": completed.get("command", ""),
+        "official_test_exit_code": completed.get("exit_code"),
+        "official_test_stdout_tail": completed.get("stdout_tail", ""),
+        "official_test_stderr_tail": completed.get("stderr_tail", ""),
+        "timed_out": bool(completed.get("timed_out")),
+        **_repo_patch_official_grade_fields(grader, fallback_score_mode="official_swelancer_task_tests"),
+    }
+
+
+def _run_swelancer_task_test_command(
+    item: BenchmarkItem,
+    grader: dict[str, Any],
+    grader_root: Path,
+    patch_path: Path,
+) -> dict[str, Any]:
+    raw_command = os.environ.get(SWELANCER_TEST_COMMAND_ENV, "").strip()
+    if raw_command:
+        argv = shlex.split(raw_command)
+        command_for_report = raw_command
+    else:
+        argv = ["python", "-m", "pytest", str(grader.get("test_path", ""))]
+        command_for_report = " ".join(shlex.quote(part) for part in argv)
+    env = os.environ.copy()
+    issue_id = str(grader.get("issue_id") or item.metadata.get("instance_id") or "")
+    env.update(
+        {
+            "AGENT_BENCH_SWELANCER_GRADER_CHECKOUT": str(grader_root),
+            "AGENT_BENCH_SWELANCER_ISSUE_ID": issue_id,
+            "AGENT_BENCH_SWELANCER_TEST_PATH": str(grader.get("test_path", "")),
+            "AGENT_BENCH_MODEL_PATCH_PATH": str(patch_path),
+            "ISSUE_ID": issue_id,
+        }
+    )
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    issue_dir = Path(str(grader.get("issue_dir", ""))).expanduser()
+    pythonpath_parts = [str(issue_dir.parent.parent), str(issue_dir.parent)]
+    if existing_pythonpath:
+        pythonpath_parts.append(existing_pythonpath)
+    env["PYTHONPATH"] = os.pathsep.join(part for part in pythonpath_parts if part)
+    try:
+        completed = subprocess.run(
+            argv,
+            cwd=grader_root,
+            text=True,
+            capture_output=True,
+            timeout=_bounded_int(os.environ.get(SWELANCER_GRADER_TIMEOUT_ENV), 1800, 5, 7200),
+            check=False,
+            env=env,
+        )
+        return {
+            "command": command_for_report,
+            "exit_code": completed.returncode,
+            "stdout_tail": (completed.stdout or "")[-4000:],
+            "stderr_tail": (completed.stderr or "")[-4000:],
+            "timed_out": False,
+        }
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "command": command_for_report,
+            "exit_code": None,
+            "stdout_tail": (exc.stdout or "")[-4000:] if isinstance(exc.stdout, str) else "",
+            "stderr_tail": (exc.stderr or "")[-4000:] if isinstance(exc.stderr, str) else "",
+            "timed_out": True,
+        }
+    except OSError as exc:
+        return {"command": command_for_report, "launch_error": f"unable to run SWE-Lancer official tests: {exc}"}
+
+
+def _swelancer_official_harness_failure(
+    reason: str,
+    grader: dict[str, Any],
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "method": "official_swelancer_task_tests",
+        "score": 0.0,
+        "status": "failed_grader",
+        "reason": reason,
+        **(details or {}),
+        **_repo_patch_official_grade_fields(grader, fallback_score_mode="official_swelancer_task_tests"),
+    }
+
+
 def _run_repo_patch_grader(command: str, item: BenchmarkItem, outputs: OutputBundle) -> tuple[float, dict[str, Any]]:
     env = os.environ.copy()
     env["AGENT_BENCH_MODEL_PATCH_PATH"] = str(outputs.metadata.get("patch_path", ""))
@@ -6741,7 +7706,7 @@ def judge_answer(benchmark: str, item: BenchmarkItem, answer: str, method: str) 
         ],
         "temperature": _bounded_float(os.environ.get("AGENT_BENCH_JUDGE_TEMPERATURE"), 0.0, 0.0, 2.0),
         "top_p": 1,
-        "max_tokens": 512,
+        "max_tokens": _bounded_int(os.environ.get("AGENT_BENCH_JUDGE_MAX_TOKENS"), 2048, 256, 8192),
         "stream": False,
         "response_format": {"type": "json_object"},
     }
@@ -6796,6 +7761,9 @@ def judge_answer(benchmark: str, item: BenchmarkItem, answer: str, method: str) 
             parsed_response = json.loads(response_body)
             content = extract_openai_content(parsed_response)
             judge_text = content or response_body
+            if not content:
+                reasoning = extract_openai_reasoning(parsed_response)
+                judge_text = reasoning or response_body
             candidate, repaired = parse_judge_json_with_repair(judge_text)
             error_message = _judge_schema_error(candidate, schema)
             if error_message:
@@ -6806,7 +7774,7 @@ def judge_answer(benchmark: str, item: BenchmarkItem, answer: str, method: str) 
         except (json.JSONDecodeError, ValueError) as exc:
             raw = response_body
             if isinstance(parsed_response, dict):
-                raw = extract_openai_content(parsed_response) or response_body
+                raw = extract_openai_content(parsed_response) or extract_openai_reasoning(parsed_response) or response_body
             attempts.append({"raw": raw, "error": str(exc)})
             judge_text = raw
     if grade is None:
@@ -6980,6 +7948,15 @@ def extract_openai_content(parsed: Any) -> str:
     content = _content_to_text(message.get("content"))
     if content:
         return content
+    return ""
+
+
+def extract_openai_reasoning(parsed: Any) -> str:
+    message = extract_openai_message(parsed)
+    for key in ("reasoning_content", "reasoning"):
+        content = _content_to_text(message.get(key))
+        if content:
+            return content
     return ""
 
 
@@ -7170,6 +8147,16 @@ def evaluation_payload(
         "missing_tools": missing_tools,
     }
     payload.update(extra)
+    grade = payload.get("grade")
+    if isinstance(grade, dict):
+        explicit_inclusion = grade.get("included_in_official_score")
+        if isinstance(explicit_inclusion, bool):
+            payload["included_in_official_score"] = explicit_inclusion
+        for key in ("official_equivalent", "score_mode", "official_grader", "fallback_grader"):
+            if key in grade and key not in payload:
+                payload[key] = grade[key]
+    if status in INVALID_EVALUATION_STATUSES:
+        payload["included_in_official_score"] = False
     if payload.get("capabilities_verified") is False:
         payload["included_in_official_score"] = False
     return payload

@@ -230,6 +230,7 @@ def test_probe_finance_agent_v2_missing_tools_are_exact_and_excluded(tmp_path, m
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("AGENT_BENCH_OUTPUT_DIR", str(tmp_path / "outputs"))
     monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "Finance Agent v2")
+    monkeypatch.setenv(probe.FINANCE_AGENT_V2_FIXTURE_ROOT_ENV, str(tmp_path / "missing-fixtures"))
     for env_name in probe.FINANCE_AGENT_V2_REQUIRED_ENV:
         monkeypatch.delenv(env_name, raising=False)
 
@@ -250,6 +251,80 @@ def test_probe_finance_agent_v2_missing_tools_are_exact_and_excluded(tmp_path, m
     assert result["missing_tools"] == sorted(probe.FINANCE_AGENT_V2_REQUIRED_TOOLS)
     assert result["capabilities_verified"] is False
     assert result["included_in_official_score"] is False
+
+
+def test_probe_finance_agent_v2_fixture_mode_exposes_required_tools(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    fixture_root = Path(__file__).resolve().parents[1] / "fixtures" / "finance_agent_v2"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "Finance Agent v2")
+    monkeypatch.setenv(probe.FINANCE_AGENT_V2_FIXTURE_ROOT_ENV, str(fixture_root))
+    for env_name in probe.FINANCE_AGENT_V2_REQUIRED_ENV:
+        monkeypatch.delenv(env_name, raising=False)
+
+    item = probe.BenchmarkItem(
+        "For NASDAQ:CRWD, describe AI tailwinds and AI risks.",
+        "rubric",
+        "data/public.csv:record-000001",
+        metadata={"required_tools": sorted(probe.FINANCE_AGENT_V2_REQUIRED_TOOLS), "live_tools_required": True},
+    )
+    workspace = probe.TaskWorkspace(root=tmp_path, output_dir=tmp_path / "outputs")
+    tools = probe.FinanceAgentV2Adapter().available_tools(item, workspace)
+    contract = probe.FinanceAgentV2Adapter().capability_contract({"tool_call", "external_data_required"}, [item])
+    status = probe._finance_agent_v2_backend_status(tmp_path)
+
+    assert probe._tool_schema_names(tools) == sorted(probe.FINANCE_AGENT_V2_REQUIRED_TOOLS)
+    assert status["ready"] is True
+    assert all(status["canaries"].values())
+    assert contract["tool_call"]["benchmark_required_tools_available"] is True
+    assert contract["tool_call"]["missing_tools"] == []
+    assert probe.validate_finance_agent_v2_item(item, tmp_path, tools) is None
+
+
+def test_probe_finance_agent_v2_fixture_tools_return_crwd_evidence(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    fixture_root = Path(__file__).resolve().parents[1] / "fixtures" / "finance_agent_v2"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(probe.FINANCE_AGENT_V2_FIXTURE_ROOT_ENV, str(fixture_root))
+
+    raw = probe._execute_finance_agent_v2_tool(
+        "retrieve_information",
+        {"query": "CRWD Charlotte AI AI Detection and Response adversarial AI regulatory compliance"},
+    )
+    payload = json.loads(raw)
+    result = payload["result"]
+
+    assert result["fixture_valid"] is True
+    assert result["canary_passed"] is True
+    text = json.dumps(result["results"])
+    assert "Charlotte AI" in text
+    assert "AI Detection and Response" in text
+    assert "adversarial AI" in text
+
+
+def test_probe_finance_agent_v2_malformed_fixture_fails_preflight(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    fixture_root = tmp_path / "finance-fixtures"
+    fixture_root.mkdir()
+    (fixture_root / "manifest.json").write_text(
+        json.dumps({"version": 1, "ticker": "CRWD", "files": {}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "Finance Agent v2")
+    monkeypatch.setenv(probe.FINANCE_AGENT_V2_FIXTURE_ROOT_ENV, str(fixture_root))
+
+    item = probe.BenchmarkItem(
+        "Research CRWD AI.",
+        "rubric",
+        "data/public.csv:record-000001",
+        metadata={"required_tools": sorted(probe.FINANCE_AGENT_V2_REQUIRED_TOOLS), "live_tools_required": True},
+    )
+    result = probe.validate_finance_agent_v2_item(item, tmp_path, probe._finance_agent_v2_tool_schemas())
+
+    assert result is not None
+    assert result[0] == "failed_missing_required_tool"
+    assert result[2]["blocker_type"] == "missing_required_tool_backend"
+    assert result[2]["backend_canary"]["ready"] is False
 
 
 def test_probe_extracts_csv_records_and_scores_choices(tmp_path):
@@ -798,6 +873,8 @@ def test_probe_repo_patch_without_grader_uses_model_judge_fallback(monkeypatch):
 
     assert contract["repo_patch"]["supported"] is True
     assert contract["repo_patch"]["official_grader"] is False
+    assert contract["repo_patch"]["official_equivalent"] is False
+    assert contract["repo_patch"]["score_mode"] == "smoke_fallback"
     assert contract["repo_patch"]["fallback_grader"] == "model_judge_task_compliance"
     assert status == ""
     assert reason == ""
@@ -830,6 +907,9 @@ def test_probe_repo_patch_grading_rejects_reference_diff(monkeypatch):
     assert grade["status"] == "failed_model_answer"
     assert grade["method"] == "task_compliance_fallback"
     assert grade["official_grader"] is False
+    assert grade["official_equivalent"] is False
+    assert grade["score_mode"] == "smoke_task_compliance_fallback"
+    assert grade["included_in_official_score"] is False
     assert calls[0][3] == "task_compliance"
     assert "Model patch:" in calls[0][2]
 
@@ -849,6 +929,143 @@ def test_probe_repo_patch_missing_diff_is_missing_artifact(monkeypatch):
     assert score == 0.0
     assert grade["status"] == "failed_model_missing_artifact"
     assert grade["method"] == "repo_patch_output_presence"
+    assert grade["official_equivalent"] is False
+    assert grade["score_mode"] == "smoke_patch_presence"
+    assert grade["included_in_official_score"] is False
+
+
+def test_probe_swelancer_contract_uses_builtin_official_task_tests(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    issue_dir = tmp_path / "issues" / "16912_4"
+    issue_dir.mkdir(parents=True)
+    (issue_dir / "test.py").write_text("def test_placeholder():\n    assert True\n", encoding="utf-8")
+    monkeypatch.delenv("AGENT_BENCH_REPO_PATCH_GRADER", raising=False)
+    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "SWE-Lancer")
+    monkeypatch.setattr(probe, "_repo_patch_checkout_available", lambda items: True)
+    monkeypatch.setattr(probe, "_repo_patch_canary", lambda: {"passed": True})
+    item = probe.BenchmarkItem(
+        "Fix the issue.",
+        "A patch should pass tests.",
+        "all_swelancer_tasks.csv:2",
+        metadata={
+            "target_repo": "https://github.com/Expensify/App.git",
+            "base_commit": "abc123",
+            "instance_id": "16912_4",
+            "issue_dir": str(issue_dir),
+        },
+    )
+
+    contract = probe.RepoPatchAdapter().capability_contract({"repo_patch"}, [item])
+
+    assert contract["repo_patch"]["supported"] is True
+    assert contract["repo_patch"]["official_grader"] is True
+    assert contract["repo_patch"]["official_equivalent"] is True
+    assert contract["repo_patch"]["score_mode"] == "official_swelancer_task_tests"
+    assert contract["repo_patch"]["swelancer_task_tests"]["issue_ids"] == ["16912_4"]
+
+
+def test_probe_swelancer_empty_patch_counts_as_official_artifact_failure(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    issue_dir = tmp_path / "issues" / "16912_4"
+    issue_dir.mkdir(parents=True)
+    (issue_dir / "test.py").write_text("def test_placeholder():\n    assert True\n", encoding="utf-8")
+    monkeypatch.delenv("AGENT_BENCH_REPO_PATCH_GRADER", raising=False)
+    item = probe.BenchmarkItem(
+        "Fix the issue.",
+        "A patch should pass tests.",
+        "all_swelancer_tasks.csv:2",
+        metadata={
+            "target_repo": "https://github.com/Expensify/App.git",
+            "base_commit": "abc123",
+            "instance_id": "16912_4",
+            "issue_dir": str(issue_dir),
+        },
+    )
+
+    score, grade = probe.RepoPatchAdapter().grade("SWE-Lancer", item, probe.OutputBundle(patch=""))
+
+    assert score == 0.0
+    assert grade["status"] == "failed_model_missing_artifact"
+    assert grade["method"] == "pre_grader_artifact_check"
+    assert grade["official_grader_not_run_reason"] == "empty_patch"
+    assert grade["official_grader"] is True
+    assert grade["official_equivalent"] is True
+    assert grade["score_mode"] == "official_swelancer_task_tests"
+    assert grade["included_in_official_score"] is True
+
+
+def test_probe_swelancer_official_grader_applies_patch_and_runs_task_test(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    source = tmp_path / "source"
+    source.mkdir()
+    subprocess.run(["git", "init"], cwd=source, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "config", "user.email", "agent-bench@example.invalid"], cwd=source, check=True)
+    subprocess.run(["git", "config", "user.name", "Agent Bench"], cwd=source, check=True)
+    (source / "app.py").write_text("print('base')\n", encoding="utf-8")
+    subprocess.run(["git", "add", "app.py"], cwd=source, check=True)
+    subprocess.run(["git", "commit", "-m", "base"], cwd=source, check=True, capture_output=True, text=True)
+    base_commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=source,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    issue_dir = tmp_path / "issues" / "16912_4"
+    issue_dir.mkdir(parents=True)
+    (issue_dir / "test.py").write_text(
+        "from pathlib import Path\n\n"
+        "def test_model_patch_applied():\n"
+        "    assert Path('app.py').read_text(encoding='utf-8') == \"print('fixed')\\n\"\n",
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "outputs"
+    output_dir.mkdir()
+    patch = (
+        "diff --git a/app.py b/app.py\n"
+        "--- a/app.py\n"
+        "+++ b/app.py\n"
+        "@@ -1 +1 @@\n"
+        "-print('base')\n"
+        "+print('fixed')\n"
+    )
+    patch_path = output_dir / "model.patch"
+    patch_path.write_text(patch, encoding="utf-8")
+    monkeypatch.delenv("AGENT_BENCH_REPO_PATCH_GRADER", raising=False)
+    monkeypatch.setenv("AGENT_BENCH_SWELANCER_GRADER_TIMEOUT", "30")
+    item = probe.BenchmarkItem(
+        "Fix the issue.",
+        "A patch should pass tests.",
+        "all_swelancer_tasks.csv:2",
+        metadata={
+            "target_repo": str(source),
+            "base_commit": base_commit,
+            "instance_id": "16912_4",
+            "issue_dir": str(issue_dir),
+        },
+    )
+
+    score, grade = probe.RepoPatchAdapter().grade(
+        "SWE-Lancer",
+        item,
+        probe.OutputBundle(
+            patch=patch,
+            metadata={
+                "patch_path": str(patch_path),
+                "target_checkout_path": str(source),
+                "base_commit": base_commit,
+            },
+        ),
+    )
+
+    assert score == 1.0
+    assert grade["status"] == "passed"
+    assert grade["method"] == "official_swelancer_task_tests"
+    assert grade["official_grader"] is True
+    assert grade["official_equivalent"] is True
+    assert grade["included_in_official_score"] is True
+    assert grade["official_test_exit_code"] == 0
+    assert (output_dir / "official_swelancer_grader_checkout" / "app.py").read_text(encoding="utf-8") == "print('fixed')\n"
 
 
 def test_probe_file_artifact_missing_assets_fails_preflight(tmp_path, monkeypatch):
@@ -1416,6 +1633,61 @@ def test_probe_extracts_swelancer_repo_patch_metadata(tmp_path, monkeypatch):
     assert items[0].metadata["target_repo"] == "https://github.com/example/project.git"
     assert items[0].metadata["base_commit"] == "abc123"
     assert items[0].metadata["issue_commit_id"] == "issuecommit"
+    assert items[0].metadata["target_repo_source"] == "record_metadata"
+    assert items[0].metadata["base_commit_source"] == "record_metadata"
+
+
+def test_probe_infers_swelancer_repo_patch_metadata_from_official_assets(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "SWE-Lancer")
+    (tmp_path / "all_swelancer_tasks.csv").write_text(
+        "question_id,title,description,cwd\n"
+        "16912_4,Fix zip hint,Patch the failing behavior,/app/expensify\n",
+        encoding="utf-8",
+    )
+    issue = tmp_path / "issues" / "16912_4"
+    issue.mkdir(parents=True)
+    (issue / "issue_data.json").write_text(
+        json.dumps({"issue_repo_steps": "Steps to reproduce the issue"}),
+        encoding="utf-8",
+    )
+    (issue / "commit_id.txt").write_text("2b791c9f3053c1682ddcb50ab036deb3e55a7542\n", encoding="utf-8")
+
+    items, errors = probe.extract_benchmark_items(tmp_path, limit=3)
+
+    assert errors == []
+    assert len(items) == 1
+    assert items[0].metadata["target_repo"] == "https://github.com/Expensify/App.git"
+    assert items[0].metadata["target_repo_source"] == "cwd:/app/expensify"
+    assert items[0].metadata["base_commit"] == "2b791c9f3053c1682ddcb50ab036deb3e55a7542"
+    assert items[0].metadata["base_commit_source"] == "16912_4/commit_id.txt"
+    assert items[0].metadata["issue_commit_id"] == "2b791c9f3053c1682ddcb50ab036deb3e55a7542"
+    assert items[0].metadata["official_workspace_cwd"] == "/app/expensify"
+    assert items[0].metadata["metadata_association"] == "official_swelancer_workspace"
+    assert "invalid_task_context_reason" not in items[0].metadata
+    assert probe.validate_swelancer_item(items[0], tmp_path) is None
+
+
+def test_probe_extracts_swelancer_lite_csv_prompt_layout(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "SWE-Lancer")
+    (tmp_path / "swelancer_tasks_lite.csv").write_text(
+        "question_id,prompt,cwd\n"
+        "17387_1,Fix the modal regression,/app/expensify\n",
+        encoding="utf-8",
+    )
+    issue = tmp_path / "issues" / "17387_1"
+    issue.mkdir(parents=True)
+    (issue / "commit_id.txt").write_text("abc123def456\n", encoding="utf-8")
+
+    items, errors = probe.extract_benchmark_items(tmp_path, limit=3)
+
+    assert errors == []
+    assert len(items) == 1
+    assert items[0].question == "Fix the modal regression"
+    assert items[0].source == "swelancer_tasks_lite.csv:2"
+    assert items[0].metadata["target_repo"] == "https://github.com/Expensify/App.git"
+    assert items[0].metadata["base_commit"] == "abc123def456"
 
 
 def test_probe_swelancer_catalog_checkout_is_invalid_target_context(tmp_path, monkeypatch):
@@ -2510,10 +2782,121 @@ def test_fintoolbench_contract_records_executable_local_backend(tmp_path, monkey
     contract = probe.FinToolBenchAdapter().capability_contract({"tool_call"}, [item])
 
     assert contract["tool_call"]["supported"] is True
-    assert contract["tool_call"]["backend"] == "agent_bench_local_deterministic"
+    assert contract["tool_call"]["backend"] == "agent_bench_fixture_deterministic"
     assert contract["tool_call"]["backend_available"] is True
     assert contract["tool_call"]["tool_manifest_count"] == 1
     assert contract["tool_call"]["executable_tools"] == ["companies_balance_sheet_statements"]
+    assert contract["tool_call"]["backend_canaries"]["companies_balance_sheet_statements"]["passed"] is True
+
+
+def test_fintoolbench_contract_excludes_missing_fixture_backend(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(probe.FINTOOLBENCH_FIXTURE_ROOT_ENV, str(tmp_path / "fixtures"))
+    tool_dir = tmp_path / "tools"
+    tool_dir.mkdir()
+    (tool_dir / "tools_all_annotated.jsonl").write_text(
+        json.dumps(
+            {
+                "name": "companies_balance_sheet_statements",
+                "description": "Return balance sheet statements.",
+                "parameters": {"symbol": {"type": "string"}},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    item = probe.BenchmarkItem(
+        "Call selected tool.",
+        "Use tool.",
+        "synthetic",
+        metadata={"select_tools": ["companies_balance_sheet_statements"]},
+    )
+
+    contract = probe.FinToolBenchAdapter().capability_contract({"tool_call"}, [item])
+
+    assert contract["tool_call"]["supported"] is False
+    assert contract["tool_call"]["backend_available"] is False
+    assert contract["tool_call"]["missing_tool_backends"] == ["companies_balance_sheet_statements"]
+    assert "semantic canary" in contract["tool_call"]["reason"]
+
+
+def test_fintoolbench_missing_fixture_is_excluded_before_model_call(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AGENT_BENCH_OUTPUT_DIR", str(tmp_path / "outputs"))
+    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "FinToolBench")
+    monkeypatch.setenv(probe.FINTOOLBENCH_FIXTURE_ROOT_ENV, str(tmp_path / "fixtures"))
+    tool_dir = tmp_path / "tools"
+    tool_dir.mkdir()
+    (tool_dir / "tools_all_annotated.jsonl").write_text(
+        json.dumps(
+            {
+                "name": "companies_balance_sheet_statements",
+                "description": "Return balance sheet statements.",
+                "parameters": {"symbol": {"type": "string"}},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    def fail_model_call(*args, **kwargs):
+        raise AssertionError("model evaluation should be skipped when FinToolBench fixture is missing")
+
+    monkeypatch.setattr(probe.FinToolBenchAdapter, "run_agent_loop", fail_model_call)
+    item = probe.BenchmarkItem(
+        "Call selected tool.",
+        "$8.70",
+        "synthetic",
+        metadata={"required_tools": ["companies_balance_sheet_statements"], "live_tools_required": True},
+    )
+
+    result = probe.FinToolBenchAdapter().evaluate_item("FinToolBench", item)
+
+    assert result["status"] == "failed_missing_required_tool"
+    assert result["capabilities_verified"] is False
+    assert result["included_in_official_score"] is False
+    assert result["missing_tools"] == ["companies_balance_sheet_statements"]
+
+
+def test_fintoolbench_contract_excludes_retrieval_snippet_fixture(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.chdir(tmp_path)
+    fixture_root = tmp_path / "fixtures" / "fintoolbench"
+    monkeypatch.setenv(probe.FINTOOLBENCH_FIXTURE_ROOT_ENV, str(fixture_root))
+    tool_dir = tmp_path / "tools"
+    tool_dir.mkdir()
+    (tool_dir / "tools_all_annotated.jsonl").write_text(
+        json.dumps(
+            {
+                "name": "companies_balance_sheet_statements",
+                "description": "Return balance sheet statements.",
+                "parameters": {"symbol": {"type": "string"}},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    fixture = fixture_root / "companies_balance_sheet_statements"
+    fixture.mkdir(parents=True)
+    (fixture / "MMM.json").write_text(
+        json.dumps({"matching_records": [{"path": "TASK.md", "snippet": "Use the selected tool."}]}),
+        encoding="utf-8",
+    )
+    item = probe.BenchmarkItem(
+        "Call selected tool.",
+        "Use tool.",
+        "synthetic",
+        metadata={"select_tools": ["companies_balance_sheet_statements"]},
+    )
+
+    contract = probe.FinToolBenchAdapter().capability_contract({"tool_call"}, [item])
+
+    assert contract["tool_call"]["supported"] is False
+    canary = contract["tool_call"]["backend_canaries"]["companies_balance_sheet_statements"]
+    assert canary["passed"] is False
+    assert "structured statement records" in canary["reason"]
 
 
 def test_fintoolbench_dispatch_executes_selected_tool_from_isolated_workspace(tmp_path, monkeypatch):
@@ -2529,8 +2912,11 @@ def test_fintoolbench_dispatch_executes_selected_tool_from_isolated_workspace(tm
     assert result is not None
     payload = json.loads(result)
     assert payload["backend"] == "agent_bench_local_deterministic"
-    assert payload["result"]["mode"] == "deterministic_local_finance_backend"
+    assert payload["result"]["mode"] == "deterministic_fixture_finance_backend"
     assert payload["result"]["tool"] == "companies_balance_sheet_statements"
+    assert payload["result"]["fixture_valid"] is True
+    fy2018 = [record for record in payload["result"]["records"] if record.get("calendarYear") == "2018"]
+    assert fy2018[0]["propertyPlantEquipmentNet"] == 8700000000
 
 
 def test_fintoolbench_static_item_bypasses_required_tool_preflight(monkeypatch):

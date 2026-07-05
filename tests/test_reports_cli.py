@@ -5,6 +5,7 @@ from agent_bench.cli import main
 from agent_bench.aggregator import aggregate_results
 from agent_bench.models import GradeResult
 from agent_bench.reports import _result_csv_row, render_summary_html
+from agent_bench.statuses import status_info
 
 
 def test_render_summary_html_contains_radar_svg():
@@ -93,8 +94,18 @@ def test_render_summary_html_contains_radar_svg():
     assert "TTFT" not in html
     assert "Tokens/s" not in html
     assert "Output Tokens" not in html
+    assert "Scored-Suite Score" in html
+    assert "Conservative selected-suite" in html
+    assert "Overall Score" not in html
     assert '<svg viewBox="0 0 320 260"' in html
     assert "alpha" in html
+
+
+def test_failed_missing_required_tool_is_catalogued_as_setup_exclusion():
+    info = status_info("failed_missing_required_tool")
+
+    assert info.counts_toward_official_score is False
+    assert info.failure_class == "benchmark_setup"
 
 
 def test_cli_mock_smoke_writes_expected_artifacts(tmp_path, monkeypatch):
@@ -169,8 +180,8 @@ def test_cli_mock_smoke_runs_all_bundled_benchmarks(tmp_path, monkeypatch):
     assert summary["task_count"] == 12
     assert summary["selected_suite_count"] == 12
     assert summary["known_suite_count"] == 12
-    assert summary["excluded_suite_count"] == 0
-    assert summary["excluded_suites"] == []
+    assert summary["excluded_suite_count"] == 3
+    assert len(summary["excluded_suites"]) == 3
     assert len(summary["benchmark_results"]) == 12
     assert summary["suite_coverage_rate"] == 0.75
     assert summary["coverage_summary"]["successfully_scored_benchmarks"] == 9
@@ -393,6 +404,7 @@ def test_aggregate_results_separates_skipped_from_valid_scores():
     assert summary["conservative_all_suite_score"] == 0.5
     assert summary["valid_task_count"] == 1
     assert summary["skipped_suite_count"] == 1
+    assert summary["excluded_suite_count"] == 1
     assert summary["skipped_suites"][0]["blocker_type"] == "unsupported_capability"
     assert summary["skipped_suites"][0]["error"]
     assert summary["skipped_count"] == 1
@@ -593,9 +605,109 @@ def test_aggregate_results_excludes_missing_environment_requirements():
 
     assert summary["valid_task_count"] == 0
     assert summary["coverage_summary"]["successfully_scored_benchmarks"] == 0
+    assert summary["excluded_suite_count"] == 1
     assert summary["benchmark_results"][0]["included_in_official_score"] is False
     assert summary["benchmark_results"][0]["capabilities_verified"] is False
     assert summary["benchmark_results"][0]["missing_env"] == ["FINANCE_AGENT_V2_CACHE"]
+
+
+def test_aggregate_results_excludes_non_official_smoke_scores():
+    summary = aggregate_results(
+        [
+            GradeResult(
+                task_id="PB_004",
+                category="Coding",
+                kind="external_benchmark",
+                score=0.0,
+                max_score=1.0,
+                passed=False,
+                json_valid=True,
+                latency_seconds=0.1,
+                status="failed_model_missing_artifact",
+                error="empty file: model.patch contains no repository diff",
+                details={
+                    "benchmark": "SWE-Lancer",
+                    "group": "Coding",
+                    "result": {
+                        "status": "failed_model_missing_artifact",
+                        "capabilities_verified": True,
+                        "included_in_official_score": False,
+                        "official_equivalent": False,
+                        "score_mode": "smoke_patch_presence",
+                        "status_counts": {"failed_model_missing_artifact": 1},
+                    },
+                },
+            )
+        ],
+        {"run_duration_seconds": 1.0, "excluded_suite_count": 0, "excluded_suites": []},
+    )
+
+    assert summary["valid_task_count"] == 0
+    assert summary["excluded_suite_count"] == 1
+    assert summary["coverage_summary"]["excluded_from_score_benchmarks"] == 1
+    assert summary["metadata"]["excluded_suite_count"] == 1
+    assert summary["metadata"]["excluded_suites"][0]["suite_id"] == "PB_004"
+    assert summary["benchmark_results"][0]["included_in_official_score"] is False
+    assert summary["benchmark_results"][0]["official_equivalent"] is False
+    assert summary["benchmark_results"][0]["score_mode"] == "smoke_patch_presence"
+    assert summary["benchmark_results"][0]["blocker_type"] == "missing_grader"
+    assert summary["benchmark_results"][0]["score_status"] == "ungraded"
+
+
+def test_aggregate_results_counts_payload_unsupported_capabilities():
+    summary = aggregate_results(
+        [
+            GradeResult(
+                task_id="PB_009",
+                category="Security",
+                kind="external_benchmark",
+                score=0.0,
+                max_score=1.0,
+                passed=False,
+                json_valid=True,
+                latency_seconds=0.1,
+                status="failed_missing_required_tool",
+                details={
+                    "benchmark": "ExploitBench",
+                    "group": "Security",
+                    "result": {
+                        "status": "failed_missing_required_tool",
+                        "capabilities_verified": False,
+                        "unsupported_capabilities": ["tool_call"],
+                        "missing_tools": ["exploitbench"],
+                        "status_counts": {"failed_missing_required_tool": 1},
+                    },
+                },
+            ),
+            GradeResult(
+                task_id="PB_016",
+                category="Finance",
+                kind="external_benchmark",
+                score=0.0,
+                max_score=1.0,
+                passed=False,
+                json_valid=True,
+                latency_seconds=0.1,
+                status="failed_missing_required_tool",
+                details={
+                    "benchmark": "Finance Agent v2",
+                    "group": "Finance",
+                    "result": {
+                        "status": "failed_missing_required_tool",
+                        "capabilities_verified": False,
+                        "unsupported_capabilities": ["external_data_required", "tool_call"],
+                        "missing_tools": ["web_search"],
+                        "status_counts": {"failed_missing_required_tool": 1},
+                    },
+                },
+            ),
+        ],
+        {"run_duration_seconds": 1.0},
+    )
+
+    assert summary["unsupported_capability_count"] == 3
+    assert summary["coverage"]["unsupported_capability_count"] == 3
+    assert summary["excluded_suite_count"] == 2
 
 
 def test_aggregate_results_counts_nested_passed_items():

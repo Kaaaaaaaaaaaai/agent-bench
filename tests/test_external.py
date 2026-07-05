@@ -358,6 +358,87 @@ def test_external_runner_prepares_paperbench_asset_cache(monkeypatch, tmp_path):
     assert any(command[:4] == ["/usr/bin/git", "-C", str(tmp_path / "agent-bench-assets" / "_downloads" / "paperbench" / "repo"), "lfs"] for command in commands)
 
 
+def test_external_runner_prepares_swelancer_asset_cache_without_lfs(monkeypatch, tmp_path):
+    commands: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        if "clone" in command:
+            clone_dir = Path(command[-1])
+            swelancer_dir = clone_dir / "project" / "swelancer"
+            issue_dir = swelancer_dir / "issues" / "16912_4"
+            issue_dir.mkdir(parents=True)
+            (swelancer_dir / "all_swelancer_tasks.csv").write_text(
+                "question_id,title,description,cwd\n"
+                "16912_4,Fix zip hint,Patch the failing behavior,/app/expensify\n",
+                encoding="utf-8",
+            )
+            (issue_dir / "commit_id.txt").write_text(
+                "2b791c9f3053c1682ddcb50ab036deb3e55a7542\n",
+                encoding="utf-8",
+            )
+        return CompletedProcess(command, 0, "", "")
+
+    def fake_which(name):
+        if name == "git":
+            return "/usr/bin/git"
+        if name == "git-lfs":
+            return None
+        return f"/usr/bin/{name}"
+
+    monkeypatch.setattr("agent_bench.external.shutil.which", fake_which)
+    monkeypatch.setattr("agent_bench.external.subprocess.run", fake_run)
+    task = Task(
+        id="PB_004",
+        category="public_benchmarks",
+        type="external_benchmark",
+        question="Run SWE-Lancer",
+        source="public_benchmarks.json",
+        benchmark={
+            "name": "SWE-Lancer",
+            "homepage": "https://github.com/openai/frontier-evals/tree/main/project/swelancer",
+            "repository": "https://github.com/openai/frontier-evals.git",
+            "ref": "51052cede8cc608f95bb00346635e03759013e5a",
+            "subdir": "project/swelancer",
+            "license": "MIT",
+            "credit": "OpenAI",
+            "docker": {"command": "agent-bench-probe --benchmark SWE-Lancer"},
+        },
+    )
+    config = ExternalBenchmarkConfig(
+        provider="openai-compatible",
+        base_url="http://localhost:8000/v1",
+        model="example-model",
+        api_key_env="",
+        output_dir=tmp_path / "runs",
+        timeout=5.0,
+        asset_root=tmp_path / "agent-bench-assets",
+    )
+
+    error = _prepare_benchmark_asset_cache(task, config)
+
+    assert error is None
+    assert (
+        tmp_path
+        / "agent-bench-assets"
+        / "swe-lancer"
+        / "project"
+        / "swelancer"
+        / "all_swelancer_tasks.csv"
+    ).is_file()
+    assert (
+        tmp_path
+        / "agent-bench-assets"
+        / "swe-lancer"
+        / "project"
+        / "swelancer"
+        / "issues"
+        / "16912_4"
+        / "commit_id.txt"
+    ).is_file()
+    assert not any("lfs" in command for command in commands)
+
+
 def test_external_runner_prepares_gdpval_asset_cache(monkeypatch, tmp_path):
     def fake_run(command, **kwargs):
         if "clone" in command:

@@ -1,0 +1,7 @@
+CrowdStrike Holdings, Inc. Form 10-Q for period ended October 31, 2025.
+
+AI-native Falcon platform: the period update continues to describe CrowdStrike as delivering an AI-native platform for the XDR era, purpose-built to stop breaches.
+
+AI Detection and Response: on September 26, 2025, CrowdStrike acquired Pangea Cyber Corporation. Pangea is described as a company that offers AI Detection and Response solutions. This supports Falcon AIDR as a net-new product category and monetization opportunity for securing customers' own AI usage.
+
+AI risks: the October 31, 2025 period keeps the AI risk-factor framing. Threat actors' use of AI may increase attack speed and sophistication. New AI regulatory and compliance frameworks may impose additional requirements. AI remains complex and rapidly evolving, so execution risk remains if CrowdStrike cannot keep pace with rapidly evolving AI capabilities.

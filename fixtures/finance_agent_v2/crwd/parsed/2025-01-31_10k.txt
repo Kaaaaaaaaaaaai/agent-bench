@@ -1,0 +1,9 @@
+CrowdStrike Holdings, Inc. Form 10-K for fiscal year ended January 31, 2025.
+
+AI-native Falcon platform: management describes Falcon as an AI-native cloud-native cybersecurity platform built with AI at the core. This platform and the Security Cloud data advantage are presented as a structural competitive advantage.
+
+Charlotte AI: management identifies Charlotte AI as a generative AI security analyst for the Falcon platform. It automates threat triage, investigation, response workflows, and routine security analyst tasks within customer-defined guardrails.
+
+AI security business opportunity: management says CrowdStrike combines AI for cybersecurity with cybersecurity for AI. It describes securing generative AI workloads, applications, sensitive data, identities, endpoints, and cloud workloads as a new product and monetization opportunity tied to customers' AI adoption. AI adoption is therefore a direct demand driver for Falcon.
+
+AI risks: management identifies adversarial AI risk because threat actors can use AI and generative AI to move faster and launch more sophisticated attacks. It also identifies regulatory and compliance risk from evolving AI laws, privacy and data protection requirements, and frameworks such as the EU AI Act. AI is complex and rapidly evolving, creating execution risk if CrowdStrike cannot keep pace with rapidly evolving AI capabilities or if its AI investments do not deliver expected benefits.
