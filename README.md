@@ -64,6 +64,25 @@ docker run --rm -it \
 By default, results are written to a timestamped directory under `runs/` and copied to `runs/latest/`.
 Runs print timestamped configuration, progress, and error logs to stderr; pass `--quiet` to suppress those logs while keeping the final summary.
 
+## Tool-Call Parsers
+
+Agent Bench records and executes native OpenAI-compatible `tool_calls` first. Some local model servers instead emit tool calls as text. For those cases, pass `--tool-call-parser <name>` or the older `--tool-parser <name>`; both flags write the same `AGENT_BENCH_TOOL_PARSER` setting. The default `auto` parser tries known output shapes in order, so most runs should not need a model-specific parser unless a text format is ambiguous.
+
+Supported local parser names include:
+
+- `openai-native`: OpenAI-compatible `message.tool_calls`.
+- `vllm-compatible`: OpenAI-style `tool_calls` plus legacy `message.function_call`.
+- `hermes` / `qwen3.5`: Hermes/Qwen tagged JSON such as `<tool_call>{"name":"...","arguments":{...}}</tool_call>`.
+- `longcat`: LongCat tagged JSON using `<longcat_tool_call>...</longcat_tool_call>`.
+- `xlam`: JSON-array tool calls, including code blocks, `[TOOL_CALLS]`, `<tool_call>`, and post-`</think>` JSON.
+- `functiongemma`: FunctionGemma calls such as `<start_function_call>call:name{arg:<escape>value<escape>}<end_function_call>`.
+- `pythonic`: Python-call lists such as `[tool_name(arg='value')]`.
+- `olmo3`: Olmo 3 `<function_calls>...</function_calls>` blocks with newline-separated Pythonic calls.
+- `json-in-content`: fallback JSON object or array parsing from assistant content.
+- `none`: disable text-call parsing.
+
+Several vLLM parser names normalize to these local parsers for convenience, including `openai`, `qwen`, `qwen2.5`, `qwen3_xml`, `llama3_json`, `llama4_pythonic`, `granite`, `granite4`, `granite-20b-fc`, `internlm`, `jamba`, `mistral`, `deepseek_v3`, `deepseek_v31`, `kimi_k2`, `hunyuan_a13b`, `cohere_command3`, `glm45`, `glm47`, `gigachat3`, and `apertus`. This is intentionally narrower than vLLM's server-side parser system: Agent Bench parses completed OpenAI-compatible responses and text fallbacks, but it does not install vLLM chat templates, reasoning parsers, or parser plugins. If vLLM itself is launched with `--enable-auto-tool-choice --tool-call-parser ...`, it will usually return native `tool_calls`, and Agent Bench will record them without needing a matching local parser. See the vLLM tool-calling reference for server-side flags and model-specific chat templates: https://docs.vllm.ai/en/stable/features/tool_calling/
+
 ## Timeouts For Local Models
 
 The bundled rows are whole benchmark descriptors, not single quiz questions. For remote providers, each `external_benchmark` row runs a Docker launcher that may clone a repository, extract benchmark records, call the configured model several times, and run judge calls. The default external benchmark timeout is therefore 21,600 seconds (6 hours) per benchmark row.
@@ -112,7 +131,7 @@ When running a remote provider, Agent Bench starts a main-process OpenAI-compati
 - `AGENT_BENCH_MODEL`
 - `AGENT_BENCH_PROVIDER`
 - `AGENT_BENCH_OUTPUT_DIR`
-- parser/generation settings such as `AGENT_BENCH_TOOL_PARSER`, `AGENT_BENCH_MAX_TOKENS`, and `AGENT_BENCH_CONTEXT_LIMIT`
+- parser/generation settings such as `AGENT_BENCH_TOOL_PARSER` (`--tool-call-parser`), `AGENT_BENCH_MAX_TOKENS`, and `AGENT_BENCH_CONTEXT_LIMIT`
 
 Most benchmark folders currently use `agent-bench-probe` from their benchmark-owned `harness/run.sh` to normalize public benchmark formats through an explicit adapter contract:
 
@@ -122,7 +141,7 @@ Most benchmark folders currently use `agent-bench-probe` from their benchmark-ow
 - `collect_outputs(run) -> OutputBundle`
 - `grade(task, outputs) -> GradeResult`
 
-Capabilities are reported only when an adapter can provide the required workspace, tools, output collection, and grader. `tool_call` rows use the stateful agent tool loop, including native OpenAI-compatible tool calls and text tool-call fallbacks for models that emit tagged JSON; rows that name a required tool fail preflight as `failed_missing_required_tool` if that tool is not exposed. FinMCP-Bench is evaluated as static transcript reasoning and does not expose live MCP tools. Finance Agent v2 uses a deterministic CRWD fixture backend for smoke coverage; `web_search`, `edgar_search`, `parse_html_page`, `retrieve_information`, and `price_history` are exposed only when fixture checksums and semantic canaries pass. Browser/GUI rows are evaluated from extracted task data and repository files when no live display is available. Repo-patch rows require target repository metadata and a checkout/patch/diff canary; when `AGENT_BENCH_REPO_PATCH_GRADER` is set, that official patch/test grader is used. SWE-Lancer rows with official issue `test.py` assets use the built-in task-test grader, which applies `model.patch` to a fresh target checkout and runs the task test. Other repo-patch rows use a `task_compliance_fallback` to grade the produced diff. File-artifact and office-document rows run a read/write/list/collect canary and use isolated per-item workspaces populated only with declared task inputs. Missing, corrupt, or Git LFS pointer-stub assets are marked `failed_missing_assets`.
+Capabilities are reported only when an adapter can provide the required workspace, tools, output collection, and grader. `tool_call` rows use the stateful agent tool loop, including native OpenAI-compatible tool calls and text tool-call fallbacks for models that emit tagged JSON, JSON arrays, FunctionGemma calls, or Pythonic calls; rows that name a required tool fail preflight as `failed_missing_required_tool` if that tool is not exposed. FinMCP-Bench is evaluated as static transcript reasoning and does not expose live MCP tools. Finance Agent v2 uses a deterministic CRWD fixture backend for smoke coverage; `web_search`, `edgar_search`, `parse_html_page`, `retrieve_information`, and `price_history` are exposed only when fixture checksums and semantic canaries pass. Browser/GUI rows are evaluated from extracted task data and repository files when no live display is available. Repo-patch rows require target repository metadata and a checkout/patch/diff canary; when `AGENT_BENCH_REPO_PATCH_GRADER` is set, that official patch/test grader is used. SWE-Lancer rows with official issue `test.py` assets use the built-in task-test grader, which applies `model.patch` to a fresh target checkout and runs the task test. Other repo-patch rows use a `task_compliance_fallback` to grade the produced diff. File-artifact and office-document rows run a read/write/list/collect canary and use isolated per-item workspaces populated only with declared task inputs. Missing, corrupt, or Git LFS pointer-stub assets are marked `failed_missing_assets`.
 
 The default external asset cache is the git-ignored `agent-bench-assets/` directory. Benchmarks with cache recipes, such as ExploitBench, download upstream data into that cache before Docker starts; each benchmark container receives only that benchmark's materialized assets at `/benchmark/assets`.
 
