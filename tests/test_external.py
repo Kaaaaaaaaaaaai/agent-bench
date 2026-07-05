@@ -10,6 +10,116 @@ from agent_bench.external import (
 from agent_bench.models import Task
 
 
+def _manifest_task(capabilities: list[str] | None = None) -> Task:
+    manifest = {
+        "id": "PB_001",
+        "display_name": "ExampleBench",
+        "task_group": "Coding",
+        "description": "Run ExampleBench under official conditions.",
+        "homepage_url": "https://example.com",
+        "official_leaderboard_url": "https://example.com/leaderboard",
+        "source": {
+            "repository_url": "https://example.com/examplebench.git",
+            "commit": "0123456789abcdef0123456789abcdef01234567",
+        },
+        "license": "MIT",
+        "credit": "Example authors",
+        "citation": "https://example.com/citation",
+        "official_conditions": {
+            "official_split": "test",
+            "official_scoring_method": "exact official score",
+            "official_prompt_format": "official prompt",
+            "official_grader_command": "examplebench grade",
+            "official_evaluation_config": "official.yaml",
+        },
+        "assets": [
+            {
+                "source": "https://example.com/assets.jsonl",
+                "revision": "0123456789abcdef0123456789abcdef01234567",
+                "checksum": "sha256:abc",
+                "expected_local_path": "examplebench/assets.jsonl",
+                "required": True,
+            }
+        ],
+        "container": {
+            "image": "example-benchmark:local",
+            "command": "agent-bench-probe --benchmark ExampleBench",
+            "network": "model_proxy",
+            "timeout_seconds": 5,
+        },
+        "adapter": {
+            "module": "examplebench.adapter",
+            "expected_output_files": ["agent_bench_result.json"],
+            "result_parser": "agent_bench_result_json",
+        },
+        "scoring": {
+            "raw_score_field": "score",
+            "max_score": 1.0,
+            "normalization": "fraction_to_0_100",
+            "direction": "higher_is_better",
+        },
+        "reporting": {
+            "category_label": "Coding",
+            "display_order": 1,
+            "license": "MIT",
+            "credit": "Example authors",
+            "citation": "https://example.com/citation",
+        },
+        "capabilities": capabilities or ["repo_patch", "chat_answer"],
+    }
+    return Task(
+        id="PB_001",
+        category="Coding",
+        type="external_benchmark",
+        question="Run benchmark",
+        source="tasks/examplebench/manifest.json",
+        benchmark={
+            "name": "ExampleBench",
+            "group": "Coding",
+            "homepage": "https://example.com",
+            "license": "MIT",
+            "credit": "Example authors",
+            "citation": "https://example.com/citation",
+            "capabilities": capabilities or ["repo_patch", "chat_answer"],
+            "manifest": manifest,
+            "docker": {
+                "image": "example-benchmark:local",
+                "command": "agent-bench-probe --benchmark ExampleBench",
+            },
+        },
+    )
+
+
+def _write_example_task_folder(root: Path) -> Path:
+    task_dir = root / "tasks" / "examplebench"
+    (task_dir / "harness").mkdir(parents=True, exist_ok=True)
+    (task_dir / "manifest.json").write_text("{}\n", encoding="utf-8")
+    (task_dir / "harness" / "run.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    return task_dir
+
+
+def _write_asset_lock_task_folder(root: Path, slug: str, recipe: dict) -> Path:
+    task_dir = root / "tasks" / slug
+    task_dir.mkdir(parents=True, exist_ok=True)
+    (task_dir / "manifest.json").write_text("{}\n", encoding="utf-8")
+    (task_dir / "assets.lock.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "agent-bench.assets-lock.v1",
+                "benchmark_slug": slug,
+                "source": {
+                    "repository_url": recipe["repository"],
+                    "commit": recipe.get("ref", "0123456789abcdef0123456789abcdef01234567"),
+                },
+                "materialization": {"cache_recipe": recipe},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return task_dir
+
+
 def test_external_runner_uses_descriptor_docker_image(monkeypatch, tmp_path):
     commands: list[list[str]] = []
 
@@ -33,25 +143,10 @@ def test_external_runner_uses_descriptor_docker_image(monkeypatch, tmp_path):
 
     monkeypatch.setattr("agent_bench.external.shutil.which", lambda name: "/usr/bin/docker")
     monkeypatch.setattr("agent_bench.external.subprocess.run", fake_run)
+    monkeypatch.setenv("AGENT_BENCH_SAMPLE_LIMIT", "1")
 
-    task = Task(
-        id="PB_001",
-        category="public_benchmarks",
-        type="external_benchmark",
-        question="Run benchmark",
-        source="public_benchmarks.json",
-        benchmark={
-            "name": "ExampleBench",
-            "homepage": "https://example.com",
-            "license": "MIT",
-            "credit": "Example authors",
-            "capabilities": ["repo_patch", "chat_answer"],
-            "docker": {
-                "image": "example-benchmark:local",
-                "command": "agent-bench-probe --benchmark ExampleBench",
-            },
-        },
-    )
+    task = _manifest_task()
+    task_dir = _write_example_task_folder(tmp_path)
 
     result = ExternalBenchmarkRunner()._run_sync(
         task,
@@ -63,24 +158,133 @@ def test_external_runner_uses_descriptor_docker_image(monkeypatch, tmp_path):
             output_dir=tmp_path,
             timeout=5.0,
             asset_root=tmp_path / "asset-cache",
+            source_root=tmp_path,
+            allow_host_docker_socket=True,
         ),
     )
 
     assert result.passed is True
     assert result.details["docker_image"] == "example-benchmark:local"
+    assert result.details["network_mode"] == "bridge"
+    assert result.details["docker_socket_mount"]["enabled"] is False
+    assert result.details["docker_socket_mount"]["global_allow_host_docker_socket"] is True
+    assert result.details["asset_cache_mount"]["cache_key"] == "examplebench"
+    assert result.details["benchmark_task_mount"] == {
+        "host_path": str(task_dir.resolve()),
+        "container_path": "/benchmark/task",
+        "readonly": True,
+    }
+    assert result.details["result"]["network_mode"] == "bridge"
+    assert result.details["result"]["docker_socket_mount"]["enabled"] is False
+    assert result.details["result"]["asset_cache_mount"]["cache_key"] == "examplebench"
+    assert result.details["result"]["benchmark_task_mount"]["container_path"] == "/benchmark/task"
     assert commands[0] == ["docker", "image", "inspect", "example-benchmark:local"]
     assert commands[1][-1] == "example-benchmark:local"
+    assert "--cap-drop" in commands[1]
+    assert "ALL" in commands[1]
+    assert "--security-opt" in commands[1]
+    assert "no-new-privileges" in commands[1]
+    assert "--user" in commands[1]
+    assert "10001:10001" in commands[1]
+    assert "--network" in commands[1]
+    assert "bridge" in commands[1]
     assert "AGENT_BENCH_DOCKER_IMAGE=example-benchmark:local" in commands[1]
     assert "AGENT_BENCH_REQUIRED_CAPABILITIES=repo_patch,chat_answer" in commands[1]
     assert "AGENT_BENCH_ALLOW_TARGET_CHECKOUT=1" in commands[1]
     assert "AGENT_BENCH_MODEL_REQUEST_TIMEOUT=1800.0" in commands[1]
     assert "AGENT_BENCH_MAX_TOKENS=16384" in commands[1]
-    assert "AGENT_BENCH_ASSET_ROOT=/asset-cache" in commands[1]
+    assert "AGENT_BENCH_TASK_DIR=/benchmark/task" in commands[1]
+    assert "AGENT_BENCH_ASSET_ROOT=/benchmark/assets" in commands[1]
     assert "AGENT_BENCH_ASSET_CACHE_KEY=examplebench" in commands[1]
-    assert f"{tmp_path / 'asset-cache'}:/asset-cache" in commands[1]
+    assert "AGENT_BENCH_SAMPLE_LIMIT=1" in commands[1]
+    assert f"type=bind,src={task_dir.resolve()},dst=/benchmark/task,readonly" in commands[1]
+    assert f"type=bind,src={(tmp_path / 'asset-cache' / 'examplebench').resolve()},dst=/benchmark/assets,readonly" in commands[1]
+    assert "/var/run/docker.sock:/var/run/docker.sock" not in commands[1]
+    assert not any(item.startswith("AGENT_BENCH_API_KEY=") for item in commands[1])
     assert not any(item.endswith(":/outputs") for item in commands[1])
     assert commands[2][:2] == ["docker", "cp"]
     assert commands[3][:3] == ["docker", "rm", "-f"]
+
+
+def test_external_runner_mounts_docker_socket_only_when_descriptor_and_config_allow(monkeypatch, tmp_path):
+    commands: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        if command[:3] == ["docker", "image", "inspect"]:
+            return CompletedProcess(command, 0, "", "")
+        if command[:3] == ["docker", "run", "--name"]:
+            return CompletedProcess(command, 0, "ready", "")
+        if command[:2] == ["docker", "cp"]:
+            output_dir = Path(command[3])
+            output_dir.mkdir(parents=True, exist_ok=True)
+            (output_dir / "agent_bench_result.json").write_text(
+                json.dumps({"score": 1.0, "ok": True}) + "\n",
+                encoding="utf-8",
+            )
+            return CompletedProcess(command, 0, "", "")
+        if command[:3] == ["docker", "rm", "-f"]:
+            return CompletedProcess(command, 0, "", "")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr("agent_bench.external.shutil.which", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr("agent_bench.external.subprocess.run", fake_run)
+
+    task = _manifest_task(["tool_call"])
+    _write_example_task_folder(tmp_path)
+    task.benchmark["manifest"]["container"]["requires_host_docker_socket"] = True
+    task.benchmark["manifest"]["container"]["network"] = "host"
+
+    result = ExternalBenchmarkRunner()._run_sync(
+        task,
+        ExternalBenchmarkConfig(
+            provider="openai-compatible",
+            base_url="http://localhost:8000/v1",
+            model="example-model",
+            api_key_env="",
+            output_dir=tmp_path,
+            timeout=5.0,
+            asset_root=tmp_path / "asset-cache",
+            source_root=tmp_path,
+            allow_host_docker_socket=True,
+        ),
+    )
+
+    assert result.passed is True
+    docker_run = commands[1]
+    assert docker_run[docker_run.index("--network") + 1] == "host"
+    assert "/var/run/docker.sock:/var/run/docker.sock" in docker_run
+    assert result.details["network_mode"] == "host"
+    assert result.details["docker_socket_mount"]["enabled"] is True
+    assert result.details["docker_socket_mount"]["descriptor_requires_host_docker_socket"] is True
+    assert result.details["docker_socket_mount"]["global_allow_host_docker_socket"] is True
+    assert result.details["result"]["network_mode"] == "host"
+    assert result.details["result"]["docker_socket_mount"]["enabled"] is True
+
+
+def test_external_runner_rejects_docker_socket_without_explicit_opt_in(tmp_path):
+    task = _manifest_task(["tool_call"])
+    task.benchmark["manifest"]["container"]["requires_host_docker_socket"] = True
+
+    result = ExternalBenchmarkRunner()._run_sync(
+        task,
+        ExternalBenchmarkConfig(
+            provider="openai-compatible",
+            base_url="http://localhost:8000/v1",
+            model="example-model",
+            api_key_env="",
+            output_dir=tmp_path,
+            timeout=5.0,
+            asset_root=tmp_path / "asset-cache",
+            source_root=tmp_path,
+            allow_host_docker_socket=False,
+        ),
+    )
+
+    assert result.passed is False
+    assert result.details["result"]["status"] == "failed_manifest_validation"
+    assert "requires the host Docker socket" in result.error
+    assert result.details["result"]["included_in_official_score"] is False
 
 
 def test_external_runner_fails_when_result_file_missing(monkeypatch, tmp_path):
@@ -99,6 +303,35 @@ def test_external_runner_fails_when_result_file_missing(monkeypatch, tmp_path):
     monkeypatch.setattr("agent_bench.external.shutil.which", lambda name: "/usr/bin/docker")
     monkeypatch.setattr("agent_bench.external.subprocess.run", fake_run)
 
+    task = _manifest_task(["chat_answer"])
+    _write_example_task_folder(tmp_path)
+
+    result = ExternalBenchmarkRunner()._run_sync(
+        task,
+        ExternalBenchmarkConfig(
+            provider="openai-compatible",
+            base_url="http://localhost:8000/v1",
+            model="example-model",
+            api_key_env="",
+            output_dir=tmp_path,
+            timeout=5.0,
+            asset_root=tmp_path / "asset-cache",
+            source_root=tmp_path,
+        ),
+    )
+
+    assert result.score == 0.0
+    assert result.passed is False
+    assert result.error == "External benchmark did not produce agent_bench_result.json"
+    result_file = tmp_path / "external" / "PB_001" / "agent_bench_result.json"
+    payload = json.loads(result_file.read_text(encoding="utf-8"))
+    assert payload["status"] == "failed_harness_setup"
+    assert payload["error"] == "External benchmark did not produce agent_bench_result.json"
+    assert payload["capability_contract"]["chat_answer"]["supported"] is True
+    assert result.details["result"]["status"] == "failed_harness_setup"
+
+
+def test_external_runner_rejects_incomplete_legacy_descriptor(tmp_path):
     task = Task(
         id="PB_001",
         category="public_benchmarks",
@@ -131,15 +364,9 @@ def test_external_runner_fails_when_result_file_missing(monkeypatch, tmp_path):
         ),
     )
 
-    assert result.score == 0.0
     assert result.passed is False
-    assert result.error == "External benchmark did not produce agent_bench_result.json"
-    result_file = tmp_path / "external" / "PB_001" / "agent_bench_result.json"
-    payload = json.loads(result_file.read_text(encoding="utf-8"))
-    assert payload["status"] == "failed_harness_setup"
-    assert payload["error"] == "External benchmark did not produce agent_bench_result.json"
-    assert payload["capability_contract"]["chat_answer"]["supported"] is True
-    assert result.details["result"]["status"] == "failed_harness_setup"
+    assert result.details["result"]["status"] == "failed_manifest_validation"
+    assert "official_conditions.official_split" in result.error
 
 
 def test_external_runner_prepares_paperbench_asset_cache(monkeypatch, tmp_path):
@@ -173,6 +400,18 @@ def test_external_runner_prepares_paperbench_asset_cache(monkeypatch, tmp_path):
             "docker": {"command": "agent-bench-probe --benchmark PaperBench"},
         },
     )
+    task.source = "tasks/paperbench/manifest.json"
+    _write_asset_lock_task_folder(
+        tmp_path,
+        "paperbench",
+        {
+            "key": "paperbench",
+            "repository": "https://github.com/openai/frontier-evals.git",
+            "ref": "main",
+            "includes": ["project/paperbench/data/papers/**"],
+            "subpaths": ["project/paperbench/data/papers"],
+        },
+    )
     config = ExternalBenchmarkConfig(
         provider="openai-compatible",
         base_url="http://localhost:8000/v1",
@@ -181,6 +420,7 @@ def test_external_runner_prepares_paperbench_asset_cache(monkeypatch, tmp_path):
         output_dir=tmp_path / "runs",
         timeout=5.0,
         asset_root=tmp_path / "agent-bench-assets",
+        source_root=tmp_path,
     )
 
     error = _prepare_benchmark_asset_cache(task, config)
@@ -198,6 +438,101 @@ def test_external_runner_prepares_paperbench_asset_cache(monkeypatch, tmp_path):
         / "paper.pdf"
     ).is_file()
     assert any(command[:4] == ["/usr/bin/git", "-C", str(tmp_path / "agent-bench-assets" / "_downloads" / "paperbench" / "repo"), "lfs"] for command in commands)
+
+
+def test_external_runner_prepares_swelancer_asset_cache_without_lfs(monkeypatch, tmp_path):
+    commands: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        if "clone" in command:
+            clone_dir = Path(command[-1])
+            swelancer_dir = clone_dir / "project" / "swelancer"
+            issue_dir = swelancer_dir / "issues" / "16912_4"
+            issue_dir.mkdir(parents=True)
+            (swelancer_dir / "all_swelancer_tasks.csv").write_text(
+                "question_id,title,description,cwd\n"
+                "16912_4,Fix zip hint,Patch the failing behavior,/app/expensify\n",
+                encoding="utf-8",
+            )
+            (issue_dir / "commit_id.txt").write_text(
+                "2b791c9f3053c1682ddcb50ab036deb3e55a7542\n",
+                encoding="utf-8",
+            )
+        return CompletedProcess(command, 0, "", "")
+
+    def fake_which(name):
+        if name == "git":
+            return "/usr/bin/git"
+        if name == "git-lfs":
+            return None
+        return f"/usr/bin/{name}"
+
+    monkeypatch.setattr("agent_bench.external.shutil.which", fake_which)
+    monkeypatch.setattr("agent_bench.external.subprocess.run", fake_run)
+    task = Task(
+        id="PB_004",
+        category="public_benchmarks",
+        type="external_benchmark",
+        question="Run SWE-Lancer",
+        source="public_benchmarks.json",
+        benchmark={
+            "name": "SWE-Lancer",
+            "homepage": "https://github.com/openai/frontier-evals/tree/main/project/swelancer",
+            "repository": "https://github.com/openai/frontier-evals.git",
+            "ref": "51052cede8cc608f95bb00346635e03759013e5a",
+            "subdir": "project/swelancer",
+            "license": "MIT",
+            "credit": "OpenAI",
+            "docker": {"command": "agent-bench-probe --benchmark SWE-Lancer"},
+        },
+    )
+    task.source = "tasks/swe-lancer/manifest.json"
+    _write_asset_lock_task_folder(
+        tmp_path,
+        "swe-lancer",
+        {
+            "key": "swe-lancer",
+            "repository": "https://github.com/openai/frontier-evals.git",
+            "ref": "51052cede8cc608f95bb00346635e03759013e5a",
+            "requires_git_lfs": False,
+            "includes": [],
+            "subpaths": ["project/swelancer"],
+        },
+    )
+    config = ExternalBenchmarkConfig(
+        provider="openai-compatible",
+        base_url="http://localhost:8000/v1",
+        model="example-model",
+        api_key_env="",
+        output_dir=tmp_path / "runs",
+        timeout=5.0,
+        asset_root=tmp_path / "agent-bench-assets",
+        source_root=tmp_path,
+    )
+
+    error = _prepare_benchmark_asset_cache(task, config)
+
+    assert error is None
+    assert (
+        tmp_path
+        / "agent-bench-assets"
+        / "swe-lancer"
+        / "project"
+        / "swelancer"
+        / "all_swelancer_tasks.csv"
+    ).is_file()
+    assert (
+        tmp_path
+        / "agent-bench-assets"
+        / "swe-lancer"
+        / "project"
+        / "swelancer"
+        / "issues"
+        / "16912_4"
+        / "commit_id.txt"
+    ).is_file()
+    assert not any("lfs" in command for command in commands)
 
 
 def test_external_runner_prepares_gdpval_asset_cache(monkeypatch, tmp_path):
@@ -228,6 +563,18 @@ def test_external_runner_prepares_gdpval_asset_cache(monkeypatch, tmp_path):
             "docker": {"command": "agent-bench-probe --benchmark GDPval"},
         },
     )
+    task.source = "tasks/gdpval/manifest.json"
+    _write_asset_lock_task_folder(
+        tmp_path,
+        "gdpval",
+        {
+            "key": "gdpval",
+            "repository": "https://huggingface.co/datasets/openai/gdpval",
+            "ref": "main",
+            "includes": ["reference_files/**", "deliverable_files/**"],
+            "subpaths": ["reference_files", "deliverable_files"],
+        },
+    )
     config = ExternalBenchmarkConfig(
         provider="openai-compatible",
         base_url="http://localhost:8000/v1",
@@ -236,6 +583,7 @@ def test_external_runner_prepares_gdpval_asset_cache(monkeypatch, tmp_path):
         output_dir=tmp_path / "runs",
         timeout=5.0,
         asset_root=tmp_path / "agent-bench-assets",
+        source_root=tmp_path,
     )
 
     error = _prepare_benchmark_asset_cache(task, config)
@@ -299,6 +647,18 @@ def test_external_runner_uses_docker_asset_downloader_when_git_lfs_missing(monke
             "docker": {"command": "agent-bench-probe --benchmark GDPval"},
         },
     )
+    task.source = "tasks/gdpval/manifest.json"
+    _write_asset_lock_task_folder(
+        tmp_path,
+        "gdpval",
+        {
+            "key": "gdpval",
+            "repository": "https://huggingface.co/datasets/openai/gdpval",
+            "ref": "main",
+            "includes": ["reference_files/**", "deliverable_files/**"],
+            "subpaths": ["reference_files", "deliverable_files"],
+        },
+    )
     config = ExternalBenchmarkConfig(
         provider="openai-compatible",
         base_url="http://localhost:8000/v1",
@@ -307,6 +667,7 @@ def test_external_runner_uses_docker_asset_downloader_when_git_lfs_missing(monke
         output_dir=tmp_path / "runs",
         timeout=5.0,
         asset_root=tmp_path / "agent-bench-assets",
+        source_root=tmp_path,
     )
 
     error = _prepare_benchmark_asset_cache(

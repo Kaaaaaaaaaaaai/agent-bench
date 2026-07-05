@@ -8,6 +8,14 @@ from agent_bench.models import ModelResponse, Task
 from agent_bench.runner import RunConfig, _process_task
 
 
+class MemoryRecorder:
+    def __init__(self, handle: io.StringIO) -> None:
+        self.handle = handle
+
+    def write(self, payload: dict) -> None:
+        self.handle.write(json.dumps(payload, sort_keys=True) + "\n")
+
+
 class SequenceClient:
     def __init__(self, raw_responses: list[str]) -> None:
         self.raw_responses = list(raw_responses)
@@ -39,13 +47,16 @@ def test_process_task_retries_empty_responses_until_non_empty() -> None:
             external_runner=ExternalBenchmarkRunner(),
             config=RunConfig(provider="mock"),
             output_dir=Path("."),
+            external_base_url="",
+            judge_base_url="",
+            judge_fallback_used=False,
             timeout=5.0,
             request_sem=asyncio.Semaphore(1),
             eval_sem=asyncio.Semaphore(1),
             raw_lock=asyncio.Lock(),
             graded_lock=asyncio.Lock(),
-            raw_handle=raw_handle,
-            graded_handle=graded_handle,
+            raw_recorder=MemoryRecorder(raw_handle),
+            graded_recorder=MemoryRecorder(graded_handle),
             responses=responses,
         )
     )
@@ -73,13 +84,16 @@ def test_process_task_stops_after_three_empty_responses() -> None:
             external_runner=ExternalBenchmarkRunner(),
             config=RunConfig(provider="mock"),
             output_dir=Path("."),
+            external_base_url="",
+            judge_base_url="",
+            judge_fallback_used=False,
             timeout=5.0,
             request_sem=asyncio.Semaphore(1),
             eval_sem=asyncio.Semaphore(1),
             raw_lock=asyncio.Lock(),
             graded_lock=asyncio.Lock(),
-            raw_handle=raw_handle,
-            graded_handle=graded_handle,
+            raw_recorder=MemoryRecorder(raw_handle),
+            graded_recorder=MemoryRecorder(graded_handle),
             responses=responses,
         )
     )
@@ -111,18 +125,21 @@ def test_external_process_task_uses_request_semaphore(tmp_path) -> None:
                     task=task,
                     client=None,
                     sandbox=None,
-                    external_runner=runner,
-                    config=RunConfig(provider="openai-compatible", base_url="http://model.test/v1", model="model"),
-                    output_dir=tmp_path,
-                    timeout=5.0,
-                    request_sem=request_sem,
-                    eval_sem=eval_sem,
-                    raw_lock=raw_lock,
-                    graded_lock=graded_lock,
-                    raw_handle=raw_handle,
-                    graded_handle=graded_handle,
-                    responses=responses,
-                )
+                        external_runner=runner,
+                        config=RunConfig(provider="openai-compatible", base_url="http://model.test/v1", model="model"),
+                        output_dir=tmp_path,
+                        external_base_url="http://proxy.test/v1",
+                        judge_base_url="http://proxy.test/v1",
+                        judge_fallback_used=True,
+                        timeout=5.0,
+                        request_sem=request_sem,
+                        eval_sem=eval_sem,
+                        raw_lock=raw_lock,
+                        graded_lock=graded_lock,
+                        raw_recorder=MemoryRecorder(raw_handle),
+                        graded_recorder=MemoryRecorder(graded_handle),
+                        responses=responses,
+                    )
                 for task in tasks
             ]
         )

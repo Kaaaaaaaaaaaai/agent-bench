@@ -12,11 +12,40 @@
       "homepage": "https://github.com/SWE-bench/SWE-bench",
       "repository": "https://github.com/SWE-bench/SWE-bench.git",
       "dataset_id": "princeton-nlp/SWE-bench",
-      "ref": "main",
+      "dataset_revision": "e48e2bd1e9fecd5bbd641e9414ac59da9f2e69f6",
+      "ref": "f7bbbb2ccdf479001d6467c9e34af59e44a840f9",
       "subdir": "",
       "license": "MIT",
       "credit": "SWE-bench authors",
       "citation": "https://github.com/SWE-bench/SWE-bench#citation--license",
+      "adapter": "repo_patch",
+      "official_conditions": {
+        "official_split": "test",
+        "official_scoring_method": "agent-bench public adapter normalized score",
+        "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+        "official_grader_command": "agent-bench-probe --benchmark \"SWE-bench\" --kind public-benchmark",
+        "official_evaluation_config": "tasks/public_benchmarks.json#PB_001",
+        "container_requirements": "agent-bench-external:python3.12 launcher image"
+      },
+      "assets": [
+        {
+          "source": "https://github.com/SWE-bench/SWE-bench.git",
+          "revision": "f7bbbb2ccdf479001d6467c9e34af59e44a840f9",
+          "expected_local_path": ".",
+          "validation_rules": {
+            "kind": "repository_clone"
+          }
+        },
+        {
+          "source": "https://huggingface.co/datasets/princeton-nlp/SWE-bench",
+          "revision": "e48e2bd1e9fecd5bbd641e9414ac59da9f2e69f6",
+          "expected_local_path": "huggingface:princeton-nlp/SWE-bench",
+          "validation_rules": {
+            "kind": "huggingface_dataset",
+            "dataset_id": "princeton-nlp/SWE-bench"
+          }
+        }
+      ],
       "docker": {
         "image": "agent-bench-external:python3.12",
         "setup": [],
@@ -38,11 +67,34 @@
       ],
       "homepage": "https://github.com/openai/frontier-evals/tree/main/project/swelancer",
       "repository": "https://github.com/openai/frontier-evals.git",
-      "ref": "main",
+      "ref": "51052cede8cc608f95bb00346635e03759013e5a",
       "subdir": "project/swelancer",
       "license": "MIT",
       "credit": "OpenAI Frontier Evals SWE-Lancer authors",
       "citation": "https://github.com/openai/frontier-evals/tree/main/project/swelancer",
+      "adapter": "repo_patch",
+      "official_conditions": {
+        "official_split": "public task set",
+        "official_scoring_method": "agent-bench public adapter normalized score",
+        "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+        "official_grader_command": "agent-bench-probe --benchmark \"SWE-Lancer\" --kind public-benchmark",
+        "official_evaluation_config": "tasks/public_benchmarks.json#PB_004",
+        "container_requirements": "agent-bench-external:python3.12 launcher image"
+      },
+      "assets": [
+        {
+          "source": "https://github.com/openai/frontier-evals.git",
+          "revision": "51052cede8cc608f95bb00346635e03759013e5a",
+          "expected_local_path": "project/swelancer",
+          "validation_rules": {
+            "kind": "repository_paths",
+            "required_paths": [
+              "project/swelancer/all_swelancer_tasks.csv",
+              "project/swelancer/issues"
+            ]
+          }
+        }
+      ],
       "docker": {
         "image": "agent-bench-external:python3.12",
         "setup": [],
@@ -65,11 +117,32 @@
       "homepage": "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified",
       "repository": "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified",
       "dataset_id": "princeton-nlp/SWE-bench_Verified",
-      "ref": "main",
+      "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+      "ref": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
       "subdir": "",
       "license": "MIT",
       "credit": "Princeton NLP and OpenAI SWE-bench Verified authors",
       "citation": "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified",
+      "adapter": "repo_patch",
+      "official_conditions": {
+        "official_split": "test",
+        "official_scoring_method": "agent-bench public adapter normalized score",
+        "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+        "official_grader_command": "agent-bench-probe --benchmark \"SWE-bench Verified\" --kind public-benchmark",
+        "official_evaluation_config": "tasks/public_benchmarks.json#PB_005",
+        "container_requirements": "agent-bench-external:python3.12 launcher image"
+      },
+      "assets": [
+        {
+          "source": "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified",
+          "revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+          "expected_local_path": ".",
+          "validation_rules": {
+            "kind": "huggingface_dataset",
+            "dataset_id": "princeton-nlp/SWE-bench_Verified"
+          }
+        }
+      ],
       "docker": {
         "image": "agent-bench-external:python3.12",
         "setup": [],
@@ -97,6 +170,15 @@
       "license": "MIT",
       "credit": "ExploitBench authors",
       "citation": "https://github.com/exploitbench/exploitbench",
+      "adapter": "tool_call",
+      "official_conditions": {
+        "official_split": "v8 and v8-small public challenge configs",
+        "official_scoring_method": "agent-bench public adapter normalized score",
+        "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+        "official_grader_command": "agent-bench-probe --benchmark \"ExploitBench\" --kind public-benchmark",
+        "official_evaluation_config": "tasks/public_benchmarks.json#PB_009",
+        "container_requirements": "agent-bench-external:python3.12 launcher image"
+      },
       "dataset_source": {
         "kind": "upstream_repository",
         "required_paths": [
@@ -105,6 +187,24 @@
           "benchmarks/bench-v8"
         ]
       },
+      "required_tools": [
+        "exploitbench"
+      ],
+      "assets": [
+        {
+          "source": "https://github.com/exploitbench/exploitbench.git",
+          "revision": "c0b8a4d0aa5227ac86102dc304e8eb7edbae17bc",
+          "expected_local_path": ".",
+          "validation_rules": {
+            "kind": "repository_paths",
+            "required_paths": [
+              "benchmarks/v8.yaml",
+              "benchmarks/v8-small.yaml",
+              "benchmarks/bench-v8"
+            ]
+          }
+        }
+      ],
       "docker": {
         "image": "agent-bench-external:python3.12",
         "setup": [],
@@ -126,11 +226,33 @@
       ],
       "homepage": "https://github.com/alexziskind1/codeneedle",
       "repository": "https://github.com/alexziskind1/codeneedle.git",
-      "ref": "main",
+      "ref": "a6ccc03145ca700ed4a556846ac87e0488ad5437",
       "subdir": "",
       "license": "Unspecified",
       "credit": "codeneedle authors",
       "citation": "https://github.com/alexziskind1/codeneedle",
+      "adapter": "chat_answer",
+      "official_conditions": {
+        "official_split": "public fixtures",
+        "official_scoring_method": "agent-bench public adapter normalized score",
+        "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+        "official_grader_command": "agent-bench-probe --benchmark \"codeneedle\" --kind public-benchmark",
+        "official_evaluation_config": "tasks/public_benchmarks.json#PB_010",
+        "container_requirements": "agent-bench-external:python3.12 launcher image"
+      },
+      "assets": [
+        {
+          "source": "https://github.com/alexziskind1/codeneedle.git",
+          "revision": "a6ccc03145ca700ed4a556846ac87e0488ad5437",
+          "expected_local_path": "fixtures",
+          "validation_rules": {
+            "kind": "repository_paths",
+            "required_paths": [
+              "fixtures"
+            ]
+          }
+        }
+      ],
       "docker": {
         "image": "agent-bench-external:python3.12",
         "setup": [],
@@ -153,11 +275,33 @@
       ],
       "homepage": "https://github.com/ChenYXxxx/stockbench",
       "repository": "https://github.com/ChenYXxxx/stockbench.git",
-      "ref": "main",
+      "ref": "ce8b2b3483590646ad3b650ac8221f43f76fd091",
       "subdir": "",
       "license": "Apache-2.0",
       "credit": "StockBench authors",
       "citation": "https://github.com/ChenYXxxx/stockbench",
+      "adapter": "chat_answer",
+      "official_conditions": {
+        "official_split": "public cached financial records",
+        "official_scoring_method": "agent-bench public adapter normalized score",
+        "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+        "official_grader_command": "agent-bench-probe --benchmark \"StockBench\" --kind public-benchmark",
+        "official_evaluation_config": "tasks/public_benchmarks.json#PB_011",
+        "container_requirements": "agent-bench-external:python3.12 launcher image"
+      },
+      "assets": [
+        {
+          "source": "https://github.com/ChenYXxxx/stockbench.git",
+          "revision": "ce8b2b3483590646ad3b650ac8221f43f76fd091",
+          "expected_local_path": "storage/cache",
+          "validation_rules": {
+            "kind": "repository_paths",
+            "required_paths": [
+              "storage/cache"
+            ]
+          }
+        }
+      ],
       "docker": {
         "image": "agent-bench-external:python3.12",
         "setup": [],
@@ -180,11 +324,33 @@
       ],
       "homepage": "https://github.com/felis33/INVESTOR-BENCH",
       "repository": "https://github.com/felis33/INVESTOR-BENCH.git",
-      "ref": "main",
+      "ref": "87e0f7bc83baf7d89fbdc1a51f92458f8d4ee11a",
       "subdir": "",
       "license": "MIT",
       "credit": "InvestorBench authors",
       "citation": "https://github.com/felis33/INVESTOR-BENCH",
+      "adapter": "chat_answer",
+      "official_conditions": {
+        "official_split": "public investor records",
+        "official_scoring_method": "agent-bench public adapter normalized score",
+        "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+        "official_grader_command": "agent-bench-probe --benchmark \"InvestorBench\" --kind public-benchmark",
+        "official_evaluation_config": "tasks/public_benchmarks.json#PB_012",
+        "container_requirements": "agent-bench-external:python3.12 launcher image"
+      },
+      "assets": [
+        {
+          "source": "https://github.com/felis33/INVESTOR-BENCH.git",
+          "revision": "87e0f7bc83baf7d89fbdc1a51f92458f8d4ee11a",
+          "expected_local_path": "data",
+          "validation_rules": {
+            "kind": "repository_paths",
+            "required_paths": [
+              "data"
+            ]
+          }
+        }
+      ],
       "docker": {
         "image": "agent-bench-external:python3.12",
         "setup": [],
@@ -206,11 +372,33 @@
       ],
       "homepage": "https://github.com/LimexAILab/QuantCode-Bench",
       "repository": "https://github.com/LimexAILab/QuantCode-Bench.git",
-      "ref": "main",
+      "ref": "f8bda951addb409a81aa316c00401dbde60774ae",
       "subdir": "",
       "license": "MIT",
       "credit": "Limex AI Lab QuantCode-Bench authors",
       "citation": "https://github.com/LimexAILab/QuantCode-Bench",
+      "adapter": "repo_patch",
+      "official_conditions": {
+        "official_split": "public benchmark tasks",
+        "official_scoring_method": "agent-bench public adapter normalized score",
+        "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+        "official_grader_command": "agent-bench-probe --benchmark \"QuantCode-Bench\" --kind public-benchmark",
+        "official_evaluation_config": "tasks/public_benchmarks.json#PB_013",
+        "container_requirements": "agent-bench-external:python3.12 launcher image"
+      },
+      "assets": [
+        {
+          "source": "https://github.com/LimexAILab/QuantCode-Bench.git",
+          "revision": "f8bda951addb409a81aa316c00401dbde60774ae",
+          "expected_local_path": "data/benchmark_tasks_multiframe.json",
+          "validation_rules": {
+            "kind": "repository_paths",
+            "required_paths": [
+              "data/benchmark_tasks_multiframe.json"
+            ]
+          }
+        }
+      ],
       "docker": {
         "image": "agent-bench-external:python3.12",
         "setup": [],
@@ -233,12 +421,32 @@
       "homepage": "https://huggingface.co/datasets/DianJin/FinMCP-Bench",
       "repository": "https://huggingface.co/datasets/DianJin/FinMCP-Bench",
       "dataset_id": "DianJin/FinMCP-Bench",
-      "ref": "main",
+      "dataset_revision": "fa3ffa6939ee29eb78576cfe0d31888de6085202",
+      "ref": "fa3ffa6939ee29eb78576cfe0d31888de6085202",
       "subdir": "",
       "license": "CC-BY-NC-SA-4.0",
       "credit": "DianJin FinMCP-Bench authors",
       "citation": "https://huggingface.co/datasets/DianJin/FinMCP-Bench",
       "adapter": "static_transcript_reasoning",
+      "official_conditions": {
+        "official_split": "public dataset records",
+        "official_scoring_method": "agent-bench public adapter normalized score",
+        "official_prompt_format": "static transcript reasoning records extracted from the pinned public dataset",
+        "official_grader_command": "agent-bench-probe --benchmark \"FinMCP-Bench\" --kind public-benchmark",
+        "official_evaluation_config": "tasks/public_benchmarks.json#PB_014",
+        "container_requirements": "agent-bench-external:python3.12 launcher image"
+      },
+      "assets": [
+        {
+          "source": "https://huggingface.co/datasets/DianJin/FinMCP-Bench",
+          "revision": "fa3ffa6939ee29eb78576cfe0d31888de6085202",
+          "expected_local_path": ".",
+          "validation_rules": {
+            "kind": "huggingface_dataset",
+            "dataset_id": "DianJin/FinMCP-Bench"
+          }
+        }
+      ],
       "static_conversion": {
         "source_dataset": "DianJin/FinMCP-Bench",
         "uses_historical_tool_messages": true,
@@ -248,40 +456,6 @@
         "image": "agent-bench-external:python3.12",
         "setup": [],
         "command": "agent-bench-probe --benchmark \"FinMCP-Bench\" --kind public-benchmark",
-        "environment": [],
-        "volumes": []
-      }
-    }
-  },
-  {
-    "id": "PB_015",
-    "type": "external_benchmark",
-    "question": "Run FinToolBench locally through the Docker-backed public benchmark adapter.",
-    "benchmark": {
-      "name": "FinToolBench",
-      "group": "Finance",
-      "capabilities": [
-        "tool_call",
-        "external_data_required"
-      ],
-      "homepage": "https://github.com/Double-wk/FinToolBench",
-      "repository": "https://github.com/Double-wk/FinToolBench.git",
-      "ref": "0ec7458e0663ba56ee3d50b64aa9f1cb9097b725",
-      "subdir": "",
-      "license": "Unspecified",
-      "credit": "FinToolBench authors",
-      "citation": "https://github.com/Double-wk/FinToolBench",
-      "dataset_source": {
-        "kind": "upstream_repository",
-        "required_paths": [
-          "tools/tools_all_annotated.jsonl",
-          "data/question/select_data_real_remove_duplicates.jsonl"
-        ]
-      },
-      "docker": {
-        "image": "agent-bench-external:python3.12",
-        "setup": [],
-        "command": "agent-bench-probe --benchmark \"FinToolBench\" --kind public-benchmark",
         "environment": [],
         "volumes": []
       }
@@ -305,12 +479,44 @@
       "license": "MIT",
       "credit": "Vals AI Finance Agent Benchmark authors",
       "citation": "https://github.com/vals-ai/finance-agent-v2",
+      "adapter": "finance_agent_v2_fixture_tools",
+      "official_conditions": {
+        "official_split": "public benchmark tasks",
+        "official_scoring_method": "agent-bench public adapter normalized score",
+        "official_prompt_format": "finance-agent prompts with deterministic CRWD fixture-backed web_search, edgar_search, parse_html_page, retrieve_information, and price_history exposed when fixture canaries pass",
+        "official_grader_command": "agent-bench-probe --benchmark \"Finance Agent v2\" --kind public-benchmark",
+        "official_evaluation_config": "tasks/public_benchmarks.json#PB_016",
+        "container_requirements": "agent-bench-external:python3.12 launcher image"
+      },
+      "assets": [
+        {
+          "source": "https://github.com/vals-ai/finance-agent-v2.git",
+          "revision": "abae841eadd1467f2865f3699a1dfc0774d44d76",
+          "expected_local_path": ".",
+          "validation_rules": {
+            "kind": "repository_clone",
+            "required_tools": [
+              "web_search",
+              "edgar_search",
+              "parse_html_page",
+              "retrieve_information",
+              "price_history"
+            ]
+          }
+        }
+      ],
       "required_tools": [
         "web_search",
         "edgar_search",
         "parse_html_page",
         "retrieve_information",
         "price_history"
+      ],
+      "optional_live_environment": [
+        "VALS_API_KEY",
+        "TAVILY_API_KEY",
+        "SEC_EDGAR_API_KEY",
+        "PRICING_DATA_API_KEY"
       ],
       "docker": {
         "image": "agent-bench-external:python3.12",
@@ -333,11 +539,30 @@
       ],
       "homepage": "https://github.com/yale-nlp/FinanceMath",
       "repository": "https://github.com/yale-nlp/FinanceMath.git",
-      "ref": "main",
+      "ref": "bdddc58655947475da852e241b96a7dbd1478742",
       "subdir": "",
       "license": "Unspecified",
       "credit": "Yale NLP FinanceMath authors",
       "citation": "https://github.com/yale-nlp/FinanceMath",
+      "adapter": "chat_answer",
+      "official_conditions": {
+        "official_split": "public benchmark tasks",
+        "official_scoring_method": "agent-bench public adapter normalized score",
+        "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+        "official_grader_command": "agent-bench-probe --benchmark \"FinanceMath\" --kind public-benchmark",
+        "official_evaluation_config": "tasks/public_benchmarks.json#PB_017",
+        "container_requirements": "agent-bench-external:python3.12 launcher image"
+      },
+      "assets": [
+        {
+          "source": "https://github.com/yale-nlp/FinanceMath.git",
+          "revision": "bdddc58655947475da852e241b96a7dbd1478742",
+          "expected_local_path": ".",
+          "validation_rules": {
+            "kind": "repository_clone"
+          }
+        }
+      ],
       "docker": {
         "image": "agent-bench-external:python3.12",
         "setup": [],

@@ -250,6 +250,64 @@ def test_grade_external_benchmark_treats_unsupported_capability_as_coverage_gap(
     assert result.category == "Coding"
 
 
+@pytest.mark.parametrize(
+    "result_payload",
+    [
+        {
+            "status": "passed",
+            "required_capabilities": ["tool_call"],
+            "exposed_tools": ["final_answer"],
+            "missing_tools": ["benchmark_tool"],
+            "capabilities_verified": True,
+        },
+        {
+            "status": "passed",
+            "required_capabilities": ["tool_call"],
+            "exposed_tools": ["benchmark_tool"],
+            "missing_tools": [],
+            "missing_env": ["BENCHMARK_API_KEY"],
+            "capabilities_verified": True,
+        },
+        {
+            "status": "passed",
+            "required_capabilities": ["tool_call"],
+            "exposed_tools": [],
+            "missing_tools": [],
+            "capabilities_verified": True,
+        },
+    ],
+)
+def test_grade_external_benchmark_promotes_capability_failures(result_payload):
+    task = Task(
+        id="PB_TOOL",
+        category="public_benchmarks",
+        type="external_benchmark",
+        question="Run benchmark",
+        source="public_benchmarks.json",
+    )
+    response = _response(
+        json.dumps(
+            {
+                "status": "passed",
+                "score": 1.0,
+                "error": None,
+                "timed_out": False,
+                "details": {
+                    "group": "Finance",
+                    "result": result_payload,
+                },
+            }
+        )
+    )
+
+    result = grade_external_benchmark(task, response)
+
+    assert result.status == "failed_missing_required_tool"
+    assert result.score == 0.0
+    assert result.passed is False
+    assert result.error == "failed missing required tool"
+
+
 def test_grade_external_benchmark_promotes_all_invalid_nested_status():
     task = Task(
         id="PB_001",
@@ -351,4 +409,39 @@ def test_grade_external_benchmark_maps_completed_zero_score_to_failed_model_answ
 
     assert result.status == "failed_model_answer"
     assert result.answer == "failed_model_answer"
+    assert result.passed is False
+
+
+def test_grade_external_benchmark_preserves_primary_item_model_failure_status():
+    task = Task(
+        id="PB_TOOL",
+        category="public_benchmarks",
+        type="external_benchmark",
+        question="Run benchmark",
+        source="public_benchmarks.json",
+    )
+    response = _response(
+        json.dumps(
+            {
+                "status": "completed",
+                "score": 0.0,
+                "error": None,
+                "timed_out": False,
+                "details": {
+                    "group": "Finance",
+                    "result": {
+                        "status": "completed",
+                        "evaluated_task_count": 1,
+                        "valid_evaluated_task_count": 1,
+                        "status_counts": {"failed_model_tool_use": 1},
+                    },
+                },
+            }
+        )
+    )
+
+    result = grade_external_benchmark(task, response)
+
+    assert result.status == "failed_model_tool_use"
+    assert result.answer == "failed_model_tool_use"
     assert result.passed is False

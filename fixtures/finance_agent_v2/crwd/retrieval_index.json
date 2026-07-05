@@ -1,0 +1,58 @@
+[
+  {
+    "id": "fy2025_ai_native_falcon",
+    "source": "SEC 10-K 2025-01-31",
+    "url": "https://www.sec.gov/Archives/edgar/data/1535527/000153552725000009/crwd-20250131.htm",
+    "section": "Business overview",
+    "text": "CrowdStrike describes Falcon as an AI-native cloud-native cybersecurity platform built with AI at the core. Management presents that architecture and the Security Cloud data advantage as a structural competitive advantage for stopping breaches and delivering modular security capabilities."
+  },
+  {
+    "id": "fy2025_charlotte_ai",
+    "source": "SEC 10-K 2025-01-31",
+    "url": "https://www.sec.gov/Archives/edgar/data/1535527/000153552725000009/crwd-20250131.htm",
+    "section": "Driving AI Innovation and Security",
+    "text": "Charlotte AI is described as a generative AI security analyst for the Falcon platform. The disclosure says it automates and accelerates detection triage, investigation, response workflows, and routine analyst work while operating within customer-defined guardrails."
+  },
+  {
+    "id": "fy2025_ai_workloads",
+    "source": "SEC 10-K 2025-01-31",
+    "url": "https://www.sec.gov/Archives/edgar/data/1535527/000153552725000009/crwd-20250131.htm",
+    "section": "Generative AI and AI security",
+    "text": "Management says CrowdStrike combines AI for cybersecurity with cybersecurity for AI. The filing describes security for generative AI applications and workloads as a business opportunity, including protection for sensitive data and mitigation of AI misconfigurations and vulnerabilities."
+  },
+  {
+    "id": "q3fy2026_aidr_pangea",
+    "source": "SEC 10-Q 2025-10-31",
+    "url": "https://www.sec.gov/Archives/edgar/data/1535527/000153552725000033/crwd-20251031.htm",
+    "section": "Acquisitions",
+    "text": "For the period ended October 31, 2025, CrowdStrike discloses that it acquired Pangea Cyber Corporation on September 26, 2025. Pangea is described as a company that offers AI Detection and Response solutions, supporting Falcon AIDR as a net-new product category and monetization opportunity tied to customers' own AI usage."
+  },
+  {
+    "id": "ai_adoption_tailwind",
+    "source": "SEC filings synthesis",
+    "url": "https://www.sec.gov/Archives/edgar/data/1535527/",
+    "section": "Management framing",
+    "text": "Across the FY2025 10-K and the October 31, 2025 10-Q, management frames AI adoption as a direct demand driver. More enterprise AI usage expands the need to protect AI applications, data, identities, endpoints, and cloud workloads through Falcon modules, Charlotte AI, and AI Detection and Response."
+  },
+  {
+    "id": "adversarial_ai_risk",
+    "source": "SEC 10-K 2025-01-31 and SEC 10-Q 2025-10-31",
+    "url": "https://www.sec.gov/Archives/edgar/data/1535527/",
+    "section": "Risk factors",
+    "text": "CrowdStrike identifies adversarial AI as a risk. Threat actors can use AI and generative AI to move faster, launch more sophisticated attacks, and increase the effectiveness or frequency of malware, hacking, fraud, and phishing activity."
+  },
+  {
+    "id": "regulatory_compliance_ai_risk",
+    "source": "SEC 10-K 2025-01-31 and SEC 10-Q 2025-10-31",
+    "url": "https://www.sec.gov/Archives/edgar/data/1535527/",
+    "section": "Risk factors",
+    "text": "CrowdStrike identifies AI regulatory and compliance risk. The filings discuss increasing governmental and regulatory scrutiny, new AI legal frameworks such as the EU AI Act, privacy and data protection requirements, and the possibility that compliance costs or product changes could increase."
+  },
+  {
+    "id": "rapid_ai_evolution_execution_risk",
+    "source": "SEC 10-K 2025-01-31 and SEC 10-Q 2025-10-31",
+    "url": "https://www.sec.gov/Archives/edgar/data/1535527/",
+    "section": "Risk factors",
+    "text": "CrowdStrike says AI is complex and rapidly evolving. It faces execution risk if competitors incorporate AI more quickly or successfully, if CrowdStrike cannot keep pace with rapidly evolving AI capabilities, or if its own AI investments do not deliver expected benefits."
+  }
+]

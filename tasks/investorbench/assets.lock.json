@@ -1,0 +1,41 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_id": "PB_012",
+  "benchmark_slug": "investorbench",
+  "asset_root": "agent-bench-assets/investorbench",
+  "source": {
+    "repository_url": "https://github.com/felis33/INVESTOR-BENCH.git",
+    "commit": "87e0f7bc83baf7d89fbdc1a51f92458f8d4ee11a",
+    "dataset_id": "",
+    "dataset_revision": "87e0f7bc83baf7d89fbdc1a51f92458f8d4ee11a",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/felis33/INVESTOR-BENCH.git",
+      "revision": "87e0f7bc83baf7d89fbdc1a51f92458f8d4ee11a",
+      "checksum": "",
+      "expected_local_path": "data",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": [
+          "data"
+        ]
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_paths",
+        "required_paths": [
+          "data"
+        ]
+      }
+    ]
+  }
+}

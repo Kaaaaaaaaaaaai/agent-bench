@@ -34,13 +34,21 @@ class OpenAICompatibleClient(ModelClient):
         api_key_env: str | None = None,
         timeout: float = 60.0,
         temperature: float = 0.0,
+        top_p: float | None = None,
         max_tokens: int = DEFAULT_CLIENT_MAX_TOKENS,
+        seed: int | None = None,
+        stop: list[str] | None = None,
+        max_retries: int = 2,
         json_mode: str = "auto",
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.temperature = temperature
+        self.top_p = top_p
         self.max_tokens = max_tokens
+        self.seed = seed
+        self.stop = list(stop or [])
+        self.max_retries = max(0, max_retries)
         self.json_mode = json_mode
         headers: dict[str, str] = {}
         if api_key_env:
@@ -59,6 +67,12 @@ class OpenAICompatibleClient(ModelClient):
             "stream": True,
             "stream_options": {"include_usage": True},
         }
+        if self.top_p is not None:
+            payload["top_p"] = self.top_p
+        if self.seed is not None:
+            payload["seed"] = self.seed
+        if self.stop:
+            payload["stop"] = self.stop
         if self.json_mode in {"auto", "on"}:
             payload["response_format"] = {"type": "json_object"}
         try:
@@ -94,13 +108,29 @@ class OpenAICompatibleClient(ModelClient):
         started: float,
     ) -> tuple[str, dict[str, Any], float | None]:
         last_error: httpx.HTTPStatusError | None = None
-        for variant in _openai_stream_payload_variants(payload, self.json_mode):
-            try:
-                return await self._stream_once(variant, started)
-            except httpx.HTTPStatusError as exc:
-                last_error = exc
-                if exc.response.status_code not in {400, 404, 422}:
-                    raise
+        variants = _openai_stream_payload_variants(payload, self.json_mode)
+        for attempt in range(self.max_retries + 1):
+            retryable_failure = False
+            for variant in variants:
+                try:
+                    return await self._stream_once(variant, started)
+                except httpx.HTTPStatusError as exc:
+                    last_error = exc
+                    if exc.response.status_code in {400, 404, 422}:
+                        continue
+                    if exc.response.status_code not in {429, 500, 502, 503, 504}:
+                        raise
+                    retryable_failure = True
+                    break
+                except httpx.HTTPError:
+                    if attempt >= self.max_retries:
+                        raise
+                    retryable_failure = True
+                    break
+            if retryable_failure and attempt < self.max_retries:
+                await asyncio.sleep(min(2.0, 0.25 * (attempt + 1)))
+                continue
+            break
         if last_error is not None:
             raise last_error
         return "", {}, None
@@ -287,7 +317,11 @@ def make_client(
     api_key_env: str | None,
     timeout: float,
     temperature: float,
+    top_p: float | None,
     max_tokens: int,
+    seed: int | None,
+    stop: list[str] | None,
+    max_retries: int,
     json_mode: str,
 ) -> ModelClient:
     if provider == "mock":
@@ -301,7 +335,11 @@ def make_client(
             api_key_env=api_key_env,
             timeout=timeout,
             temperature=temperature,
+            top_p=top_p,
             max_tokens=max_tokens,
+            seed=seed,
+            stop=stop,
+            max_retries=max_retries,
             json_mode=json_mode,
         )
     if provider == "ollama-native":

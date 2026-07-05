@@ -1,0 +1,83 @@
+{
+  "version": "agent-bench.manifest.v1",
+  "id": "PB_012",
+  "display_name": "InvestorBench",
+  "task_group": "Finance",
+  "description": "Run InvestorBench locally through the Docker-backed public benchmark adapter.",
+  "homepage_url": "https://github.com/felis33/INVESTOR-BENCH",
+  "official_leaderboard_url": "",
+  "source": {
+    "repository_url": "https://github.com/felis33/INVESTOR-BENCH.git",
+    "commit": "87e0f7bc83baf7d89fbdc1a51f92458f8d4ee11a",
+    "dataset_id": "",
+    "dataset_revision": "87e0f7bc83baf7d89fbdc1a51f92458f8d4ee11a",
+    "subdir": ""
+  },
+  "license": "MIT",
+  "credit": "InvestorBench authors",
+  "citation": "https://github.com/felis33/INVESTOR-BENCH",
+  "official_conditions": {
+    "official_split": "public investor records",
+    "official_scoring_method": "agent-bench public adapter normalized score",
+    "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+    "official_grader_command": "agent-bench-probe --benchmark \"InvestorBench\" --kind public-benchmark",
+    "official_evaluation_config": "tasks/investorbench/configs/official.json",
+    "container_requirements": "agent-bench-external:python3.12 launcher image"
+  },
+  "assets": [
+    {
+      "source": "https://github.com/felis33/INVESTOR-BENCH.git",
+      "revision": "87e0f7bc83baf7d89fbdc1a51f92458f8d4ee11a",
+      "checksum": "",
+      "expected_local_path": "data",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": [
+          "data"
+        ]
+      }
+    }
+  ],
+  "container": {
+    "image": "agent-bench-external:python3.12",
+    "build_context": ".",
+    "dockerfile": "harness/Dockerfile",
+    "command": "bash /benchmark/task/harness/run.sh",
+    "environment_allowed": [],
+    "mounts": [],
+    "network": "model_proxy",
+    "cpus": null,
+    "memory": "",
+    "pids_limit": 1024,
+    "timeout_seconds": 21600.0,
+    "requires_nested_docker": false,
+    "requires_host_docker_socket": false,
+    "run_as_user": "10001:10001"
+  },
+  "adapter": {
+    "module": "",
+    "entry_point": "harness/run.sh",
+    "expected_output_files": [
+      "agent_bench_result.json"
+    ],
+    "result_parser": "agent_bench_result_json"
+  },
+  "scoring": {
+    "raw_score_field": "score",
+    "max_score": 1.0,
+    "normalization": "fraction_to_0_100",
+    "direction": "higher_is_better"
+  },
+  "reporting": {
+    "category_label": "Finance",
+    "display_order": 7,
+    "credit": "InvestorBench authors",
+    "citation": "https://github.com/felis33/INVESTOR-BENCH",
+    "license": "MIT"
+  },
+  "capabilities": [
+    "chat_answer",
+    "external_data_required"
+  ]
+}

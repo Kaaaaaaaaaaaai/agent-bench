@@ -9,22 +9,37 @@ mkdir -p "${AGENT_BENCH_OUTPUT_DIR}"
 repo_dir="/workspace/repo"
 export GIT_LFS_SKIP_SMUDGE="${AGENT_BENCH_GIT_LFS_SKIP_SMUDGE:-1}"
 
+asset_cache_key="${AGENT_BENCH_ASSET_CACHE_KEY:-}"
+asset_cache_root="${AGENT_BENCH_ASSET_ROOT:-/benchmark/assets}"
+copy_cached_assets() {
+  local source_dir=""
+  if [[ -n "${asset_cache_key}" && -d "${asset_cache_root}/${asset_cache_key}" ]]; then
+    source_dir="${asset_cache_root}/${asset_cache_key}"
+  elif [[ -d "${asset_cache_root}" ]]; then
+    source_dir="${asset_cache_root}"
+  fi
+  if [[ -z "${source_dir}" ]] || [[ -z "$(find "${source_dir}" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+    return 1
+  fi
+  mkdir -p "${repo_dir}"
+  cp -a "${source_dir}/." "${repo_dir}/"
+  return 0
+}
+
 if [[ ! -d "${repo_dir}/.git" ]]; then
-  repository_ref="${AGENT_BENCH_REPOSITORY_REF:-main}"
-  if ! git clone --depth 1 --branch "${repository_ref}" "${AGENT_BENCH_REPOSITORY}" "${repo_dir}"; then
-    rm -rf "${repo_dir}"
-    echo "Unable to clone ${AGENT_BENCH_REPOSITORY} branch/tag ${repository_ref}; retrying default branch plus exact checkout." >&2
-    git clone --depth 1 "${AGENT_BENCH_REPOSITORY}" "${repo_dir}"
-    git -C "${repo_dir}" fetch --depth 1 origin "${repository_ref}"
-    git -C "${repo_dir}" checkout --detach "${repository_ref}"
+  if ! copy_cached_assets; then
+    repository_ref="${AGENT_BENCH_REPOSITORY_REF:-main}"
+    if ! git clone --depth 1 --branch "${repository_ref}" "${AGENT_BENCH_REPOSITORY}" "${repo_dir}"; then
+      rm -rf "${repo_dir}"
+      echo "Unable to clone ${AGENT_BENCH_REPOSITORY} branch/tag ${repository_ref}; retrying default branch plus exact checkout." >&2
+      git clone --depth 1 "${AGENT_BENCH_REPOSITORY}" "${repo_dir}"
+      git -C "${repo_dir}" fetch --depth 1 origin "${repository_ref}"
+      git -C "${repo_dir}" checkout --detach "${repository_ref}"
+    fi
   fi
 fi
 
-asset_cache_key="${AGENT_BENCH_ASSET_CACHE_KEY:-}"
-asset_cache_root="${AGENT_BENCH_ASSET_ROOT:-/asset-cache}"
-if [[ -n "${asset_cache_key}" && -d "${asset_cache_root}/${asset_cache_key}" ]]; then
-  cp -a "${asset_cache_root}/${asset_cache_key}/." "${repo_dir}/"
-fi
+copy_cached_assets || true
 
 cd "${repo_dir}"
 if [[ "${AGENT_BENCH_GIT_LFS_PULL:-0}" == "1" ]] && command -v git-lfs >/dev/null 2>&1; then

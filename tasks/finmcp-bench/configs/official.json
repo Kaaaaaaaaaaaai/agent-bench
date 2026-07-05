@@ -1,0 +1,17 @@
+{
+  "schema_version": "agent-bench.benchmark-config.v1",
+  "benchmark_id": "PB_014",
+  "benchmark_slug": "finmcp-bench",
+  "display_name": "FinMCP-Bench",
+  "source_descriptor": "tasks/finmcp-bench/manifest.json",
+  "legacy_adapter": "static_transcript_reasoning",
+  "official_conditions": {
+    "official_split": "public dataset records",
+    "official_scoring_method": "agent-bench public adapter normalized score",
+    "official_prompt_format": "static transcript reasoning records extracted from the pinned public dataset",
+    "official_grader_command": "agent-bench-probe --benchmark \"FinMCP-Bench\" --kind public-benchmark",
+    "official_evaluation_config": "tasks/finmcp-bench/configs/official.json",
+    "container_requirements": "agent-bench-external:python3.12 launcher image"
+  },
+  "container_command": "bash /benchmark/task/harness/run.sh"
+}

@@ -1,0 +1,50 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_id": "PB_001",
+  "benchmark_slug": "swe-bench",
+  "asset_root": "agent-bench-assets/swe-bench",
+  "source": {
+    "repository_url": "https://github.com/SWE-bench/SWE-bench.git",
+    "commit": "f7bbbb2ccdf479001d6467c9e34af59e44a840f9",
+    "dataset_id": "princeton-nlp/SWE-bench",
+    "dataset_revision": "e48e2bd1e9fecd5bbd641e9414ac59da9f2e69f6",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/SWE-bench/SWE-bench.git",
+      "revision": "f7bbbb2ccdf479001d6467c9e34af59e44a840f9",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_clone"
+      }
+    },
+    {
+      "source": "https://huggingface.co/datasets/princeton-nlp/SWE-bench",
+      "revision": "e48e2bd1e9fecd5bbd641e9414ac59da9f2e69f6",
+      "checksum": "",
+      "expected_local_path": "huggingface:princeton-nlp/SWE-bench",
+      "required": true,
+      "validation_rules": {
+        "kind": "huggingface_dataset",
+        "dataset_id": "princeton-nlp/SWE-bench"
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_clone"
+      },
+      {
+        "kind": "huggingface_dataset",
+        "dataset_id": "princeton-nlp/SWE-bench"
+      }
+    ]
+  }
+}

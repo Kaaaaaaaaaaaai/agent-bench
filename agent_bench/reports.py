@@ -16,6 +16,7 @@ from agent_bench.statuses import (
     FAILED_MISSING_REQUIRED_TOOL,
     FAILED_MODEL_ANSWER,
     FAILED_MODEL_FORMAT,
+    FAILED_MODEL_MISSING_ARTIFACT,
     FAILED_MODEL_TOOL_USE,
     FAILED_TOKEN_BUDGET,
     INVALID_EVALUATION_STATUSES,
@@ -41,6 +42,7 @@ RESULT_FIELDS = [
     "suite_id",
     "suite_name",
     "category",
+    "task_group",
     "kind",
     "score",
     "max_score",
@@ -58,7 +60,33 @@ RESULT_FIELDS = [
     "status",
     "run_status",
     "score_status",
+    "official_equivalent",
+    "score_mode",
+    "score_modes",
     "included_in_official_score",
+    "coverage_status",
+    "required_capabilities",
+    "supported_capabilities",
+    "capabilities_verified",
+    "required_tools",
+    "exposed_tools",
+    "missing_tools",
+    "missing_env",
+    "missing_assets_count",
+    "setup_details",
+    "docker_image",
+    "container_name",
+    "network_mode",
+    "docker_socket_mount",
+    "output_mount",
+    "asset_cache_mount",
+    "catalog_checkout_path",
+    "target_checkout_path",
+    "benchmark_checkout_path",
+    "homepage",
+    "license",
+    "credit",
+    "citation",
     "blocker_type",
     "raw_score",
     "valid_score",
@@ -102,111 +130,408 @@ def update_latest(timestamp_dir: Path, latest_dir: Path) -> None:
 
 def render_summary_html(summary: dict[str, Any], results: list[GradeResult]) -> str:
     metadata = summary.get("metadata", {})
-    category_counts = summary.get("category_counts", {})
     benchmark_results = summary.get("benchmark_results", [])
+    coverage = summary.get("coverage_summary", summary.get("coverage", {}))
+    target = metadata.get("target_model") if isinstance(metadata.get("target_model"), dict) else {}
+    judge = metadata.get("judge") if isinstance(metadata.get("judge"), dict) else {}
+    run_id = metadata.get("run_id") or metadata.get("output_dir") or "agent-bench-run"
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Agent Bench Summary</title>
+  <title>Agent Bench Report</title>
   <style>
     :root {{
       color-scheme: light;
-      --ink: #172033;
+      --ink: #1d2433;
       --muted: #667085;
-      --line: #d7dde8;
-      --panel: #f7f9fc;
-      --blue: #276ef1;
-      --green: #12805c;
-      --gold: #b7791f;
+      --line: #d9e0ea;
+      --panel: #f6f8fb;
+      --panel-strong: #eef3f8;
+      --blue: #2563eb;
+      --green: #12715b;
+      --amber: #996515;
       --red: #b42318;
     }}
     * {{ box-sizing: border-box; }}
-    body {{ margin: 0; font: 14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; color: var(--ink); background: #ffffff; }}
-    header {{ padding: 26px 32px 18px; border-bottom: 1px solid var(--line); }}
-    h1 {{ margin: 0 0 4px; font-size: 28px; letter-spacing: 0; }}
-    h2 {{ margin: 26px 0 12px; font-size: 18px; }}
-    main {{ max-width: 1180px; margin: 0 auto; padding: 22px 28px 44px; }}
+    body {{ margin: 0; font: 14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; color: var(--ink); background: #fff; }}
+    header {{ padding: 24px 32px 18px; border-bottom: 1px solid var(--line); background: var(--panel); }}
+    h1 {{ margin: 0 0 6px; font-size: 28px; letter-spacing: 0; }}
+    h2 {{ margin: 28px 0 12px; font-size: 18px; }}
+    h3 {{ margin: 18px 0 8px; font-size: 15px; }}
+    main {{ max-width: 1240px; margin: 0 auto; padding: 22px 28px 44px; }}
+    a {{ color: var(--blue); }}
     .muted {{ color: var(--muted); }}
-    .note {{ color: var(--muted); margin: -4px 0 12px; max-width: 920px; }}
-    .cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 16px 0 24px; }}
-    .card {{ border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: var(--panel); }}
+    .note {{ color: var(--muted); margin: -4px 0 12px; max-width: 960px; }}
+    .header-grid {{ display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: end; }}
+    .headline-score {{ text-align: right; }}
+    .headline-score strong {{ display: block; font-size: 30px; }}
+    .cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 16px 0 24px; }}
+    .card {{ border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: #fff; }}
     .card span {{ display: block; color: var(--muted); font-size: 12px; }}
     .card strong {{ display: block; margin-top: 6px; font-size: 23px; }}
     .grid {{ display: grid; grid-template-columns: 390px minmax(0, 1fr); gap: 24px; align-items: start; }}
     table {{ width: 100%; border-collapse: collapse; border: 1px solid var(--line); }}
     th, td {{ padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }}
-    th {{ background: var(--panel); white-space: nowrap; }}
+    th {{ background: var(--panel-strong); white-space: nowrap; }}
     td {{ overflow-wrap: anywhere; }}
-    .group-row td {{ background: #fff4f5; color: #c9334c; font-weight: 700; }}
+    .group-row td {{ background: var(--panel); color: var(--ink); font-weight: 700; }}
     .score-cell {{ font-weight: 700; text-align: right; }}
-    .status-pass {{ color: var(--green); font-weight: 700; }}
-    .status-fail {{ color: var(--red); font-weight: 700; }}
-    .radar {{ border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 12px; }}
+    .status-success, .status-passed {{ color: var(--green); font-weight: 700; }}
+    .status-failed, .status-error {{ color: var(--red); font-weight: 700; }}
+    .status-skipped {{ color: var(--amber); font-weight: 700; }}
+    .radar {{ border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 12px; }}
     .metadata {{ display: grid; grid-template-columns: 190px 1fr; gap: 6px 12px; }}
-    @media (max-width: 820px) {{ main {{ padding: 18px 14px 34px; }} .grid {{ grid-template-columns: 1fr; }} .metadata {{ grid-template-columns: 1fr; }} }}
+    .metadata dt {{ color: var(--muted); }}
+    .metadata dd {{ margin: 0; }}
+    .table-wrap {{ overflow-x: auto; }}
+    .pill {{ display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 2px 7px; background: #fff; }}
+    @media (max-width: 820px) {{ main {{ padding: 18px 14px 34px; }} .grid, .header-grid {{ grid-template-columns: 1fr; }} .headline-score {{ text-align: left; }} .metadata {{ grid-template-columns: 1fr; }} }}
   </style>
 </head>
 <body>
   <header>
-    <h1>Agent Bench Summary</h1>
-    <div class="muted">{html.escape(str(metadata.get("model", "unknown model")))} · {html.escape(str(metadata.get("created_at_utc", "")))}</div>
+    <div class="header-grid">
+      <div>
+        <h1>Agent Bench Report</h1>
+        <div class="muted">Run {html.escape(str(run_id))} · {html.escape(str(metadata.get("created_at_utc", "")))}</div>
+        <div class="muted">{html.escape(str(target.get("model") or metadata.get("model", "unknown model")))} · {html.escape(str(target.get("base_url") or metadata.get("base_url", "")))}</div>
+        <div class="muted">Judge {html.escape(str(judge.get("model") or judge.get("provider") or "none"))} · fallback {html.escape("yes" if judge.get("fallback_used") else "no")} · commit {html.escape(str(metadata.get("git_commit", ""))[:12])}</div>
+      </div>
+      <div class="headline-score">
+        <span class="muted">Scored-Suite Score</span>
+        <strong>{_format_percent(summary.get("score_valid_tasks_only", summary.get("total_score")))}</strong>
+        <span class="muted">Conservative selected-suite {_format_rate(summary.get("conservative_all_suite_score"))}</span>
+        <span class="muted">{html.escape(_coverage_label(coverage))}</span>
+      </div>
+    </div>
   </header>
   <main>
-    {_metric_cards(summary)}
+    {_report_metric_cards(summary)}
     <section class="grid">
       <div>
-        <h2>Average Score Radar</h2>
-        <div class="radar">{_radar_svg(_average_scores(summary))}</div>
+        <h2>Radar Chart</h2>
+        <div class="radar">{_radar_svg(summary.get("category_scores", {}))}</div>
       </div>
       <div>
-        <h2>Category Metrics</h2>
-        {_category_table(category_counts)}
+        <h2>Coverage By Category</h2>
+        {_coverage_table(coverage)}
       </div>
     </section>
     <section>
       <h2>Benchmark Scores</h2>
-      <p class="note">Scores are per benchmark row from the local graded benchmark sample executed by each descriptor. Repository readiness and endpoint checks are recorded in each task result.</p>
-      {_benchmark_table(benchmark_results, str(metadata.get("model", "Model")))}
+      <p class="note">Invalid setup, asset, judge, timeout, and unsupported statuses are shown here and excluded from the official score.</p>
+      {_report_benchmark_table(benchmark_results, metadata)}
     </section>
     <section>
-      <h2>Profile Coverage</h2>
-      {_profile_table(summary.get("profile_results"))}
+      <h2>Metadata</h2>
+      {_report_metadata_tables(metadata, benchmark_results)}
     </section>
     <section>
-      <h2>Excluded Suites</h2>
-      {_excluded_suite_table(summary.get("excluded_suites"))}
+      <h2>Failures And Status</h2>
+      {_report_failure_table(benchmark_results)}
     </section>
     <section>
-      <h2>Skipped Suites</h2>
-      {_skipped_suite_table(summary.get("skipped_suites"))}
-    </section>
-    <section>
-      <h2>Status Distribution</h2>
-      {_status_distribution_table(summary)}
-    </section>
-    <section>
-      <h2>Timing</h2>
-      <p class="note">{html.escape(str(summary.get("timing_note", "")))}</p>
-      {_timing_table(summary)}
-    </section>
-    <section>
-      <h2>Run Metadata</h2>
-      {_metadata_table(metadata)}
-    </section>
-    <section>
-      <h2>Task Results</h2>
-      {_results_table(results)}
-    </section>
-    <section>
-      <h2>Benchmark Citations</h2>
-      {_citation_table(benchmark_results)}
+      <h2>Credits Citations Licenses</h2>
+      {_report_credits_table(benchmark_results)}
     </section>
   </main>
 </body>
 </html>
 """
+
+
+def _coverage_label(coverage: Any) -> str:
+    if not isinstance(coverage, dict):
+        return "coverage n/a"
+    scored = coverage.get("successfully_scored_benchmarks", coverage.get("valid_judged_suite_count"))
+    total = coverage.get("total_configured_benchmarks", coverage.get("suite_count"))
+    if isinstance(scored, int) and isinstance(total, int):
+        return f"{scored}/{total} scored"
+    return "coverage n/a"
+
+
+def _report_metric_cards(summary: dict[str, Any]) -> str:
+    coverage = summary.get("coverage_summary", {})
+    metadata = summary.get("metadata", {})
+    judge = metadata.get("judge") if isinstance(metadata.get("judge"), dict) else {}
+    cards = [
+        ("Scored-Suite", _format_percent(summary.get("score_valid_tasks_only", summary.get("total_score")))),
+        ("Official Valid", f"{coverage.get('successfully_scored_benchmarks', summary.get('valid_task_count', 0))}"),
+        ("Coverage", _format_rate(coverage.get("coverage_rate", summary.get("suite_coverage_rate")))),
+        ("Failed", f"{coverage.get('failed_benchmarks', 0)}"),
+        ("Judge", str(judge.get("model") or judge.get("provider") or "none")),
+        ("Duration", _format_seconds(summary.get("total_run_duration_seconds"))),
+    ]
+    return '<section class="cards">' + "".join(
+        f'<div class="card"><span>{html.escape(label)}</span><strong>{html.escape(value)}</strong></div>'
+        for label, value in cards
+    ) + "</section>"
+
+
+def _coverage_table(coverage: Any) -> str:
+    if not isinstance(coverage, dict):
+        return "<table><tbody><tr><td>No coverage data recorded.</td></tr></tbody></table>"
+    per_category = coverage.get("per_category")
+    if not isinstance(per_category, dict) or not per_category:
+        return "<table><tbody><tr><td>No category coverage data recorded.</td></tr></tbody></table>"
+    rows = []
+    for category, data in sorted(per_category.items()):
+        if not isinstance(data, dict):
+            continue
+        rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(category))}</td>"
+            f"<td>{int(data.get('total_configured_benchmarks', 0))}</td>"
+            f"<td>{int(data.get('successfully_scored_benchmarks', 0))}</td>"
+            f"<td>{int(data.get('failed_benchmarks', 0))}</td>"
+            f"<td>{_format_rate(data.get('coverage_rate'))}</td>"
+            "</tr>"
+        )
+    return (
+        "<table><thead><tr><th>Category</th><th>Configured</th><th>Scored</th>"
+        "<th>Failed</th><th>Coverage</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def _report_benchmark_table(benchmark_results: Any, metadata: dict[str, Any]) -> str:
+    if not isinstance(benchmark_results, list) or not benchmark_results:
+        return "<table><tbody><tr><td>No benchmark rows were recorded.</td></tr></tbody></table>"
+    artifact_paths = metadata.get("artifact_paths") if isinstance(metadata.get("artifact_paths"), dict) else {}
+    rows: list[str] = []
+    current_group: str | None = None
+    for row in benchmark_results:
+        if not isinstance(row, dict):
+            continue
+        group = str(row.get("group", "Other"))
+        if group != current_group:
+            rows.append(f'<tr class="group-row"><td colspan="26">{html.escape(group)}</td></tr>')
+            current_group = group
+        status = str(row.get("status") or "")
+        status_class = _status_class(status)
+        setup_details = row.get("setup_details")
+        rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(row.get('benchmark', '')))}</td>"
+            f"<td>{html.escape(group)}</td>"
+            f'<td class="{status_class}">{html.escape(status)}</td>'
+            f"<td>{_format_percent(row.get('raw_score'))}</td>"
+            f"<td>{_format_percent(row.get('score'))}</td>"
+            f"<td>{'yes' if row.get('included_in_official_score') else 'no'}</td>"
+            f"<td>{'scored' if row.get('included_in_official_score') else 'excluded'}</td>"
+            f"<td>{'yes' if row.get('capabilities_verified') else 'no'}</td>"
+            f"<td>{html.escape(_short_json(row.get('required_capabilities')))}</td>"
+            f"<td>{html.escape(_short_json(row.get('supported_capabilities')))}</td>"
+            f"<td>{html.escape(_short_json(row.get('required_tools')))}</td>"
+            f"<td>{html.escape(_short_json(row.get('exposed_tools')))}</td>"
+            f"<td>{html.escape(_short_json(row.get('missing_tools')))}</td>"
+            f"<td>{html.escape(_short_json(row.get('missing_env')))}</td>"
+            f"<td>{int(row.get('missing_assets_count') or 0)}</td>"
+            f"<td>{html.escape(str(row.get('docker_image') or ''))}</td>"
+            f"<td>{html.escape(str(row.get('container_name') or ''))}</td>"
+            f"<td>{html.escape(str(row.get('network_mode') or ''))}</td>"
+            f"<td>{html.escape(_short_json(row.get('docker_socket_mount')))}</td>"
+            f"<td>{html.escape(_short_json(row.get('output_mount')))}</td>"
+            f"<td>{html.escape(_short_json(row.get('asset_cache_mount')))}</td>"
+            f"<td>{html.escape(_short_json(setup_details))}</td>"
+            f"<td>{_format_seconds(row.get('duration_seconds'))}</td>"
+            f"<td>{_artifact_link(artifact_paths.get('raw_responses'), 'raw')}</td>"
+            f"<td>{_artifact_link(artifact_paths.get('graded_results'), 'graded')}</td>"
+            f"<td>{html.escape(_display_error(str(row.get('error_details') or row.get('error') or '')))}</td>"
+            "</tr>"
+        )
+    return (
+        '<div class="table-wrap"><table><thead><tr><th>Benchmark</th><th>Task Group</th>'
+        "<th>Status</th><th>Raw Score</th><th>Normalized 0-100</th><th>Official Score</th>"
+        "<th>Coverage</th><th>Capabilities Verified</th><th>Required Capabilities</th>"
+        "<th>Supported Capabilities</th><th>Required Tools</th><th>Exposed Tools</th>"
+        "<th>Missing Tools</th><th>Missing Env</th><th>Missing Assets</th>"
+        "<th>Image</th><th>Container</th><th>Network</th><th>Docker Socket</th>"
+        "<th>Output Mount</th><th>Asset Cache</th><th>Setup Details</th>"
+        "<th>Duration</th><th>Raw Responses</th><th>Graded Results</th><th>Notes</th>"
+        f"</tr></thead><tbody>{''.join(rows)}</tbody></table></div>"
+    )
+
+
+def _report_metadata_tables(metadata: dict[str, Any], benchmark_results: Any) -> str:
+    target = metadata.get("target_model") if isinstance(metadata.get("target_model"), dict) else {}
+    judge = metadata.get("judge") if isinstance(metadata.get("judge"), dict) else {}
+    rows = {
+        "run_id": metadata.get("run_id"),
+        "git_commit": metadata.get("git_commit"),
+        "target_provider": target.get("provider_type", metadata.get("provider")),
+        "target_base_url": target.get("base_url", metadata.get("base_url")),
+        "target_model": target.get("model", metadata.get("model")),
+        "temperature": target.get("temperature", metadata.get("temperature")),
+        "top_p": target.get("top_p", metadata.get("top_p")),
+        "max_tokens": target.get("max_tokens", metadata.get("max_tokens")),
+        "tool_parser": target.get("tool_parser", metadata.get("tool_parser")),
+        "context_window": target.get("context_window", metadata.get("context_window")),
+        "judge_provider": judge.get("provider"),
+        "judge_base_url": judge.get("base_url"),
+        "judge_model": judge.get("model"),
+        "judge_temperature": judge.get("temperature"),
+        "judge_timeout": judge.get("timeout_seconds"),
+        "judge_fallback_used": judge.get("fallback_used"),
+        "allow_host_docker_socket": metadata.get("allow_host_docker_socket"),
+    }
+    manifest_rows: list[str] = []
+    if isinstance(benchmark_results, list):
+        for row in benchmark_results:
+            if not isinstance(row, dict):
+                continue
+            manifest = row.get("manifest") if isinstance(row.get("manifest"), dict) else {}
+            source = row.get("source") if isinstance(row.get("source"), dict) else {}
+            official = row.get("official_conditions") if isinstance(row.get("official_conditions"), dict) else {}
+            assets = row.get("asset_refs") if isinstance(row.get("asset_refs"), list) else []
+            manifest_rows.append(
+                "<tr>"
+                f"<td>{html.escape(str(row.get('benchmark', '')))}</td>"
+                f"<td>{html.escape(str(row.get('docker_image') or manifest.get('container', {}).get('image', '')))}</td>"
+                f"<td>{html.escape(_source_ref(source))}</td>"
+                f"<td>{html.escape(_asset_summary(assets))}</td>"
+                f"<td>{html.escape(str(official.get('official_split', '')))}</td>"
+                f"<td>{html.escape(str(official.get('official_scoring_method', '')))}</td>"
+                "</tr>"
+            )
+    manifest_body = "".join(manifest_rows) or '<tr><td colspan="6">No manifest metadata recorded.</td></tr>'
+    return (
+        f"{_metadata_definition_list(rows)}"
+        "<h3>Benchmark Manifests</h3>"
+        "<table><thead><tr><th>Benchmark</th><th>Container</th><th>Source Ref</th><th>Assets</th>"
+        "<th>Official Split</th><th>Scoring</th></tr></thead>"
+        f"<tbody>{manifest_body}</tbody></table>"
+    )
+
+
+def _report_failure_table(benchmark_results: Any) -> str:
+    if not isinstance(benchmark_results, list):
+        return "<table><tbody><tr><td>No failures recorded.</td></tr></tbody></table>"
+    rows = []
+    for row in benchmark_results:
+        if not isinstance(row, dict) or row.get("included_in_official_score"):
+            continue
+        status = str(row.get("status") or "")
+        rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(row.get('benchmark', '')))}</td>"
+            f"<td>{html.escape(status)}</td>"
+            f"<td>{html.escape(str(row.get('blocker_type') or ''))}</td>"
+            f"<td>{html.escape(_display_error(str(row.get('error_details') or row.get('error') or '')))}</td>"
+            "<td>yes</td>"
+            f"<td>{html.escape(_suggested_action(row))}</td>"
+            "</tr>"
+        )
+    if not rows:
+        rows.append('<tr><td colspan="6">No failed or skipped benchmarks.</td></tr>')
+    return (
+        "<table><thead><tr><th>Benchmark</th><th>Status Code</th><th>Failure Class</th>"
+        "<th>Explanation</th><th>Excluded</th><th>Suggested Action</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def _report_credits_table(benchmark_results: Any) -> str:
+    if not isinstance(benchmark_results, list) or not benchmark_results:
+        return "<table><tbody><tr><td>No credits recorded.</td></tr></tbody></table>"
+    rows = []
+    for row in benchmark_results:
+        if not isinstance(row, dict):
+            continue
+        source = row.get("source") if isinstance(row.get("source"), dict) else {}
+        homepage = str(row.get("homepage") or "")
+        leaderboard = str(row.get("official_leaderboard_url") or "")
+        rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(row.get('benchmark', '')))}</td>"
+            f"<td>{_link(homepage, homepage or 'n/a')}</td>"
+            f"<td>{html.escape(_source_ref(source))}</td>"
+            f"<td>{html.escape(str(row.get('license') or ''))}</td>"
+            f"<td>{html.escape(str(row.get('credit') or ''))}</td>"
+            f"<td>{_link(str(row.get('citation') or ''), str(row.get('citation') or ''))}</td>"
+            f"<td>{_link(leaderboard, leaderboard)}</td>"
+            "</tr>"
+        )
+    return (
+        "<table><thead><tr><th>Benchmark</th><th>Homepage</th><th>Repository/Dataset Ref</th>"
+        "<th>License</th><th>Credit</th><th>Citation</th><th>Leaderboard</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def _metadata_definition_list(values: dict[str, Any]) -> str:
+    rows = []
+    for key, value in values.items():
+        rows.append(f"<dt>{html.escape(str(key))}</dt><dd>{html.escape(str(value))}</dd>")
+    return f'<dl class="metadata">{"".join(rows)}</dl>'
+
+
+def _status_class(status: str) -> str:
+    normalized = status.lower()
+    if normalized in {"passed", "success", "success_with_warnings"}:
+        return "status-success"
+    if normalized.startswith("skipped"):
+        return "status-skipped"
+    if normalized.startswith("failed") or normalized in {"timed_out", "cancelled"}:
+        return "status-failed"
+    return ""
+
+
+def _artifact_link(path: Any, label: str) -> str:
+    if not isinstance(path, str) or not path:
+        return "n/a"
+    href = html.escape(Path(path).name, quote=True)
+    return f'<a href="{href}">{html.escape(label)}</a>'
+
+
+def _source_ref(source: dict[str, Any]) -> str:
+    repository = str(source.get("repository_url") or "")
+    commit = str(source.get("commit") or "")
+    dataset = str(source.get("dataset_id") or "")
+    revision = str(source.get("dataset_revision") or "")
+    if repository:
+        return f"{repository}@{commit or 'un-pinned'}"
+    if dataset:
+        return f"{dataset}@{revision or 'un-pinned'}"
+    return ""
+
+
+def _asset_summary(assets: list[Any]) -> str:
+    if not assets:
+        return ""
+    labels = []
+    for asset in assets[:3]:
+        if not isinstance(asset, dict):
+            continue
+        path = asset.get("expected_local_path") or asset.get("source") or "asset"
+        revision = asset.get("revision") or asset.get("ref") or ""
+        labels.append(f"{path}@{revision}" if revision else str(path))
+    if len(assets) > 3:
+        labels.append(f"+{len(assets) - 3} more")
+    return "; ".join(labels)
+
+
+def _suggested_action(row: dict[str, Any]) -> str:
+    manifest = row.get("manifest") if isinstance(row.get("manifest"), dict) else {}
+    result = row.get("result") if isinstance(row.get("result"), dict) else {}
+    validation = result.get("validation") if isinstance(result.get("validation"), dict) else {}
+    issues = validation.get("issues") if isinstance(validation.get("issues"), list) else []
+    for issue in issues:
+        if isinstance(issue, dict) and issue.get("suggestion"):
+            return str(issue["suggestion"])
+    if manifest:
+        return "Fix the benchmark manifest and rerun validation."
+    return "Inspect graded_results.jsonl and benchmark logs."
+
+
+def _link(url: str, label: str) -> str:
+    if not url:
+        return ""
+    if url.startswith(("http://", "https://")):
+        return f'<a href="{html.escape(url, quote=True)}">{html.escape(label or url)}</a>'
+    return html.escape(label or url)
 
 
 def _write_results_csv(path: Path, results: list[GradeResult]) -> None:
@@ -223,11 +548,58 @@ def _result_csv_row(result: GradeResult) -> dict[str, Any]:
     details = result.details if isinstance(result.details, dict) else {}
     payload = details.get("result") if isinstance(details.get("result"), dict) else {}
     row["status"] = _result_status(result)
+    row["answer"] = _csv_answer(result, payload)
     row["suite_id"] = details.get("suite_id", result.task_id)
     row["suite_name"] = _result_benchmark_name(result)
+    row["task_group"] = details.get("group", result.category)
     row["run_status"] = _run_status(result)
     row["score_status"] = _score_status(result)
-    row["included_in_official_score"] = _result_status(result) not in INVALID_EVALUATION_STATUSES
+    row["official_equivalent"] = payload.get("official_equivalent", details.get("official_equivalent"))
+    row["score_mode"] = payload.get("score_mode", details.get("score_mode"))
+    row["score_modes"] = _json_cell(payload.get("score_modes", details.get("score_modes", [])))
+    row["included_in_official_score"] = _included_in_official_score(result)
+    row["coverage_status"] = "scored" if row["included_in_official_score"] else "excluded"
+    row["required_capabilities"] = _json_cell(payload.get("required_capabilities", details.get("required_capabilities", [])))
+    row["supported_capabilities"] = _json_cell(payload.get("supported_capabilities", []))
+    row["capabilities_verified"] = _capabilities_verified(result)
+    row["required_tools"] = _json_cell(payload.get("required_tools", []))
+    row["exposed_tools"] = _json_cell(payload.get("exposed_tools", []))
+    row["missing_tools"] = _json_cell(payload.get("missing_tools", []))
+    row["missing_env"] = _json_cell(payload.get("missing_env", payload.get("missing_environment", [])))
+    row["missing_assets_count"] = payload.get("missing_assets_count", _payload_status_count(payload, FAILED_MISSING_ASSETS))
+    setup_details = payload.get("setup_details", details.get("setup_details"))
+    external_setup = setup_details.get("external_harness") if isinstance(setup_details, dict) else {}
+    if not isinstance(external_setup, dict):
+        external_setup = {}
+    row["setup_details"] = _json_cell(setup_details)
+    row["docker_image"] = payload.get("docker_image", details.get("docker_image", external_setup.get("image")))
+    row["container_name"] = payload.get("container_name", details.get("container_name", external_setup.get("container_name")))
+    row["network_mode"] = payload.get("network_mode", details.get("network_mode", external_setup.get("network_mode")))
+    row["docker_socket_mount"] = _json_cell(
+        payload.get("docker_socket_mount", details.get("docker_socket_mount", external_setup.get("docker_socket_mount")))
+    )
+    row["output_mount"] = _json_cell(
+        payload.get("output_mount", details.get("output_mount", external_setup.get("output_mount")))
+    )
+    row["asset_cache_mount"] = _json_cell(
+        payload.get("asset_cache_mount", details.get("asset_cache_mount", external_setup.get("asset_cache_mount")))
+    )
+    row["catalog_checkout_path"] = payload.get(
+        "catalog_checkout_path",
+        details.get("catalog_checkout_path", external_setup.get("catalog_checkout_path")),
+    )
+    row["target_checkout_path"] = payload.get(
+        "target_checkout_path",
+        details.get("target_checkout_path", external_setup.get("target_checkout_path")),
+    )
+    row["benchmark_checkout_path"] = payload.get(
+        "benchmark_checkout_path",
+        details.get("benchmark_checkout_path", external_setup.get("benchmark_checkout_path")),
+    )
+    row["homepage"] = details.get("homepage")
+    row["license"] = details.get("license")
+    row["credit"] = details.get("credit")
+    row["citation"] = details.get("citation", details.get("homepage"))
     row["blocker_type"] = _blocker_type(result)
     row["error_details"] = _result_error_reason(result)
     row["raw_score"] = _unit_to_percent(payload.get("raw_score"))
@@ -241,12 +613,52 @@ def _result_csv_row(result: GradeResult) -> dict[str, Any]:
     return row
 
 
+def _csv_answer(result: GradeResult, payload: dict[str, Any]) -> Any:
+    answer = result.answer
+    if result.kind != "external_benchmark":
+        return answer
+    if _has_answer_value(answer) and not _is_status_token(answer):
+        return answer
+    payload_answer = payload.get("answer")
+    if _has_answer_value(payload_answer) and not _is_status_token(payload_answer):
+        return payload_answer
+    model_eval = payload.get("model_eval")
+    if isinstance(model_eval, dict):
+        model_answer = model_eval.get("answer")
+        if _has_answer_value(model_answer) and not _is_status_token(model_answer):
+            return model_answer
+    return ""
+
+
+def _has_answer_value(value: Any) -> bool:
+    return value is not None and (not isinstance(value, str) or bool(value.strip()))
+
+
+def _is_status_token(value: Any) -> bool:
+    return isinstance(value, str) and normalize_status(value) in {
+        PASSED,
+        FAILED_MODEL_ANSWER,
+        FAILED_MODEL_FORMAT,
+        FAILED_MODEL_MISSING_ARTIFACT,
+        FAILED_MODEL_TOOL_USE,
+        FAILED_HARNESS_SETUP,
+        FAILED_DATASET_EXTRACTION,
+        FAILED_MISSING_ASSETS,
+        FAILED_MISSING_REQUIRED_TOOL,
+        FAILED_GRADER,
+        FAILED_TOKEN_BUDGET,
+        FAILED_INVALID_TASK_CONTEXT,
+        SKIPPED_UNSUPPORTED_CAPABILITY,
+        TIMED_OUT,
+    }
+
+
 def _metric_cards(summary: dict[str, Any]) -> str:
     cards = [
-        ("Valid Judged Score", _format_rate(summary.get("valid_judged_score"))),
+        ("Scored-Suite Score", _format_rate(summary.get("valid_judged_score"))),
         ("Suite Coverage", _format_rate(summary.get("suite_coverage_rate"))),
         ("Item Coverage", _format_rate(summary.get("item_coverage_rate"))),
-        ("Conservative Score", _format_rate(summary.get("conservative_all_suite_score"))),
+        ("Conservative Selected-Suite", _format_rate(summary.get("conservative_all_suite_score"))),
         ("Model Score", _format_percent(summary.get("model_score_valid_tasks_only"))),
         ("Raw Score", _format_percent(summary.get("raw_score_all_tasks", summary.get("raw_score")))),
         ("Valid Tasks", _format_integer(summary.get("valid_task_count"))),
@@ -622,9 +1034,76 @@ def _result_status(result: GradeResult) -> str:
     return FAILED_MODEL_ANSWER
 
 
+def _included_in_official_score(result: GradeResult) -> bool:
+    if _result_status(result) in INVALID_EVALUATION_STATUSES:
+        return False
+    if _explicitly_excluded_from_official(result):
+        return False
+    if result.kind == "external_benchmark" and not _capabilities_verified(result):
+        return False
+    return True
+
+
+def _explicitly_excluded_from_official(result: GradeResult) -> bool:
+    payload = _benchmark_payload(result)
+    return payload.get("included_in_official_score") is False
+
+
+def _capabilities_verified(result: GradeResult) -> bool:
+    if result.kind != "external_benchmark":
+        return True
+    payload = _benchmark_payload(result)
+    required = payload.get("required_capabilities")
+    missing_tools = payload.get("missing_tools")
+    missing_env = payload.get("missing_env", payload.get("missing_environment"))
+    exposed_tools = payload.get("exposed_tools")
+    if isinstance(missing_tools, list) and missing_tools:
+        return False
+    if isinstance(missing_env, list) and missing_env:
+        return False
+    if isinstance(required, list) and "tool_call" in {str(item) for item in required}:
+        if not isinstance(exposed_tools, list) or not exposed_tools:
+            return False
+    value = payload.get("capabilities_verified")
+    if isinstance(value, bool):
+        return value
+    unsupported = payload.get("unsupported_capabilities")
+    if isinstance(unsupported, list) and unsupported:
+        return False
+    contract = payload.get("capability_contract")
+    if isinstance(contract, dict):
+        for item in contract.values():
+            if isinstance(item, dict) and item.get("supported") is False:
+                return False
+    return _result_status(result) not in INVALID_EVALUATION_STATUSES
+
+
+def _benchmark_payload(result: GradeResult) -> dict[str, Any]:
+    details = result.details if isinstance(result.details, dict) else {}
+    payload = details.get("result")
+    return payload if isinstance(payload, dict) else {}
+
+
+def _payload_status_count(payload: dict[str, Any], status: str) -> int:
+    status_counts = payload.get("status_counts")
+    if not isinstance(status_counts, dict):
+        return 0
+    normalized = normalize_status(status) or status
+    for key, count in status_counts.items():
+        if normalize_status(key) == normalized and isinstance(count, int):
+            return int(count)
+    return 0
+
+
 def _run_status(result: GradeResult) -> str:
     status = _result_status(result)
-    if status in {PASSED, FAILED_MODEL_ANSWER, FAILED_MODEL_FORMAT, FAILED_MODEL_TOOL_USE}:
+    if status in {
+        PASSED,
+        FAILED_MODEL_ANSWER,
+        FAILED_MODEL_FORMAT,
+        FAILED_MODEL_MISSING_ARTIFACT,
+        FAILED_MODEL_TOOL_USE,
+    }:
         return RUN_COMPLETED
     if status in {FAILED_MISSING_ASSETS, FAILED_MISSING_REQUIRED_TOOL, SKIPPED_UNSUPPORTED_CAPABILITY}:
         return RUN_SKIPPED
@@ -637,12 +1116,23 @@ def _run_status(result: GradeResult) -> str:
 
 def _score_status(result: GradeResult) -> str:
     status = _result_status(result)
-    if status in INVALID_EVALUATION_STATUSES:
+    if (
+        status in INVALID_EVALUATION_STATUSES
+        or _explicitly_excluded_from_official(result)
+        or (result.kind == "external_benchmark" and not _capabilities_verified(result))
+    ):
         return SCORE_NOT_APPLICABLE if _run_status(result) == RUN_SKIPPED else SCORE_UNGRADED
     if result.passed:
         return SCORE_PASSED
     if result.score > 0.0:
         return SCORE_PARTIALLY_CORRECT
+    if status in {
+        FAILED_MODEL_ANSWER,
+        FAILED_MODEL_FORMAT,
+        FAILED_MODEL_MISSING_ARTIFACT,
+        FAILED_MODEL_TOOL_USE,
+    }:
+        return status
     return SCORE_FAILED_MODEL_ANSWER
 
 
@@ -654,6 +1144,8 @@ def _blocker_type(result: GradeResult) -> str:
     explicit = _explicit_blocker_type(details, payload, error)
     if explicit:
         return explicit
+    if _uses_smoke_score_mode(payload):
+        return "missing_grader"
     unsupported = payload.get("unsupported_capabilities")
     unsupported_values = {str(item) for item in unsupported} if isinstance(unsupported, list) else set()
     contract = payload.get("capability_contract")
@@ -684,6 +1176,17 @@ def _blocker_type(result: GradeResult) -> str:
     if status in {FAILED_MODEL_FORMAT, FAILED_DATASET_EXTRACTION}:
         return "output_parse_error"
     return ""
+
+
+def _uses_smoke_score_mode(payload: dict[str, Any]) -> bool:
+    modes: set[str] = set()
+    mode = payload.get("score_mode")
+    if isinstance(mode, str) and mode.strip():
+        modes.add(mode.strip())
+    score_modes = payload.get("score_modes")
+    if isinstance(score_modes, list):
+        modes.update(str(item).strip() for item in score_modes if str(item).strip())
+    return payload.get("official_equivalent") is False or any(mode.startswith("smoke") for mode in modes)
 
 
 def _explicit_blocker_type(details: dict[str, Any], payload: dict[str, Any], error: str) -> str:
@@ -760,6 +1263,16 @@ def _json_cell(value: Any) -> str | None:
     if isinstance(value, str):
         return value
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _short_json(value: Any, max_chars: int = 260) -> str:
+    if value in (None, "", [], {}):
+        return ""
+    if isinstance(value, str):
+        text = value
+    else:
+        text = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return text if len(text) <= max_chars else text[: max_chars - 1] + "..."
 
 
 def _format_percent(value: Any) -> str:

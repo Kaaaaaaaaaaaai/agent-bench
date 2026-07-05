@@ -29,6 +29,7 @@ from agent_bench.statuses import (
     FAILED_MISSING_REQUIRED_TOOL,
     INVALID_EVALUATION_STATUSES,
     PASSED,
+    FAILED_MODEL_MISSING_ARTIFACT,
     RUN_COMPLETED,
     RUN_EXECUTION_ERROR,
     RUN_INFRASTRUCTURE_ERROR,
@@ -44,6 +45,7 @@ from agent_bench.statuses import (
     is_invalid_evaluation_status,
     is_skipped_like_status,
     normalize_status,
+    status_catalog_dict,
 )
 
 
@@ -123,10 +125,20 @@ def aggregate_results(
         category: {
             "task_count": len(items),
             "passed_count": sum(1 for item in items if item.passed),
+            "attempted_benchmark_count": len(items),
+            "successfully_scored_benchmark_count": len(_valid_items(items)),
+            "failed_benchmark_count": len([item for item in items if not _is_valid_result(item)]),
+            "coverage_rate": _ratio(len(_valid_items(items)), len(items)),
             "score": category_scores[category],
         }
         for category, items in sorted(by_category.items())
     }
+    valid_category_scores = [
+        score
+        for category, score in category_scores.items()
+        if any(_is_valid_result(item) for item in by_category[category])
+    ]
+    primary_overall_score = round(sum(valid_category_scores) / len(valid_category_scores), 4) if valid_category_scores else None
 
     coding_results = [result for result in results if result.kind == "coding"]
     timing_by_category = _timing_by_category(results)
@@ -135,20 +147,24 @@ def aggregate_results(
     item_count, valid_item_count = _item_coverage_counts(results)
     suite_blockers = _suite_blockers(results)
     blocker_counts = _blocker_counts(results)
-    excluded_suites = _excluded_suites(metadata)
-    excluded_suite_count = _int_metadata(metadata, "excluded_suite_count", len(excluded_suites))
+    excluded_suites = _merged_excluded_suites(_excluded_suites(metadata), _result_excluded_suites(results))
+    excluded_suite_count = len(excluded_suites)
+    summary_metadata = dict(metadata)
+    summary_metadata["excluded_suites"] = excluded_suites
+    summary_metadata["excluded_suite_count"] = excluded_suite_count
     profile_results = _profile_results(benchmark_results)
     parser_repair_count = _parser_repair_count(results)
     usage_summary = _usage_summary(results)
 
     return {
         "benchmark_version": "agent-bench-v0.1",
+        "schema_version": "agent-bench.summary.v2",
         "selected_profile": metadata.get("selected_profile", "full_active"),
         "known_suite_count": known_suite_count,
         "selected_suite_count": task_count,
         "excluded_suite_count": excluded_suite_count,
         "excluded_suites": excluded_suites,
-        "metadata": metadata,
+        "metadata": summary_metadata,
         "task_count": task_count,
         "valid_task_count": valid_task_count,
         "valid_judged_suite_count": valid_task_count,
@@ -178,6 +194,7 @@ def aggregate_results(
         "status_counts": status_counts,
         "benchmark_item_status_counts": benchmark_item_status_counts,
         "coverage": _coverage_summary(results, status_counts, benchmark_item_status_counts),
+        "coverage_summary": _official_coverage_summary(results, category_counts),
         "harness_health": _harness_health_summary(status_counts, benchmark_item_status_counts),
         "headline": {
             "valid_judged_score": _ratio(total_score, valid_task_count),
@@ -221,14 +238,14 @@ def aggregate_results(
         "judge_parse_error_count": blocker_counts.get(BLOCKER_JUDGE_PARSE_ERROR, 0),
         "repo_patch_harness_setup_count": blocker_counts.get(BLOCKER_REPO_PATCH_HARNESS_SETUP, 0),
         "missing_assets_count": status_counts.get(FAILED_MISSING_ASSETS, 0),
-        "unsupported_capability_count": status_counts.get(SKIPPED_UNSUPPORTED_CAPABILITY, 0),
+        "unsupported_capability_count": _unsupported_capability_count(results, status_counts),
         "missing_grader_count": blocker_counts.get(BLOCKER_MISSING_GRADER, 0),
         "judge_error_count": grader_failure_count,
         "parser_repair_count": parser_repair_count,
         "dataset_extraction_failed_count": status_counts.get(FAILED_DATASET_EXTRACTION, 0),
         "token_budget_failed_count": status_counts.get(FAILED_TOKEN_BUDGET, 0),
         "skipped_missing_assets_count": status_counts.get(FAILED_MISSING_ASSETS, 0),
-        "skipped_unsupported_capability_count": status_counts.get(SKIPPED_UNSUPPORTED_CAPABILITY, 0),
+        "skipped_unsupported_capability_count": _unsupported_capability_count(results, status_counts),
         "benchmark_item_skipped_count": benchmark_item_skipped_count,
         "setup_failed_count": status_counts.get(FAILED_HARNESS_SETUP, 0),
         "harness_setup_failure_count": status_counts.get(FAILED_HARNESS_SETUP, 0),
@@ -251,6 +268,11 @@ def aggregate_results(
         else None,
         "category_scores": category_scores,
         "category_counts": category_counts,
+        "overall_score": primary_overall_score,
+        "overall_score_fraction": round(primary_overall_score / 100.0, 6) if primary_overall_score is not None else None,
+        "primary_score_method": "equal_weight_category_mean",
+        "benchmark_level_mean_score": _percent(total_score, valid_task_count),
+        "status_catalog": status_catalog_dict(),
         "benchmark_results": benchmark_results,
         "profile_results": profile_results,
         "timing_by_category": timing_by_category,
@@ -318,18 +340,79 @@ def _excluded_suites(metadata: dict[str, Any]) -> list[dict[str, Any]]:
     return sorted(rows, key=lambda row: row["suite_id"])
 
 
+def _result_excluded_suites(results: list[GradeResult]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for result in results:
+        status = _result_status(result)
+        if _is_valid_result(result):
+            continue
+        rows.append(
+            {
+                "suite_id": result.task_id,
+                "name": _benchmark_name(result),
+                "lifecycle_status": "score_excluded",
+                "exclusion_reason": _blocker_type(result) or status,
+                "included_in_official_score": False,
+                "status": status,
+                "run_status": _run_status(result),
+                "error": _result_error_reason(result),
+            }
+        )
+    return rows
+
+
+def _merged_excluded_suites(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for group in groups:
+        for row in group:
+            suite_id = row.get("suite_id")
+            if not isinstance(suite_id, str) or not suite_id:
+                continue
+            existing = merged.get(suite_id, {})
+            merged[suite_id] = {**existing, **row}
+    return sorted(merged.values(), key=lambda row: str(row.get("suite_id", "")))
+
+
 def _valid_items(items: list[GradeResult]) -> list[GradeResult]:
     return [item for item in items if _is_valid_result(item)]
 
 
+def _benchmark_name(result: GradeResult) -> str:
+    payload = _benchmark_payload(result)
+    details = result.details if isinstance(result.details, dict) else {}
+    return str(payload.get("benchmark") or details.get("benchmark") or result.task_id)
+
+
 def _is_valid_result(result: GradeResult) -> bool:
-    return _result_status(result) not in INVALID_EVALUATION_STATUSES
+    if _result_status(result) in INVALID_EVALUATION_STATUSES:
+        return False
+    if _explicitly_excluded_from_official(result):
+        return False
+    if result.kind == "external_benchmark" and not _capabilities_verified(result):
+        return False
+    return True
+
+
+def _explicitly_excluded_from_official(result: GradeResult) -> bool:
+    payload = _benchmark_payload(result)
+    return payload.get("included_in_official_score") is False
 
 
 def _capabilities_verified(result: GradeResult) -> bool:
     if result.kind != "external_benchmark":
         return True
     payload = _benchmark_payload(result)
+    required = payload.get("required_capabilities")
+    missing_tools = payload.get("missing_tools")
+    missing_env = payload.get("missing_env", payload.get("missing_environment"))
+    exposed_tools = payload.get("exposed_tools")
+    if isinstance(missing_tools, list) and missing_tools:
+        return False
+    if isinstance(missing_env, list) and missing_env:
+        return False
+    if isinstance(required, list) and "tool_call" in {str(item) for item in required}:
+        if not isinstance(exposed_tools, list) or not exposed_tools:
+            return False
     value = payload.get("capabilities_verified")
     if isinstance(value, bool):
         return value
@@ -376,7 +459,13 @@ def _result_status(result: GradeResult) -> str:
 
 def _run_status(result: GradeResult) -> str:
     status = _result_status(result)
-    if status in {PASSED, FAILED_MODEL_ANSWER, FAILED_MODEL_FORMAT, FAILED_MODEL_TOOL_USE}:
+    if status in {
+        PASSED,
+        FAILED_MODEL_ANSWER,
+        FAILED_MODEL_FORMAT,
+        FAILED_MODEL_MISSING_ARTIFACT,
+        FAILED_MODEL_TOOL_USE,
+    }:
         return RUN_COMPLETED
     if status in {FAILED_MISSING_ASSETS, FAILED_MISSING_REQUIRED_TOOL, SKIPPED_UNSUPPORTED_CAPABILITY}:
         return RUN_SKIPPED
@@ -389,12 +478,23 @@ def _run_status(result: GradeResult) -> str:
 
 def _score_status(result: GradeResult) -> str:
     status = _result_status(result)
-    if status in INVALID_EVALUATION_STATUSES:
+    if (
+        status in INVALID_EVALUATION_STATUSES
+        or _explicitly_excluded_from_official(result)
+        or (result.kind == "external_benchmark" and not _capabilities_verified(result))
+    ):
         return SCORE_NOT_APPLICABLE if _run_status(result) == RUN_SKIPPED else SCORE_UNGRADED
     if result.passed:
         return SCORE_PASSED
     if result.score > 0.0:
         return SCORE_PARTIALLY_CORRECT
+    if status in {
+        FAILED_MODEL_ANSWER,
+        FAILED_MODEL_FORMAT,
+        FAILED_MODEL_MISSING_ARTIFACT,
+        FAILED_MODEL_TOOL_USE,
+    }:
+        return status
     return SCORE_FAILED_MODEL_ANSWER
 
 
@@ -405,6 +505,8 @@ def _blocker_type(result: GradeResult) -> str:
     explicit_blocker = _explicit_blocker_type(result, payload)
     if explicit_blocker:
         return explicit_blocker
+    if _uses_smoke_score_mode(payload):
+        return BLOCKER_MISSING_GRADER
     unsupported = payload.get("unsupported_capabilities")
     unsupported_values = {str(item) for item in unsupported} if isinstance(unsupported, list) else set()
     contract = payload.get("capability_contract")
@@ -435,6 +537,17 @@ def _blocker_type(result: GradeResult) -> str:
     if status in {FAILED_MODEL_FORMAT, FAILED_DATASET_EXTRACTION}:
         return BLOCKER_OUTPUT_PARSE_ERROR
     return ""
+
+
+def _uses_smoke_score_mode(payload: dict[str, Any]) -> bool:
+    modes: set[str] = set()
+    mode = payload.get("score_mode")
+    if isinstance(mode, str) and mode.strip():
+        modes.add(mode.strip())
+    score_modes = payload.get("score_modes")
+    if isinstance(score_modes, list):
+        modes.update(str(item).strip() for item in score_modes if str(item).strip())
+    return payload.get("official_equivalent") is False or any(mode.startswith("smoke") for mode in modes)
 
 
 def _explicit_blocker_type(result: GradeResult, payload: dict[str, Any]) -> str:
@@ -567,7 +680,7 @@ def _coverage_summary(
     task_count = len(results)
     valid_count = sum(1 for result in results if _is_valid_result(result))
     item_count, valid_item_count = _item_coverage_counts(results)
-    unsupported_count = status_counts.get(SKIPPED_UNSUPPORTED_CAPABILITY, 0)
+    unsupported_count = _unsupported_capability_count(results, status_counts)
     missing_assets_count = status_counts.get(FAILED_MISSING_ASSETS, 0)
     dataset_failed_count = status_counts.get(FAILED_DATASET_EXTRACTION, 0)
     return {
@@ -593,6 +706,43 @@ def _coverage_summary(
             for status, count in benchmark_item_status_counts.items()
             if status in INVALID_EVALUATION_STATUSES
         ),
+    }
+
+
+def _unsupported_capability_count(results: list[GradeResult], status_counts: dict[str, int]) -> int:
+    explicit_count = 0
+    for result in results:
+        payload = _benchmark_payload(result)
+        unsupported = payload.get("unsupported_capabilities")
+        if isinstance(unsupported, list):
+            explicit_count += len({str(item) for item in unsupported if str(item)})
+    return max(status_counts.get(SKIPPED_UNSUPPORTED_CAPABILITY, 0), explicit_count)
+
+
+def _official_coverage_summary(
+    results: list[GradeResult],
+    category_counts: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    total = len(results)
+    scored = sum(1 for result in results if _is_valid_result(result))
+    failed = total - scored
+    return {
+        "total_configured_benchmarks": total,
+        "attempted_benchmarks": total,
+        "successfully_scored_benchmarks": scored,
+        "failed_benchmarks": failed,
+        "excluded_from_score_benchmarks": failed,
+        "coverage_rate": _ratio(scored, total),
+        "per_category": {
+            category: {
+                "total_configured_benchmarks": int(data.get("task_count", 0)),
+                "attempted_benchmarks": int(data.get("attempted_benchmark_count", 0)),
+                "successfully_scored_benchmarks": int(data.get("successfully_scored_benchmark_count", 0)),
+                "failed_benchmarks": int(data.get("failed_benchmark_count", 0)),
+                "coverage_rate": data.get("coverage_rate", 0.0),
+            }
+            for category, data in sorted(category_counts.items())
+        },
     }
 
 
@@ -703,14 +853,23 @@ def _usage_summary(results: list[GradeResult]) -> dict[str, Any]:
             total_tokens += _usage_value(usage, ("total_tokens",))
     if saw_usage and total_tokens <= 0:
         total_tokens = prompt_tokens + completion_tokens
-    denominator = len(results)
+    suite_denominator = len(results)
+    item_denominator = _usage_item_denominator(results)
+    finish_reason_length_count = _protocol_diagnostic_count(results, "finish_reason", "length")
+    hidden_reasoning_no_final_count = _protocol_diagnostic_count(results, "hidden_reasoning_no_final", True)
+    no_final_content_count = _protocol_diagnostic_count(results, "no_final_content", True)
     return {
         "total_prompt_tokens": prompt_tokens if saw_usage else None,
         "total_completion_tokens": completion_tokens if saw_usage else None,
         "total_tokens": total_tokens if saw_usage else None,
-        "average_prompt_tokens_per_item": _average_token_count(prompt_tokens, denominator, saw_usage),
-        "average_completion_tokens_per_item": _average_token_count(completion_tokens, denominator, saw_usage),
-        "truncated_completion_count": sum(1 for result in results if _is_truncated(result)),
+        "average_prompt_tokens_per_suite": _average_token_count(prompt_tokens, suite_denominator, saw_usage),
+        "average_completion_tokens_per_suite": _average_token_count(completion_tokens, suite_denominator, saw_usage),
+        "average_prompt_tokens_per_item": _average_token_count(prompt_tokens, item_denominator, saw_usage),
+        "average_completion_tokens_per_item": _average_token_count(completion_tokens, item_denominator, saw_usage),
+        "finish_reason_length_count": finish_reason_length_count,
+        "hidden_reasoning_no_final_count": hidden_reasoning_no_final_count,
+        "no_final_content_count": no_final_content_count,
+        "truncated_completion_count": sum(1 for result in results if _is_truncated(result)) + finish_reason_length_count,
         "empty_response_count": sum(1 for result in results if _result_error_reason(result) == "empty response"),
         "judge_retry_count": _nested_count(results, ("judge_retry_count",)),
         "output_extraction_failure_count": sum(
@@ -719,6 +878,31 @@ def _usage_summary(results: list[GradeResult]) -> dict[str, Any]:
             if isinstance(result.details, dict) and result.details.get("extraction_status") == "failed"
         ),
     }
+
+
+def _usage_item_denominator(results: list[GradeResult]) -> int:
+    total = 0
+    for result in results:
+        payload = _benchmark_payload(result)
+        model_evals = payload.get("model_evals")
+        if isinstance(model_evals, list) and model_evals:
+            total += sum(1 for item in model_evals if isinstance(item, dict))
+        else:
+            total += 1
+    return total
+
+
+def _protocol_diagnostic_count(results: list[GradeResult], key: str, expected: Any) -> int:
+    total = 0
+    for result in results:
+        payload = _benchmark_payload(result)
+        for item in payload.get("model_evals", []):
+            if not isinstance(item, dict):
+                continue
+            diagnostics = item.get("protocol_diagnostics")
+            if isinstance(diagnostics, dict) and diagnostics.get(key) == expected:
+                total += 1
+    return total
 
 
 def _usage_payloads(result: GradeResult) -> list[dict[str, Any]]:
@@ -857,6 +1041,11 @@ def _benchmark_results(results: list[GradeResult]) -> list[dict[str, Any]]:
         grading_methods = _grading_methods(model_evals)
         error = _result_error_reason(result)
         required_capabilities = benchmark_payload.get("required_capabilities", details.get("required_capabilities", []))
+        manifest = details.get("manifest") if isinstance(details.get("manifest"), dict) else {}
+        setup_details = benchmark_payload.get("setup_details", details.get("setup_details", {}))
+        external_setup = setup_details.get("external_harness") if isinstance(setup_details, dict) else {}
+        if not isinstance(external_setup, dict):
+            external_setup = {}
         rows.append(
             {
                 "suite_id": result.task_id,
@@ -864,6 +1053,7 @@ def _benchmark_results(results: list[GradeResult]) -> list[dict[str, Any]]:
                 "group": group,
                 "benchmark": benchmark,
                 "included_in_official_score": _is_valid_result(result),
+                "required_capabilities": required_capabilities,
                 "profile": _profile_for_capabilities(required_capabilities),
                 "score_fraction": round(result.score, 6),
                 "score": round(result.score * 100.0, 4),
@@ -873,13 +1063,38 @@ def _benchmark_results(results: list[GradeResult]) -> list[dict[str, Any]]:
                 "status": _result_status(result),
                 "run_status": _run_status(result),
                 "score_status": _score_status(result),
+                "official_equivalent": benchmark_payload.get("official_equivalent", details.get("official_equivalent")),
+                "score_mode": benchmark_payload.get("score_mode", details.get("score_mode", "")),
+                "score_modes": benchmark_payload.get("score_modes", details.get("score_modes", [])),
+                "duration_seconds": result.task_duration_seconds,
                 "blocker_type": _blocker_type(result),
                 "error": error,
                 "error_details": error,
                 "homepage": details.get("homepage", ""),
+                "official_leaderboard_url": details.get("official_leaderboard_url", ""),
                 "license": details.get("license", ""),
                 "credit": details.get("credit", ""),
                 "citation": details.get("citation", details.get("homepage", "")),
+                "docker_image": benchmark_payload.get("docker_image", details.get("docker_image", external_setup.get("image", ""))),
+                "container_name": benchmark_payload.get("container_name", details.get("container_name", external_setup.get("container_name", ""))),
+                "network_mode": benchmark_payload.get("network_mode", details.get("network_mode", external_setup.get("network_mode", ""))),
+                "docker_socket_mount": benchmark_payload.get("docker_socket_mount", details.get("docker_socket_mount", external_setup.get("docker_socket_mount", {}))),
+                "output_mount": benchmark_payload.get("output_mount", details.get("output_mount", external_setup.get("output_mount", {}))),
+                "asset_cache_mount": benchmark_payload.get("asset_cache_mount", details.get("asset_cache_mount", external_setup.get("asset_cache_mount", {}))),
+                "catalog_checkout_path": benchmark_payload.get(
+                    "catalog_checkout_path",
+                    details.get("catalog_checkout_path", external_setup.get("catalog_checkout_path", "")),
+                ),
+                "target_checkout_path": benchmark_payload.get(
+                    "target_checkout_path",
+                    details.get("target_checkout_path", external_setup.get("target_checkout_path", "")),
+                ),
+                "benchmark_checkout_path": benchmark_payload.get("benchmark_checkout_path", details.get("benchmark_checkout_path", external_setup.get("benchmark_checkout_path", ""))),
+                "output_dir": details.get("output_dir", ""),
+                "manifest": manifest,
+                "asset_refs": manifest.get("assets", []) if isinstance(manifest, dict) else [],
+                "official_conditions": manifest.get("official_conditions", {}) if isinstance(manifest, dict) else {},
+                "source": manifest.get("source", {}) if isinstance(manifest, dict) else {},
                 "model_eval": model_eval,
                 "model_evals": model_evals,
                 "grading_methods": grading_methods,
@@ -887,6 +1102,13 @@ def _benchmark_results(results: list[GradeResult]) -> list[dict[str, Any]]:
                 "capabilities_verified": _capabilities_verified(result),
                 "capability_contract": benchmark_payload.get("capability_contract", {}),
                 "supported_capabilities": benchmark_payload.get("supported_capabilities", []),
+                "required_tools": benchmark_payload.get("required_tools", []),
+                "exposed_tools": benchmark_payload.get("exposed_tools", []),
+                "missing_tools": benchmark_payload.get("missing_tools", []),
+                "missing_env": benchmark_payload.get(
+                    "missing_env",
+                    benchmark_payload.get("missing_environment", []),
+                ),
                 "repository_ready": bool(benchmark_payload.get("repository_ready", False)),
                 "file_count_sampled": benchmark_payload.get("file_count_sampled"),
                 "extracted_task_count": benchmark_payload.get("extracted_task_count"),
@@ -895,7 +1117,11 @@ def _benchmark_results(results: list[GradeResult]) -> list[dict[str, Any]]:
                 "evaluation_passed_count": benchmark_payload.get("evaluation_passed_count"),
                 "skipped_task_count": benchmark_payload.get("skipped_task_count"),
                 "setup_failed_count": _payload_status_count(benchmark_payload, "failed_harness_setup"),
-                "missing_assets_count": _payload_status_count(benchmark_payload, FAILED_MISSING_ASSETS),
+                "missing_assets_count": benchmark_payload.get(
+                    "missing_assets_count",
+                    _payload_status_count(benchmark_payload, FAILED_MISSING_ASSETS),
+                ),
+                "setup_details": setup_details,
                 "unsupported_capability_count": _payload_status_count(
                     benchmark_payload,
                     SKIPPED_UNSUPPORTED_CAPABILITY,
