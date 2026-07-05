@@ -13,8 +13,8 @@ RUN apt-get update \
 
 COPY docker/external_launcher.sh /usr/local/bin/agent-bench-external-launcher
 COPY docker/benchmark_probe.py /usr/local/bin/agent-bench-probe
-COPY fixtures/finance_agent_v2 /opt/agent-bench/fixtures/finance_agent_v2
-RUN chmod -R a+rX /opt/agent-bench/fixtures
+COPY tasks/finance-agent-v2/fixtures/finance_agent_v2 /opt/agent-bench/tasks/finance-agent-v2/fixtures/finance_agent_v2
+RUN chmod -R a+rX /opt/agent-bench/tasks/finance-agent-v2/fixtures
 RUN chmod 0755 /usr/local/bin/agent-bench-external-launcher /usr/local/bin/agent-bench-probe
 
 ENTRYPOINT ["agent-bench-external-launcher"]

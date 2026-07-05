@@ -4562,14 +4562,17 @@ def _finance_agent_v2_fixture_roots(root: Path | None = None) -> list[Path]:
     env_root = os.environ.get(FINANCE_AGENT_V2_FIXTURE_ROOT_ENV)
     if env_root:
         return [Path(env_root).expanduser()]
+    task_dir = os.environ.get("AGENT_BENCH_TASK_DIR")
+    if task_dir:
+        candidates.append(Path(task_dir) / "fixtures" / "finance_agent_v2")
     if root is not None:
-        candidates.append(root / "fixtures" / "finance_agent_v2")
-    candidates.append(Path.cwd() / "fixtures" / "finance_agent_v2")
+        candidates.append(root / "tasks" / "finance-agent-v2" / "fixtures" / "finance_agent_v2")
+    candidates.append(Path.cwd() / "tasks" / "finance-agent-v2" / "fixtures" / "finance_agent_v2")
     try:
-        candidates.append(Path(__file__).resolve().parents[1] / "fixtures" / "finance_agent_v2")
+        candidates.append(Path(__file__).resolve().parents[1] / "tasks" / "finance-agent-v2" / "fixtures" / "finance_agent_v2")
     except IndexError:
         pass
-    candidates.append(Path("/opt/agent-bench/fixtures/finance_agent_v2"))
+    candidates.append(Path("/opt/agent-bench/tasks/finance-agent-v2/fixtures/finance_agent_v2"))
     unique: list[Path] = []
     seen: set[str] = set()
     for candidate in candidates:
