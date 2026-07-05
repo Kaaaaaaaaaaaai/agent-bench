@@ -250,6 +250,64 @@ def test_grade_external_benchmark_treats_unsupported_capability_as_coverage_gap(
     assert result.category == "Coding"
 
 
+@pytest.mark.parametrize(
+    "result_payload",
+    [
+        {
+            "status": "passed",
+            "required_capabilities": ["tool_call"],
+            "exposed_tools": ["final_answer"],
+            "missing_tools": ["benchmark_tool"],
+            "capabilities_verified": True,
+        },
+        {
+            "status": "passed",
+            "required_capabilities": ["tool_call"],
+            "exposed_tools": ["benchmark_tool"],
+            "missing_tools": [],
+            "missing_env": ["BENCHMARK_API_KEY"],
+            "capabilities_verified": True,
+        },
+        {
+            "status": "passed",
+            "required_capabilities": ["tool_call"],
+            "exposed_tools": [],
+            "missing_tools": [],
+            "capabilities_verified": True,
+        },
+    ],
+)
+def test_grade_external_benchmark_promotes_capability_failures(result_payload):
+    task = Task(
+        id="PB_015",
+        category="public_benchmarks",
+        type="external_benchmark",
+        question="Run benchmark",
+        source="public_benchmarks.json",
+    )
+    response = _response(
+        json.dumps(
+            {
+                "status": "passed",
+                "score": 1.0,
+                "error": None,
+                "timed_out": False,
+                "details": {
+                    "group": "Finance",
+                    "result": result_payload,
+                },
+            }
+        )
+    )
+
+    result = grade_external_benchmark(task, response)
+
+    assert result.status == "failed_missing_required_tool"
+    assert result.score == 0.0
+    assert result.passed is False
+    assert result.error == "failed missing required tool"
+
+
 def test_grade_external_benchmark_promotes_all_invalid_nested_status():
     task = Task(
         id="PB_001",

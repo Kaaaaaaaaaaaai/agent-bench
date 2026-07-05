@@ -349,6 +349,8 @@ def grade_external_benchmark(task: Task, response: ModelResponse) -> GradeResult
     )
     if status in INVALID_EVALUATION_STATUSES and not benchmark_error:
         benchmark_error = _external_status_error(status, result_payload)
+    if status in INVALID_EVALUATION_STATUSES:
+        normalized_score = 0.0
     return GradeResult(
         task_id=task.id,
         category=group if isinstance(group, str) and group.strip() else task.category,
@@ -391,6 +393,9 @@ def _external_benchmark_status(
     score: float,
     error: str | None,
 ) -> str:
+    capability_status = _external_capability_failure_status(result_payload)
+    if capability_status:
+        return capability_status
     status = normalize_status(result_status or payload_status)
     if status in STRICT_STATUSES:
         return status
@@ -421,6 +426,37 @@ def _external_benchmark_status(
     if error:
         return FAILED_HARNESS_SETUP
     return PASSED if score >= 1.0 else FAILED_MODEL_ANSWER
+
+
+def _external_capability_failure_status(result_payload: dict[str, Any]) -> str:
+    missing_tools = _string_values(result_payload.get("missing_tools"))
+    missing_env = _string_values(result_payload.get("missing_env")) or _string_values(
+        result_payload.get("missing_environment")
+    )
+    if missing_tools or missing_env:
+        return FAILED_MISSING_REQUIRED_TOOL
+    required = set(_string_values(result_payload.get("required_capabilities")))
+    exposed_tools = _string_values(result_payload.get("exposed_tools"))
+    if "tool_call" in required and not exposed_tools:
+        return FAILED_MISSING_REQUIRED_TOOL
+    if result_payload.get("capabilities_verified") is False:
+        status = normalize_status(result_payload.get("status") if isinstance(result_payload.get("status"), str) else "")
+        if status in INVALID_EVALUATION_STATUSES:
+            return status
+        return FAILED_HARNESS_SETUP
+    return ""
+
+
+def _string_values(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value] if value else []
+    if not isinstance(value, list):
+        return []
+    values: list[str] = []
+    for item in value:
+        if isinstance(item, str) and item:
+            values.append(item)
+    return values
 
 
 def _primary_model_failure_status(status_counts: dict[str, Any]) -> str:

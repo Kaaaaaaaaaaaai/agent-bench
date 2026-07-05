@@ -2453,6 +2453,21 @@ def test_finance_agent_v2_static_public_item_skips_backend_credentials_only_when
 
     result = probe.validate_finance_agent_v2_item(item, tmp_path, probe.agent_tool_schemas())
 
+    assert result is not None
+    assert result[0] == "failed_missing_required_tool"
+
+    monkeypatch.setenv(
+        "AGENT_BENCH_BENCHMARK_JSON",
+        json.dumps(
+            {
+                "name": "Finance Agent v2",
+                "adapter_mode": "static_gold_answer",
+                "live_tools_required": False,
+            }
+        ),
+    )
+    result = probe.validate_finance_agent_v2_item(item, tmp_path, probe.agent_tool_schemas())
+
     assert result is None
 
 
@@ -2469,8 +2484,58 @@ def test_fintoolbench_missing_required_tool_helper_blocks_model_call():
     assert probe._missing_required_tools(item, tools) == ["companies_balance_sheet_statements"]
 
 
-def test_fintoolbench_static_item_bypasses_required_tool_preflight():
+def test_fintoolbench_contract_records_executable_local_backend(tmp_path, monkeypatch):
     probe = _load_probe_module()
+    monkeypatch.chdir(tmp_path)
+    tool_dir = tmp_path / "tools"
+    tool_dir.mkdir()
+    (tool_dir / "tools_all_annotated.jsonl").write_text(
+        json.dumps(
+            {
+                "name": "companies_balance_sheet_statements",
+                "description": "Return balance sheet statements.",
+                "parameters": {"symbol": {"type": "string"}},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    item = probe.BenchmarkItem(
+        "Call selected tool.",
+        "Use tool.",
+        "synthetic",
+        metadata={"select_tools": ["companies_balance_sheet_statements"]},
+    )
+
+    contract = probe.FinToolBenchAdapter().capability_contract({"tool_call"}, [item])
+
+    assert contract["tool_call"]["supported"] is True
+    assert contract["tool_call"]["backend"] == "agent_bench_local_deterministic"
+    assert contract["tool_call"]["backend_available"] is True
+    assert contract["tool_call"]["tool_manifest_count"] == 1
+    assert contract["tool_call"]["executable_tools"] == ["companies_balance_sheet_statements"]
+
+
+def test_fintoolbench_dispatch_executes_selected_tool_from_isolated_workspace(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(
+        probe.FINTOOLBENCH_EXECUTABLE_TOOLS_ENV,
+        json.dumps(["companies_balance_sheet_statements"]),
+    )
+
+    result = probe.execute_benchmark_tool("companies_balance_sheet_statements", {"symbol": "MMM"})
+
+    assert result is not None
+    payload = json.loads(result)
+    assert payload["backend"] == "agent_bench_local_deterministic"
+    assert payload["result"]["mode"] == "deterministic_local_finance_backend"
+    assert payload["result"]["tool"] == "companies_balance_sheet_statements"
+
+
+def test_fintoolbench_static_item_bypasses_required_tool_preflight(monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "FinToolBench")
     item = probe.BenchmarkItem(
         "Answer from static benchmark row.",
         "$8.70",
@@ -2481,6 +2546,19 @@ def test_fintoolbench_static_item_bypasses_required_tool_preflight():
         },
     )
     tools = [{"type": "function", "function": {"name": "final_answer"}}]
+
+    assert probe._missing_required_tools(item, tools) == ["companies_balance_sheet_statements"]
+
+    monkeypatch.setenv(
+        "AGENT_BENCH_BENCHMARK_JSON",
+        json.dumps(
+            {
+                "name": "FinToolBench",
+                "adapter_mode": "static_gold_answer",
+                "live_tools_required": False,
+            }
+        ),
+    )
 
     assert probe._missing_required_tools(item, tools) == []
 

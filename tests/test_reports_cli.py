@@ -77,6 +77,9 @@ def test_render_summary_html_contains_radar_svg():
     assert "ExampleBench" in html
     assert "https://example.com/citation" in html
     assert "<th>Status</th><th>Raw Score</th><th>Normalized 0-100</th>" in html
+    assert "<th>Image</th><th>Container</th><th>Network</th>" in html
+    assert "<th>Missing Tools</th><th>Missing Env</th><th>Missing Assets</th>" in html
+    assert "<th>Asset Cache</th><th>Setup Details</th>" in html
     assert "<th>Benchmark</th><th>Status Code</th><th>Failure Class</th>" in html
     assert "<th>Benchmark</th><th>Homepage</th><th>Repository/Dataset Ref</th>" in html
     assert html.rfind("Credits Citations Licenses") > html.rfind("Failures And Status")
@@ -171,7 +174,7 @@ def test_cli_mock_smoke_runs_all_bundled_benchmarks(tmp_path, monkeypatch):
     assert len(summary["benchmark_results"]) == 12
     assert summary["suite_coverage_rate"] == 0.75
     assert summary["coverage_summary"]["successfully_scored_benchmarks"] == 9
-    assert summary["conservative_all_suite_score"] == 1.0
+    assert summary["conservative_all_suite_score"] == 0.75
     assert "public_benchmarks" not in html
     assert "SWE-bench" in html
     assert "Failures And Status" in html
@@ -251,6 +254,18 @@ def test_aggregate_results_emits_external_benchmark_rows():
                     "license": "MIT",
                     "credit": "Example authors",
                     "citation": "https://example.com/cite",
+                    "required_capabilities": ["repo_patch"],
+                    "setup_details": {
+                        "external_harness": {
+                            "image": "example-benchmark:local",
+                            "container_name": "agent-bench-pb-001",
+                            "network_mode": "bridge",
+                            "docker_socket_mount": {"enabled": False},
+                            "output_mount": {"host_path": "/tmp/out", "container_path": "/outputs"},
+                            "asset_cache_mount": {"cache_key": "examplebench", "container_path": "/asset-cache"},
+                            "benchmark_checkout_path": "/workspace/repo",
+                        }
+                    },
                     "result": {
                         "repository_ready": True,
                         "file_count_sampled": 12,
@@ -279,6 +294,16 @@ def test_aggregate_results_emits_external_benchmark_rows():
     assert summary["benchmark_results"][0]["setup_failed_count"] == 1
     assert summary["benchmark_results"][0]["citation"] == "https://example.com/cite"
     assert summary["benchmark_results"][0]["model_eval"] == {"answer": "A", "expected": "B"}
+    assert summary["benchmark_results"][0]["required_capabilities"] == ["repo_patch"]
+    assert summary["benchmark_results"][0]["docker_image"] == "example-benchmark:local"
+    assert summary["benchmark_results"][0]["container_name"] == "agent-bench-pb-001"
+    assert summary["benchmark_results"][0]["network_mode"] == "bridge"
+    assert summary["benchmark_results"][0]["docker_socket_mount"] == {"enabled": False}
+    assert summary["benchmark_results"][0]["asset_cache_mount"] == {
+        "cache_key": "examplebench",
+        "container_path": "/asset-cache",
+    }
+    assert summary["benchmark_results"][0]["benchmark_checkout_path"] == "/workspace/repo"
     assert summary["num_suites_failed_setup"] == 0
     assert summary["num_items_failed_setup"] == 1
     assert summary["num_items_valid_model_attempts"] == 2
@@ -301,6 +326,17 @@ def test_external_benchmark_csv_row_keeps_answer_separate_from_status():
         details={
             "benchmark": "FinToolBench",
             "group": "Finance",
+            "setup_details": {
+                "external_harness": {
+                    "image": "agent-bench-external:python3.12",
+                    "container_name": "agent-bench-pb-015",
+                    "network_mode": "bridge",
+                    "docker_socket_mount": {"enabled": False},
+                    "output_mount": {"host_path": "/tmp/out", "container_path": "/outputs"},
+                    "asset_cache_mount": {"cache_key": "fintoolbench"},
+                    "benchmark_checkout_path": "/workspace/repo",
+                }
+            },
             "result": {
                 "model_eval": {"answer": "0/1", "expected": "1/1"},
                 "status_counts": {"failed_model_tool_use": 1},
@@ -313,6 +349,12 @@ def test_external_benchmark_csv_row_keeps_answer_separate_from_status():
     assert row["status"] == "failed_model_tool_use"
     assert row["score_status"] == "failed_model_tool_use"
     assert row["answer"] == "0/1"
+    assert row["docker_image"] == "agent-bench-external:python3.12"
+    assert row["container_name"] == "agent-bench-pb-015"
+    assert row["network_mode"] == "bridge"
+    assert row["docker_socket_mount"] == '{"enabled": false}'
+    assert row["asset_cache_mount"] == '{"cache_key": "fintoolbench"}'
+    assert row["benchmark_checkout_path"] == "/workspace/repo"
 
 
 def test_aggregate_results_separates_skipped_from_valid_scores():
@@ -516,6 +558,44 @@ def test_aggregate_results_excludes_tool_call_without_exposed_tools():
     assert summary["valid_task_count"] == 0
     assert summary["benchmark_results"][0]["included_in_official_score"] is False
     assert summary["benchmark_results"][0]["capabilities_verified"] is False
+
+
+def test_aggregate_results_excludes_missing_environment_requirements():
+    summary = aggregate_results(
+        [
+            GradeResult(
+                task_id="PB_016",
+                category="Finance",
+                kind="external_benchmark",
+                score=1.0,
+                max_score=1.0,
+                passed=True,
+                json_valid=True,
+                latency_seconds=0.1,
+                status="passed",
+                details={
+                    "benchmark": "Finance Agent v2",
+                    "group": "Finance",
+                    "result": {
+                        "status": "passed",
+                        "required_capabilities": ["tool_call"],
+                        "required_tools": ["web_search"],
+                        "exposed_tools": ["web_search"],
+                        "missing_tools": [],
+                        "missing_env": ["FINANCE_AGENT_V2_CACHE"],
+                        "status_counts": {"passed": 1},
+                    },
+                },
+            )
+        ],
+        {"run_duration_seconds": 1.0},
+    )
+
+    assert summary["valid_task_count"] == 0
+    assert summary["coverage_summary"]["successfully_scored_benchmarks"] == 0
+    assert summary["benchmark_results"][0]["included_in_official_score"] is False
+    assert summary["benchmark_results"][0]["capabilities_verified"] is False
+    assert summary["benchmark_results"][0]["missing_env"] == ["FINANCE_AGENT_V2_CACHE"]
 
 
 def test_aggregate_results_counts_nested_passed_items():

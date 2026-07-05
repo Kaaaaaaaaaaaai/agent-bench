@@ -160,7 +160,7 @@ class ExternalBenchmarkRunner:
                 f"External benchmark timed out after {config.timeout:.1f}s",
                 score=0.0,
             )
-            result_payload["setup_details"] = setup_details
+            _attach_external_setup_details(result_payload, setup_details)
             _write_result_payload(task_output_dir / "agent_bench_result.json", result_payload)
             return ExternalBenchmarkResult(
                 score=0.0,
@@ -209,6 +209,8 @@ class ExternalBenchmarkRunner:
             "official_leaderboard_url": benchmark.get("official_leaderboard_url", manifest.official_leaderboard_url),
             "docker_image": launcher_image,
             "container_name": container_name,
+            "network_mode": setup_details["network_mode"],
+            "docker_socket_mount": setup_details["docker_socket_mount"],
             "output_dir": str(task_output_dir),
             "output_mount": setup_details["output_mount"],
             "asset_cache_mount": setup_details["asset_cache_mount"],
@@ -436,19 +438,26 @@ def _docker_run_command(
         command.extend(["--memory", manifest.container.memory])
     if manifest.container.cpus is not None:
         command.extend(["--cpus", str(manifest.container.cpus)])
-    if manifest.container.network == "none":
-        command.extend(["--network", "none"])
-    elif manifest.container.network == "host":
-        command.extend(["--network", "host"])
-    else:
-        command.extend(["--network", "bridge"])
+    command.extend(["--network", _docker_network_mode(manifest)])
     command.extend(["--mount", f"type=bind,src={config.asset_root.resolve()},dst={CONTAINER_ASSET_ROOT},readonly"])
-    if manifest.container.requires_host_docker_socket:
+    if _docker_socket_mount_enabled(config, manifest):
         command.extend(["-v", "/var/run/docker.sock:/var/run/docker.sock"])
     for key, value in sorted(env.items()):
         command.extend(["-e", f"{key}={value}"])
     command.append(launcher_image)
     return command
+
+
+def _docker_network_mode(manifest: BenchmarkManifest) -> str:
+    if manifest.container.network == "none":
+        return "none"
+    if manifest.container.network == "host":
+        return "host"
+    return "bridge"
+
+
+def _docker_socket_mount_enabled(config: ExternalBenchmarkConfig, manifest: BenchmarkManifest) -> bool:
+    return bool(manifest.container.requires_host_docker_socket and config.allow_host_docker_socket)
 
 
 def _docker_env(
@@ -545,6 +554,14 @@ def _external_setup_details(
     return {
         "container_name": container_name,
         "image": launcher_image,
+        "network_mode": _docker_network_mode(manifest),
+        "docker_socket_mount": {
+            "enabled": _docker_socket_mount_enabled(config, manifest),
+            "host_path": "/var/run/docker.sock" if _docker_socket_mount_enabled(config, manifest) else "",
+            "container_path": "/var/run/docker.sock" if _docker_socket_mount_enabled(config, manifest) else "",
+            "descriptor_requires_host_docker_socket": manifest.container.requires_host_docker_socket,
+            "global_allow_host_docker_socket": config.allow_host_docker_socket,
+        },
         "output_mount": {
             "host_path": str(task_output_dir),
             "container_path": CONTAINER_OUTPUT_DIR,
@@ -569,6 +586,8 @@ def _external_setup_details(
 def _attach_external_setup_details(payload: dict[str, Any], setup_details: dict[str, Any]) -> None:
     payload["container_name"] = setup_details["container_name"]
     payload["docker_image"] = setup_details["image"]
+    payload["network_mode"] = setup_details["network_mode"]
+    payload["docker_socket_mount"] = setup_details["docker_socket_mount"]
     payload["output_mount"] = setup_details["output_mount"]
     payload["asset_cache_mount"] = setup_details["asset_cache_mount"]
     payload["benchmark_checkout_path"] = setup_details["benchmark_checkout_path"]

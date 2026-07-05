@@ -68,8 +68,16 @@ RESULT_FIELDS = [
     "required_tools",
     "exposed_tools",
     "missing_tools",
+    "missing_env",
     "missing_assets_count",
     "setup_details",
+    "docker_image",
+    "container_name",
+    "network_mode",
+    "docker_socket_mount",
+    "output_mount",
+    "asset_cache_mount",
+    "benchmark_checkout_path",
     "homepage",
     "license",
     "credit",
@@ -293,7 +301,7 @@ def _report_benchmark_table(benchmark_results: Any, metadata: dict[str, Any]) ->
             continue
         group = str(row.get("group", "Other"))
         if group != current_group:
-            rows.append(f'<tr class="group-row"><td colspan="18">{html.escape(group)}</td></tr>')
+            rows.append(f'<tr class="group-row"><td colspan="26">{html.escape(group)}</td></tr>')
             current_group = group
         status = str(row.get("status") or "")
         status_class = _status_class(status)
@@ -313,11 +321,19 @@ def _report_benchmark_table(benchmark_results: Any, metadata: dict[str, Any]) ->
             f"<td>{html.escape(_short_json(row.get('required_tools')))}</td>"
             f"<td>{html.escape(_short_json(row.get('exposed_tools')))}</td>"
             f"<td>{html.escape(_short_json(row.get('missing_tools')))}</td>"
+            f"<td>{html.escape(_short_json(row.get('missing_env')))}</td>"
             f"<td>{int(row.get('missing_assets_count') or 0)}</td>"
+            f"<td>{html.escape(str(row.get('docker_image') or ''))}</td>"
+            f"<td>{html.escape(str(row.get('container_name') or ''))}</td>"
+            f"<td>{html.escape(str(row.get('network_mode') or ''))}</td>"
+            f"<td>{html.escape(_short_json(row.get('docker_socket_mount')))}</td>"
+            f"<td>{html.escape(_short_json(row.get('output_mount')))}</td>"
+            f"<td>{html.escape(_short_json(row.get('asset_cache_mount')))}</td>"
+            f"<td>{html.escape(_short_json(setup_details))}</td>"
             f"<td>{_format_seconds(row.get('duration_seconds'))}</td>"
             f"<td>{_artifact_link(artifact_paths.get('raw_responses'), 'raw')}</td>"
             f"<td>{_artifact_link(artifact_paths.get('graded_results'), 'graded')}</td>"
-            f"<td>{html.escape(_display_error(str(row.get('error_details') or row.get('error') or _short_json(setup_details) or '')))}</td>"
+            f"<td>{html.escape(_display_error(str(row.get('error_details') or row.get('error') or '')))}</td>"
             "</tr>"
         )
     return (
@@ -325,7 +341,9 @@ def _report_benchmark_table(benchmark_results: Any, metadata: dict[str, Any]) ->
         "<th>Status</th><th>Raw Score</th><th>Normalized 0-100</th><th>Official Score</th>"
         "<th>Coverage</th><th>Capabilities Verified</th><th>Required Capabilities</th>"
         "<th>Supported Capabilities</th><th>Required Tools</th><th>Exposed Tools</th>"
-        "<th>Missing Tools</th><th>Missing Assets</th>"
+        "<th>Missing Tools</th><th>Missing Env</th><th>Missing Assets</th>"
+        "<th>Image</th><th>Container</th><th>Network</th><th>Docker Socket</th>"
+        "<th>Output Mount</th><th>Asset Cache</th><th>Setup Details</th>"
         "<th>Duration</th><th>Raw Responses</th><th>Graded Results</th><th>Notes</th>"
         f"</tr></thead><tbody>{''.join(rows)}</tbody></table></div>"
     )
@@ -538,8 +556,29 @@ def _result_csv_row(result: GradeResult) -> dict[str, Any]:
     row["required_tools"] = _json_cell(payload.get("required_tools", []))
     row["exposed_tools"] = _json_cell(payload.get("exposed_tools", []))
     row["missing_tools"] = _json_cell(payload.get("missing_tools", []))
+    row["missing_env"] = _json_cell(payload.get("missing_env", payload.get("missing_environment", [])))
     row["missing_assets_count"] = payload.get("missing_assets_count", _payload_status_count(payload, FAILED_MISSING_ASSETS))
-    row["setup_details"] = _json_cell(payload.get("setup_details", details.get("setup_details")))
+    setup_details = payload.get("setup_details", details.get("setup_details"))
+    external_setup = setup_details.get("external_harness") if isinstance(setup_details, dict) else {}
+    if not isinstance(external_setup, dict):
+        external_setup = {}
+    row["setup_details"] = _json_cell(setup_details)
+    row["docker_image"] = payload.get("docker_image", details.get("docker_image", external_setup.get("image")))
+    row["container_name"] = payload.get("container_name", details.get("container_name", external_setup.get("container_name")))
+    row["network_mode"] = payload.get("network_mode", details.get("network_mode", external_setup.get("network_mode")))
+    row["docker_socket_mount"] = _json_cell(
+        payload.get("docker_socket_mount", details.get("docker_socket_mount", external_setup.get("docker_socket_mount")))
+    )
+    row["output_mount"] = _json_cell(
+        payload.get("output_mount", details.get("output_mount", external_setup.get("output_mount")))
+    )
+    row["asset_cache_mount"] = _json_cell(
+        payload.get("asset_cache_mount", details.get("asset_cache_mount", external_setup.get("asset_cache_mount")))
+    )
+    row["benchmark_checkout_path"] = payload.get(
+        "benchmark_checkout_path",
+        details.get("benchmark_checkout_path", external_setup.get("benchmark_checkout_path")),
+    )
     row["homepage"] = details.get("homepage")
     row["license"] = details.get("license")
     row["credit"] = details.get("credit")
@@ -992,8 +1031,11 @@ def _capabilities_verified(result: GradeResult) -> bool:
     payload = _benchmark_payload(result)
     required = payload.get("required_capabilities")
     missing_tools = payload.get("missing_tools")
+    missing_env = payload.get("missing_env", payload.get("missing_environment"))
     exposed_tools = payload.get("exposed_tools")
     if isinstance(missing_tools, list) and missing_tools:
+        return False
+    if isinstance(missing_env, list) and missing_env:
         return False
     if isinstance(required, list) and "tool_call" in {str(item) for item in required}:
         if not isinstance(exposed_tools, list) or not exposed_tools:

@@ -153,6 +153,7 @@ DEFAULT_MAX_TOTAL_TOOL_CALLS = 40
 MAX_CONSECUTIVE_FAILED_TOOL_CALLS = 5
 REPO_PATCH_GRADER_ENV = "AGENT_BENCH_REPO_PATCH_GRADER"
 TARGET_REPO_ROOT_ENV = "AGENT_BENCH_TARGET_REPO_ROOT"
+FINTOOLBENCH_EXECUTABLE_TOOLS_ENV = "AGENT_BENCH_FINTOOLBENCH_EXECUTABLE_TOOLS"
 DEFAULT_ASSET_ROOT = "/tmp/agent-bench-assets"
 FINANCE_AGENT_V2_REQUIRED_TOOLS = {
     "web_search",
@@ -688,19 +689,43 @@ class FinToolBenchAdapter(ToolCallAdapter):
         required = set(_item_required_tools(item))
         return _fintoolbench_tool_schemas(Path.cwd(), required_tools=required)
 
+    def run_agent_loop(
+        self,
+        benchmark: str,
+        item: BenchmarkItem,
+        workspace: TaskWorkspace,
+        tools: list[dict[str, Any]],
+    ) -> AgentRun:
+        previous = os.environ.get(FINTOOLBENCH_EXECUTABLE_TOOLS_ENV)
+        os.environ[FINTOOLBENCH_EXECUTABLE_TOOLS_ENV] = json.dumps(sorted(_tool_schema_names(tools)))
+        try:
+            return super().run_agent_loop(benchmark, item, workspace, tools)
+        finally:
+            if previous is None:
+                os.environ.pop(FINTOOLBENCH_EXECUTABLE_TOOLS_ENV, None)
+            else:
+                os.environ[FINTOOLBENCH_EXECUTABLE_TOOLS_ENV] = previous
+
     def capability_contract(self, required_capabilities: set[str], items: list[BenchmarkItem]) -> dict[str, Any]:
         contract = capability_contract_for(required_capabilities, self)
         required_tools = sorted({tool for item in items for tool in _item_required_tools(item)})
+        tool_manifest_path = Path.cwd() / "tools" / "tools_all_annotated.jsonl"
+        tool_manifest_count = len(_fintoolbench_tool_manifest(tool_manifest_path)) if tool_manifest_path.is_file() else 0
         available_tools = set(_tool_schema_names(_fintoolbench_tool_schemas(Path.cwd(), required_tools=set(required_tools))))
         missing_tools = sorted(set(required_tools) - available_tools)
+        backend_available = not missing_tools and bool(available_tools)
         support = contract.get("tool_call")
         if isinstance(support, dict):
             support["mode"] = "live_financial_tools"
             support["tool_manifest"] = "tools/tools_all_annotated.jsonl"
+            support["tool_manifest_count"] = tool_manifest_count
+            support["backend"] = "agent_bench_local_deterministic"
+            support["backend_available"] = backend_available
             support["required_benchmark_tools"] = required_tools
             support["exposed_tools"] = sorted(available_tools)
+            support["executable_tools"] = sorted(available_tools) if backend_available else []
             support["missing_tools"] = missing_tools
-            support["benchmark_required_tools_available"] = not missing_tools and bool(available_tools)
+            support["benchmark_required_tools_available"] = backend_available
             if not available_tools:
                 support["supported"] = False
                 support["tools"] = False
@@ -1271,7 +1296,7 @@ def main() -> int:
 
 
 def _promote_evaluation_tool_fields(payload: dict[str, Any], evaluations: list[dict[str, Any]]) -> None:
-    for key in ("required_tools", "exposed_tools", "missing_tools"):
+    for key in ("required_tools", "exposed_tools", "missing_tools", "missing_env", "missing_environment"):
         values = _flatten_string_values(payload.get(key))
         for evaluation in evaluations:
             if isinstance(evaluation, dict):
@@ -1300,6 +1325,7 @@ def _base_result_payload(
     required_tools = _contract_required_tools(capability_contract)
     exposed_tools = _contract_exposed_tools(capability_contract)
     missing_tools = _contract_missing_tools(capability_contract)
+    missing_env = _contract_missing_env(capability_contract)
     return {
         "benchmark": args.benchmark,
         "group": os.environ.get("AGENT_BENCH_BENCHMARK_GROUP") or "Benchmarks",
@@ -1330,6 +1356,7 @@ def _base_result_payload(
         "required_tools": required_tools,
         "exposed_tools": exposed_tools,
         "missing_tools": missing_tools,
+        "missing_env": missing_env,
         "native_tool_call_protocol_supported": capability_profile["native_tool_call_protocol_supported"],
         "generic_sandbox_tools_available": capability_profile["generic_sandbox_tools_available"],
         "benchmark_required_tools_available": capability_profile["benchmark_required_tools_available"],
@@ -1567,10 +1594,30 @@ def _supported_capabilities_for_item(
 
 def _static_conversion_live_tools_disabled() -> bool:
     benchmark = _benchmark_descriptor()
+    adapter_mode = str(benchmark.get("adapter_mode") or benchmark.get("mode") or "").strip().lower()
+    if adapter_mode in {
+        "static",
+        "static_gold_answer",
+        "static_public_prompt",
+        "static_transcript",
+        "static_transcript_reasoning",
+    }:
+        return True
+    if benchmark.get("live_tools_required") is False:
+        return True
     static_conversion = benchmark.get("static_conversion")
-    if not isinstance(static_conversion, dict):
-        return False
-    return static_conversion.get("live_tools_required") is False
+    if isinstance(static_conversion, dict):
+        static_mode = str(static_conversion.get("adapter_mode") or static_conversion.get("mode") or "").strip().lower()
+        if static_mode in {
+            "static",
+            "static_gold_answer",
+            "static_public_prompt",
+            "static_transcript",
+            "static_transcript_reasoning",
+        }:
+            return True
+        return static_conversion.get("live_tools_required") is False
+    return False
 
 
 def _benchmark_descriptor() -> dict[str, Any]:
@@ -3482,6 +3529,16 @@ def _contract_missing_tools(capability_contract: dict[str, Any]) -> list[str]:
     return sorted({tool for tool in tools if tool})
 
 
+def _contract_missing_env(capability_contract: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    for support in capability_contract.values():
+        if not isinstance(support, dict):
+            continue
+        values.extend(_flatten_string_values(support.get("missing_env")))
+        values.extend(_flatten_string_values(support.get("missing_environment")))
+    return sorted({value for value in values if value})
+
+
 def _contract_required_tools(capability_contract: dict[str, Any]) -> list[str]:
     tools: list[str] = []
     for support in capability_contract.values():
@@ -3682,7 +3739,11 @@ def validate_finance_agent_v2_item(
     tools: list[dict[str, Any]],
 ) -> tuple[str, str, dict[str, Any]] | None:
     metadata = item.metadata if isinstance(item.metadata, dict) else {}
-    if metadata.get("live_tools_required") is False and not metadata.get("task_md_only"):
+    if (
+        metadata.get("live_tools_required") is False
+        and not metadata.get("task_md_only")
+        and _static_conversion_live_tools_disabled()
+    ):
         return None
     missing_env = [key for key in FINANCE_AGENT_V2_REQUIRED_ENV if not os.environ.get(key)]
     documents = metadata.get("required_documents")
@@ -4980,10 +5041,21 @@ def execute_agent_tool(name: str, arguments: dict[str, Any]) -> str:
 def execute_benchmark_tool(name: str, arguments: dict[str, Any]) -> str | None:
     if name in FINANCE_AGENT_V2_REQUIRED_TOOLS:
         return _execute_finance_agent_v2_tool(name, arguments)
-    fintool_names = set(_tool_schema_names(_fintoolbench_tool_schemas(Path.cwd())))
+    fintool_names = _fintoolbench_executable_tool_names()
     if name in fintool_names:
         return _execute_fintoolbench_tool(name, arguments)
     return None
+
+
+def _fintoolbench_executable_tool_names() -> set[str]:
+    raw = os.environ.get(FINTOOLBENCH_EXECUTABLE_TOOLS_ENV, "")
+    if raw.strip():
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return {name.strip() for name in raw.split(",") if name.strip()}
+        return {str(name).strip() for name in _flatten_string_values(payload) if str(name).strip()}
+    return set(_tool_schema_names(_fintoolbench_tool_schemas(Path.cwd())))
 
 
 def _execute_finance_agent_v2_tool(name: str, arguments: dict[str, Any]) -> str:
@@ -5150,13 +5222,19 @@ def _item_required_tools(item: BenchmarkItem) -> list[str]:
 
 def _missing_required_tools(item: BenchmarkItem, tools: list[dict[str, Any]]) -> list[str]:
     metadata = item.metadata if isinstance(item.metadata, dict) else {}
-    if metadata.get("live_tools_required") is False:
+    if metadata.get("live_tools_required") is False and _item_metadata_may_disable_live_tools(item):
         return []
     exposed = set(_tool_schema_names(tools))
     required = set(_item_required_tools(item))
     if not required:
         return []
     return sorted(required - exposed)
+
+
+def _item_metadata_may_disable_live_tools(item: BenchmarkItem) -> bool:
+    if "tool_call" not in _item_required_capabilities(item):
+        return True
+    return _static_conversion_live_tools_disabled()
 
 
 def tool_list_files(arguments: dict[str, Any]) -> str:

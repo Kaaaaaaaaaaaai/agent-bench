@@ -356,8 +356,11 @@ def _capabilities_verified(result: GradeResult) -> bool:
     payload = _benchmark_payload(result)
     required = payload.get("required_capabilities")
     missing_tools = payload.get("missing_tools")
+    missing_env = payload.get("missing_env", payload.get("missing_environment"))
     exposed_tools = payload.get("exposed_tools")
     if isinstance(missing_tools, list) and missing_tools:
+        return False
+    if isinstance(missing_env, list) and missing_env:
         return False
     if isinstance(required, list) and "tool_call" in {str(item) for item in required}:
         if not isinstance(exposed_tools, list) or not exposed_tools:
@@ -969,6 +972,10 @@ def _benchmark_results(results: list[GradeResult]) -> list[dict[str, Any]]:
         error = _result_error_reason(result)
         required_capabilities = benchmark_payload.get("required_capabilities", details.get("required_capabilities", []))
         manifest = details.get("manifest") if isinstance(details.get("manifest"), dict) else {}
+        setup_details = benchmark_payload.get("setup_details", details.get("setup_details", {}))
+        external_setup = setup_details.get("external_harness") if isinstance(setup_details, dict) else {}
+        if not isinstance(external_setup, dict):
+            external_setup = {}
         rows.append(
             {
                 "suite_id": result.task_id,
@@ -976,6 +983,7 @@ def _benchmark_results(results: list[GradeResult]) -> list[dict[str, Any]]:
                 "group": group,
                 "benchmark": benchmark,
                 "included_in_official_score": _is_valid_result(result),
+                "required_capabilities": required_capabilities,
                 "profile": _profile_for_capabilities(required_capabilities),
                 "score_fraction": round(result.score, 6),
                 "score": round(result.score * 100.0, 4),
@@ -994,7 +1002,13 @@ def _benchmark_results(results: list[GradeResult]) -> list[dict[str, Any]]:
                 "license": details.get("license", ""),
                 "credit": details.get("credit", ""),
                 "citation": details.get("citation", details.get("homepage", "")),
-                "docker_image": details.get("docker_image", ""),
+                "docker_image": benchmark_payload.get("docker_image", details.get("docker_image", external_setup.get("image", ""))),
+                "container_name": benchmark_payload.get("container_name", details.get("container_name", external_setup.get("container_name", ""))),
+                "network_mode": benchmark_payload.get("network_mode", details.get("network_mode", external_setup.get("network_mode", ""))),
+                "docker_socket_mount": benchmark_payload.get("docker_socket_mount", details.get("docker_socket_mount", external_setup.get("docker_socket_mount", {}))),
+                "output_mount": benchmark_payload.get("output_mount", details.get("output_mount", external_setup.get("output_mount", {}))),
+                "asset_cache_mount": benchmark_payload.get("asset_cache_mount", details.get("asset_cache_mount", external_setup.get("asset_cache_mount", {}))),
+                "benchmark_checkout_path": benchmark_payload.get("benchmark_checkout_path", details.get("benchmark_checkout_path", external_setup.get("benchmark_checkout_path", ""))),
                 "output_dir": details.get("output_dir", ""),
                 "manifest": manifest,
                 "asset_refs": manifest.get("assets", []) if isinstance(manifest, dict) else [],
@@ -1010,6 +1024,10 @@ def _benchmark_results(results: list[GradeResult]) -> list[dict[str, Any]]:
                 "required_tools": benchmark_payload.get("required_tools", []),
                 "exposed_tools": benchmark_payload.get("exposed_tools", []),
                 "missing_tools": benchmark_payload.get("missing_tools", []),
+                "missing_env": benchmark_payload.get(
+                    "missing_env",
+                    benchmark_payload.get("missing_environment", []),
+                ),
                 "repository_ready": bool(benchmark_payload.get("repository_ready", False)),
                 "file_count_sampled": benchmark_payload.get("file_count_sampled"),
                 "extracted_task_count": benchmark_payload.get("extracted_task_count"),
@@ -1022,7 +1040,7 @@ def _benchmark_results(results: list[GradeResult]) -> list[dict[str, Any]]:
                     "missing_assets_count",
                     _payload_status_count(benchmark_payload, FAILED_MISSING_ASSETS),
                 ),
-                "setup_details": benchmark_payload.get("setup_details", details.get("setup_details", {})),
+                "setup_details": setup_details,
                 "unsupported_capability_count": _payload_status_count(
                     benchmark_payload,
                     SKIPPED_UNSUPPORTED_CAPABILITY,
