@@ -75,7 +75,7 @@ def test_probe_fails_before_model_call_when_required_tool_missing(tmp_path, monk
         metadata={"required_tools": ["earnings_calendar"]},
     )
 
-    result = MissingToolAdapter().evaluate_item("FinToolBench", item)
+    result = MissingToolAdapter().evaluate_item("ToolBench", item)
 
     assert result["status"] == "failed_missing_required_tool"
     assert result["setup_details"]["blocker_type"] == "missing_required_tool"
@@ -133,96 +133,6 @@ def test_probe_exploitbench_missing_backend_is_listed_and_excluded(tmp_path, mon
     assert result["missing_tools"] == ["exploitbench"]
     assert result["included_in_official_score"] is False
     assert result["capabilities_verified"] is False
-
-
-def test_probe_fintoolbench_without_tool_schema_is_missing_tool_not_model_format(tmp_path, monkeypatch):
-    probe = _load_probe_module()
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("AGENT_BENCH_OUTPUT_DIR", str(tmp_path / "outputs"))
-    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "FinToolBench")
-
-    def fail_model_call(*args, **kwargs):
-        raise AssertionError("model evaluation should be skipped when FinToolBench schemas are missing")
-
-    monkeypatch.setattr(probe.FinToolBenchAdapter, "run_agent_loop", fail_model_call)
-    item = probe.BenchmarkItem(
-        "Call the selected financial tool.",
-        "Use the selected tool.",
-        "data/question/select_data_real_remove_duplicates.jsonl:1",
-        metadata={"required_tools": ["companies_balance_sheet_statements"], "live_tools_required": True},
-    )
-
-    result = probe.FinToolBenchAdapter().evaluate_item("FinToolBench", item)
-
-    assert result["status"] == "failed_missing_required_tool"
-    assert result["missing_tools"] == ["companies_balance_sheet_statements"]
-    assert result["status"] != "failed_model_format"
-    assert result["included_in_official_score"] is False
-
-
-def test_probe_fintoolbench_loads_required_tool_schema(tmp_path, monkeypatch):
-    probe = _load_probe_module()
-    monkeypatch.chdir(tmp_path)
-    tool_dir = tmp_path / "tools"
-    tool_dir.mkdir()
-    (tool_dir / "tools_all_annotated.jsonl").write_text(
-        json.dumps(
-            {
-                "name": "companies_balance_sheet_statements",
-                "description": "Return balance sheet data.",
-                "parameters": {"symbol": {"type": "string", "description": "Ticker symbol"}},
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    item = probe.BenchmarkItem(
-        "Call the balance-sheet tool.",
-        "Use the selected tool.",
-        "data/question/select_data_real_remove_duplicates.jsonl:1",
-        metadata={"required_tools": ["companies_balance_sheet_statements"], "live_tools_required": True},
-    )
-
-    tools = probe.FinToolBenchAdapter().available_tools(
-        item,
-        probe.TaskWorkspace(root=tmp_path, output_dir=tmp_path / "outputs"),
-    )
-
-    assert probe._tool_schema_names(tools) == ["companies_balance_sheet_statements"]
-
-
-def test_probe_fintoolbench_loads_tool_schema_beyond_generic_record_limit(tmp_path, monkeypatch):
-    probe = _load_probe_module()
-    monkeypatch.chdir(tmp_path)
-    tool_dir = tmp_path / "tools"
-    tool_dir.mkdir()
-    rows = [
-        json.dumps({"name": f"irrelevant_tool_{index}", "parameters": {"type": "object", "properties": {}}})
-        for index in range(probe.MAX_RECORDS_PER_FILE + 10)
-    ]
-    rows.append(
-        json.dumps(
-            {
-                "name": "companies_balance_sheet_statements",
-                "description": "Return balance sheet data.",
-                "parameters": {"type": "object", "properties": {"symbol": {"type": "string"}}},
-            }
-        )
-    )
-    (tool_dir / "tools_all_annotated.jsonl").write_text("\n".join(rows) + "\n", encoding="utf-8")
-    item = probe.BenchmarkItem(
-        "Call the balance-sheet tool.",
-        "Use the selected tool.",
-        "data/question/select_data_real_remove_duplicates.jsonl:1",
-        metadata={"required_tools": ["companies_balance_sheet_statements"], "live_tools_required": True},
-    )
-
-    tools = probe.FinToolBenchAdapter().available_tools(
-        item,
-        probe.TaskWorkspace(root=tmp_path, output_dir=tmp_path / "outputs"),
-    )
-
-    assert probe._tool_schema_names(tools) == ["companies_balance_sheet_statements"]
 
 
 def test_probe_finance_agent_v2_missing_tools_are_exact_and_excluded(tmp_path, monkeypatch):
@@ -615,7 +525,7 @@ def test_static_finance_contract_reports_degraded_missing_benchmark_tools():
         [item],
     )
     payload = probe._base_result_payload(
-        args=type("Args", (), {"benchmark": "FinToolBench", "kind": "repository"})(),
+        args=type("Args", (), {"benchmark": "Finance Agent v2", "kind": "repository"})(),
         files=["README.md"],
         markers=["README.md"],
         sample_limit=3,
@@ -708,7 +618,7 @@ def test_probe_payload_reports_degraded_benchmark_tools_as_unsupported():
         },
         "completed",
         "",
-        "FinToolBench",
+        "ExampleFinanceToolBench",
     )
 
     assert unsupported == ["external_data_required", "tool_call"]
@@ -2743,7 +2653,7 @@ def test_finance_agent_v2_static_public_item_skips_backend_credentials_only_when
     assert result is None
 
 
-def test_fintoolbench_missing_required_tool_helper_blocks_model_call():
+def test_missing_required_tool_helper_blocks_model_call():
     probe = _load_probe_module()
     item = probe.BenchmarkItem(
         "Call selected tool.",
@@ -2754,199 +2664,6 @@ def test_fintoolbench_missing_required_tool_helper_blocks_model_call():
     tools = [{"type": "function", "function": {"name": "final_answer"}}]
 
     assert probe._missing_required_tools(item, tools) == ["companies_balance_sheet_statements"]
-
-
-def test_fintoolbench_contract_records_executable_local_backend(tmp_path, monkeypatch):
-    probe = _load_probe_module()
-    monkeypatch.chdir(tmp_path)
-    tool_dir = tmp_path / "tools"
-    tool_dir.mkdir()
-    (tool_dir / "tools_all_annotated.jsonl").write_text(
-        json.dumps(
-            {
-                "name": "companies_balance_sheet_statements",
-                "description": "Return balance sheet statements.",
-                "parameters": {"symbol": {"type": "string"}},
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    item = probe.BenchmarkItem(
-        "Call selected tool.",
-        "Use tool.",
-        "synthetic",
-        metadata={"select_tools": ["companies_balance_sheet_statements"]},
-    )
-
-    contract = probe.FinToolBenchAdapter().capability_contract({"tool_call"}, [item])
-
-    assert contract["tool_call"]["supported"] is True
-    assert contract["tool_call"]["backend"] == "agent_bench_fixture_deterministic"
-    assert contract["tool_call"]["backend_available"] is True
-    assert contract["tool_call"]["tool_manifest_count"] == 1
-    assert contract["tool_call"]["executable_tools"] == ["companies_balance_sheet_statements"]
-    assert contract["tool_call"]["backend_canaries"]["companies_balance_sheet_statements"]["passed"] is True
-
-
-def test_fintoolbench_contract_excludes_missing_fixture_backend(tmp_path, monkeypatch):
-    probe = _load_probe_module()
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv(probe.FINTOOLBENCH_FIXTURE_ROOT_ENV, str(tmp_path / "fixtures"))
-    tool_dir = tmp_path / "tools"
-    tool_dir.mkdir()
-    (tool_dir / "tools_all_annotated.jsonl").write_text(
-        json.dumps(
-            {
-                "name": "companies_balance_sheet_statements",
-                "description": "Return balance sheet statements.",
-                "parameters": {"symbol": {"type": "string"}},
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    item = probe.BenchmarkItem(
-        "Call selected tool.",
-        "Use tool.",
-        "synthetic",
-        metadata={"select_tools": ["companies_balance_sheet_statements"]},
-    )
-
-    contract = probe.FinToolBenchAdapter().capability_contract({"tool_call"}, [item])
-
-    assert contract["tool_call"]["supported"] is False
-    assert contract["tool_call"]["backend_available"] is False
-    assert contract["tool_call"]["missing_tool_backends"] == ["companies_balance_sheet_statements"]
-    assert "semantic canary" in contract["tool_call"]["reason"]
-
-
-def test_fintoolbench_missing_fixture_is_excluded_before_model_call(tmp_path, monkeypatch):
-    probe = _load_probe_module()
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("AGENT_BENCH_OUTPUT_DIR", str(tmp_path / "outputs"))
-    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "FinToolBench")
-    monkeypatch.setenv(probe.FINTOOLBENCH_FIXTURE_ROOT_ENV, str(tmp_path / "fixtures"))
-    tool_dir = tmp_path / "tools"
-    tool_dir.mkdir()
-    (tool_dir / "tools_all_annotated.jsonl").write_text(
-        json.dumps(
-            {
-                "name": "companies_balance_sheet_statements",
-                "description": "Return balance sheet statements.",
-                "parameters": {"symbol": {"type": "string"}},
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-
-    def fail_model_call(*args, **kwargs):
-        raise AssertionError("model evaluation should be skipped when FinToolBench fixture is missing")
-
-    monkeypatch.setattr(probe.FinToolBenchAdapter, "run_agent_loop", fail_model_call)
-    item = probe.BenchmarkItem(
-        "Call selected tool.",
-        "$8.70",
-        "synthetic",
-        metadata={"required_tools": ["companies_balance_sheet_statements"], "live_tools_required": True},
-    )
-
-    result = probe.FinToolBenchAdapter().evaluate_item("FinToolBench", item)
-
-    assert result["status"] == "failed_missing_required_tool"
-    assert result["capabilities_verified"] is False
-    assert result["included_in_official_score"] is False
-    assert result["missing_tools"] == ["companies_balance_sheet_statements"]
-
-
-def test_fintoolbench_contract_excludes_retrieval_snippet_fixture(tmp_path, monkeypatch):
-    probe = _load_probe_module()
-    monkeypatch.chdir(tmp_path)
-    fixture_root = tmp_path / "fixtures" / "fintoolbench"
-    monkeypatch.setenv(probe.FINTOOLBENCH_FIXTURE_ROOT_ENV, str(fixture_root))
-    tool_dir = tmp_path / "tools"
-    tool_dir.mkdir()
-    (tool_dir / "tools_all_annotated.jsonl").write_text(
-        json.dumps(
-            {
-                "name": "companies_balance_sheet_statements",
-                "description": "Return balance sheet statements.",
-                "parameters": {"symbol": {"type": "string"}},
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    fixture = fixture_root / "companies_balance_sheet_statements"
-    fixture.mkdir(parents=True)
-    (fixture / "MMM.json").write_text(
-        json.dumps({"matching_records": [{"path": "TASK.md", "snippet": "Use the selected tool."}]}),
-        encoding="utf-8",
-    )
-    item = probe.BenchmarkItem(
-        "Call selected tool.",
-        "Use tool.",
-        "synthetic",
-        metadata={"select_tools": ["companies_balance_sheet_statements"]},
-    )
-
-    contract = probe.FinToolBenchAdapter().capability_contract({"tool_call"}, [item])
-
-    assert contract["tool_call"]["supported"] is False
-    canary = contract["tool_call"]["backend_canaries"]["companies_balance_sheet_statements"]
-    assert canary["passed"] is False
-    assert "structured statement records" in canary["reason"]
-
-
-def test_fintoolbench_dispatch_executes_selected_tool_from_isolated_workspace(tmp_path, monkeypatch):
-    probe = _load_probe_module()
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv(
-        probe.FINTOOLBENCH_EXECUTABLE_TOOLS_ENV,
-        json.dumps(["companies_balance_sheet_statements"]),
-    )
-
-    result = probe.execute_benchmark_tool("companies_balance_sheet_statements", {"symbol": "MMM"})
-
-    assert result is not None
-    payload = json.loads(result)
-    assert payload["backend"] == "agent_bench_local_deterministic"
-    assert payload["result"]["mode"] == "deterministic_fixture_finance_backend"
-    assert payload["result"]["tool"] == "companies_balance_sheet_statements"
-    assert payload["result"]["fixture_valid"] is True
-    fy2018 = [record for record in payload["result"]["records"] if record.get("calendarYear") == "2018"]
-    assert fy2018[0]["propertyPlantEquipmentNet"] == 8700000000
-
-
-def test_fintoolbench_static_item_bypasses_required_tool_preflight(monkeypatch):
-    probe = _load_probe_module()
-    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "FinToolBench")
-    item = probe.BenchmarkItem(
-        "Answer from static benchmark row.",
-        "$8.70",
-        "synthetic",
-        metadata={
-            "live_tools_required": False,
-            "required_tools": ["companies_balance_sheet_statements"],
-        },
-    )
-    tools = [{"type": "function", "function": {"name": "final_answer"}}]
-
-    assert probe._missing_required_tools(item, tools) == ["companies_balance_sheet_statements"]
-
-    monkeypatch.setenv(
-        "AGENT_BENCH_BENCHMARK_JSON",
-        json.dumps(
-            {
-                "name": "FinToolBench",
-                "adapter_mode": "static_gold_answer",
-                "live_tools_required": False,
-            }
-        ),
-    )
-
-    assert probe._missing_required_tools(item, tools) == []
 
 
 def test_finmcp_static_item_validation_rejects_live_tool_call_metadata():

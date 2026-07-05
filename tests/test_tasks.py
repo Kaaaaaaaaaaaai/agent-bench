@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,76 @@ from agent_bench.tasks import TaskLoadError, load_task_registry, load_tasks
 
 
 REPO_TASKS_DIR = Path(__file__).resolve().parents[1] / "tasks"
+ACTIVE_IDS = [
+    "PB_001",
+    "PB_004",
+    "PB_005",
+    "PB_009",
+    "PB_010",
+    "PB_011",
+    "PB_012",
+    "PB_013",
+    "PB_014",
+    "PB_016",
+    "PB_017",
+]
+ACTIVE_NAMES = [
+    "SWE-bench",
+    "SWE-Lancer",
+    "SWE-bench Verified",
+    "ExploitBench",
+    "codeneedle",
+    "StockBench",
+    "InvestorBench",
+    "QuantCode-Bench",
+    "FinMCP-Bench",
+    "Finance Agent v2",
+    "FinanceMath",
+]
+
+
+def _manifest_payload(task_id: str, name: str, display_order: int = 1) -> dict:
+    return {
+        "id": task_id,
+        "display_name": name,
+        "task_group": "Coding",
+        "description": f"Run {name}.",
+        "homepage_url": "https://example.com",
+        "source": {
+            "repository_url": "https://example.com/repo.git",
+            "commit": "0123456789abcdef0123456789abcdef01234567",
+        },
+        "license": "MIT",
+        "credit": "Example authors",
+        "citation": "https://example.com/cite",
+        "official_conditions": {
+            "official_split": "test",
+            "official_scoring_method": "official score",
+            "official_prompt_format": "official prompt",
+            "official_grader_command": "bash /benchmark/task/harness/run.sh",
+            "official_evaluation_config": f"tasks/{name.lower()}/configs/official.json",
+        },
+        "assets": [
+            {
+                "source": "https://example.com/data.jsonl",
+                "revision": "0123456789abcdef0123456789abcdef01234567",
+                "checksum": "sha256:abc",
+                "expected_local_path": ".",
+            }
+        ],
+        "container": {
+            "image": "agent-bench-external:python3.12",
+            "command": "bash /benchmark/task/harness/run.sh",
+        },
+        "adapter": {
+            "entry_point": "harness/run.sh",
+            "expected_output_files": ["agent_bench_result.json"],
+            "result_parser": "agent_bench_result_json",
+        },
+        "scoring": {"raw_score_field": "score", "max_score": 1.0},
+        "reporting": {"category_label": "Coding", "display_order": display_order},
+        "capabilities": ["chat_answer"],
+    }
 
 
 def test_load_tasks_discovers_json_files_and_derives_category(tmp_path):
@@ -100,50 +171,24 @@ def test_load_tasks_supports_text_recall(tmp_path):
 
 
 
-def test_bundled_public_benchmarks_are_external_tasks_with_credits():
-    tasks = json.loads((REPO_TASKS_DIR / "public_benchmarks.json").read_text(encoding="utf-8"))
-
-    assert len(tasks) == 12
-    assert {task["type"] for task in tasks} == {"external_benchmark"}
-    assert all(task["benchmark"].get("license") for task in tasks)
-    assert all(task["benchmark"].get("credit") for task in tasks)
-    assert all(task["benchmark"].get("citation") for task in tasks)
-    assert all(task["benchmark"].get("group") for task in tasks)
-    assert [task["id"] for task in tasks] == [
-        "PB_001",
-        "PB_004",
-        "PB_005",
-        "PB_009",
-        "PB_010",
-        "PB_011",
-        "PB_012",
-        "PB_013",
-        "PB_014",
-        "PB_015",
-        "PB_016",
-        "PB_017",
-    ]
-    assert [task["benchmark"]["name"] for task in tasks] == [
-        "SWE-bench",
-        "SWE-Lancer",
-        "SWE-bench Verified",
-        "ExploitBench",
-        "codeneedle",
-        "StockBench",
-        "InvestorBench",
-        "QuantCode-Bench",
-        "FinMCP-Bench",
-        "FinToolBench",
-        "Finance Agent v2",
-        "FinanceMath",
-    ]
-
+def test_bundled_benchmark_folders_are_external_tasks_with_credits():
+    legacy_tasks = json.loads((REPO_TASKS_DIR / "public_benchmarks.json").read_text(encoding="utf-8"))
     registry = load_task_registry(REPO_TASKS_DIR)
     loaded = load_tasks(REPO_TASKS_DIR)
     loaded_ids = [task.id for task in loaded]
-    assert len(registry) == 12
-    assert len(loaded) == 12
-    assert loaded_ids == [task["id"] for task in tasks]
+
+    assert len(legacy_tasks) == 11
+    assert [task["id"] for task in legacy_tasks] == ACTIVE_IDS
+    assert "PB_015" not in {task["id"] for task in legacy_tasks}
+    assert len(registry) == 11
+    assert len(loaded) == 11
+    assert loaded_ids == ACTIVE_IDS
+    assert [task.benchmark["name"] for task in loaded] == ACTIVE_NAMES
+    assert all(Path(task.source).name == "manifest.json" for task in loaded)
+    assert all(task["type"] == "external_benchmark" for task in legacy_tasks)
+    assert all(task.benchmark.get("license") for task in loaded)
+    assert all(task.benchmark.get("credit") for task in loaded)
+    assert all(task.benchmark.get("citation") for task in loaded)
     assert "public_benchmarks" not in {task.category for task in loaded}
     assert {task.category for task in loaded} == {
         "Coding",
@@ -156,21 +201,47 @@ def test_bundled_public_benchmarks_are_external_tasks_with_credits():
 def test_full_active_profile_selects_all_current_public_benchmarks():
     loaded = load_tasks(REPO_TASKS_DIR, profile="full_active")
 
-    assert len(loaded) == 12
-    assert [task.id for task in loaded] == [
-        "PB_001",
-        "PB_004",
-        "PB_005",
-        "PB_009",
-        "PB_010",
-        "PB_011",
-        "PB_012",
-        "PB_013",
-        "PB_014",
-        "PB_015",
-        "PB_016",
-        "PB_017",
+    assert len(loaded) == 11
+    assert [task.id for task in loaded] == ACTIVE_IDS
+    assert "PB_015" not in [task.id for task in loaded]
+
+
+def test_load_tasks_discovers_benchmark_folders_without_central_registry(tmp_path):
+    task_dir = tmp_path / "tasks"
+    first = task_dir / "example_bench"
+    second = task_dir / "second_bench"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+    (first / "manifest.json").write_text(json.dumps(_manifest_payload("PB_EX", "ExampleBench", 2)), encoding="utf-8")
+    (second / "manifest.json").write_text(json.dumps(_manifest_payload("PB_SECOND", "SecondBench", 1)), encoding="utf-8")
+    (task_dir / "public_benchmarks.json").write_text(json.dumps([{"id": "BROKEN"}]), encoding="utf-8")
+
+    loaded = load_tasks(task_dir)
+
+    assert [task.id for task in loaded] == ["PB_SECOND", "PB_EX"]
+    assert {Path(task.source).parent.name for task in loaded} == {"example_bench", "second_bench"}
+
+    shutil.rmtree(second)
+    loaded_after_remove = load_tasks(task_dir)
+
+    assert [task.id for task in loaded_after_remove] == ["PB_EX"]
+
+
+def test_core_runner_execution_code_does_not_branch_on_bundled_benchmark_names():
+    repo_root = Path(__file__).resolve().parents[1]
+    core_files = [
+        repo_root / "agent_bench" / "external.py",
+        repo_root / "agent_bench" / "manifest.py",
+        repo_root / "agent_bench" / "runner.py",
+        repo_root / "agent_bench" / "tasks.py",
     ]
+    forbidden = {item.lower() for item in ACTIVE_IDS + ACTIVE_NAMES + ["PB_015", "FinToolBench"]}
+    hits = []
+    for path in core_files:
+        text = path.read_text(encoding="utf-8").lower()
+        hits.extend(f"{path.name}:{name}" for name in sorted(forbidden) if name in text)
+
+    assert hits == []
 
 
 def test_finmcp_descriptor_is_static_not_live_tool_call():

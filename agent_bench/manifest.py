@@ -295,6 +295,7 @@ class BenchmarkManifest:
     version: str = MANIFEST_VERSION
     source_path: str = ""
     capabilities: list[str] = field(default_factory=list)
+    required_tools: list[str] = field(default_factory=list)
 
     @classmethod
     def from_task(cls, task: Task) -> "BenchmarkManifest":
@@ -364,6 +365,7 @@ class BenchmarkManifest:
             ),
             source_path=task.source,
             capabilities=_str_list(benchmark.get("capabilities")),
+            required_tools=_str_list(benchmark.get("required_tools")),
         )
 
     @classmethod
@@ -452,6 +454,7 @@ class BenchmarkManifest:
             version=str(raw.get("version") or MANIFEST_VERSION),
             source_path=source_path,
             capabilities=_str_list(raw.get("capabilities")),
+            required_tools=_str_list(raw.get("required_tools")),
         )
 
     def validate(self, *, allow_host_docker_socket: bool = False) -> ValidationResult:
@@ -584,7 +587,7 @@ class BenchmarkManifest:
             category=self.task_group,
             type="external_benchmark",
             question=self.description,
-            source=self.source_path or f"benchmarks/{self.id}/manifest.yaml",
+            source=self.source_path or f"tasks/{self.id}/manifest.json",
             benchmark=self.to_legacy_benchmark(),
         )
 
@@ -594,6 +597,7 @@ class BenchmarkManifest:
             "name": self.display_name,
             "group": self.task_group,
             "capabilities": list(self.capabilities),
+            "required_tools": list(self.required_tools),
             "homepage": self.homepage_url,
             "official_leaderboard_url": self.official_leaderboard_url,
             "repository": self.source.repository_url,
@@ -609,6 +613,10 @@ class BenchmarkManifest:
                 "command": self.container.command,
                 "environment": [],
                 "volumes": [],
+                "requires_host_docker_socket": self.container.requires_host_docker_socket,
+                "requires_nested_docker": self.container.requires_nested_docker,
+                "run_as_user": self.container.run_as_user,
+                "timeout_seconds": self.container.timeout_seconds,
             },
         }
 
@@ -633,6 +641,7 @@ class BenchmarkManifest:
             "reporting": self.reporting.to_dict(),
             "source_path": self.source_path,
             "capabilities": list(self.capabilities),
+            "required_tools": list(self.required_tools),
         }
 
 
@@ -648,9 +657,17 @@ def load_manifest_tasks(benchmark_root: str | Path) -> list[Task]:
     if not root.exists():
         return []
     tasks: list[Task] = []
-    for path in sorted(root.glob("*/manifest.yaml")) + sorted(root.glob("*/manifest.yml")):
+    manifest_paths = (
+        sorted(root.glob("*/manifest.json"))
+        + sorted(root.glob("*/manifest.yaml"))
+        + sorted(root.glob("*/manifest.yml"))
+    )
+    manifests: list[BenchmarkManifest] = []
+    for path in manifest_paths:
         raw = load_manifest_mapping(path)
-        tasks.append(BenchmarkManifest.from_mapping(raw, source_path=str(path)).to_task())
+        manifests.append(BenchmarkManifest.from_mapping(raw, source_path=str(path)))
+    for manifest in sorted(manifests, key=lambda item: (item.reporting.display_order, item.id)):
+        tasks.append(manifest.to_task())
     return tasks
 
 

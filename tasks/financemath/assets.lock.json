@@ -1,0 +1,35 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_id": "PB_017",
+  "benchmark_slug": "financemath",
+  "asset_root": "agent-bench-assets/financemath",
+  "source": {
+    "repository_url": "https://github.com/yale-nlp/FinanceMath.git",
+    "commit": "bdddc58655947475da852e241b96a7dbd1478742",
+    "dataset_id": "",
+    "dataset_revision": "bdddc58655947475da852e241b96a7dbd1478742",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/yale-nlp/FinanceMath.git",
+      "revision": "bdddc58655947475da852e241b96a7dbd1478742",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_clone"
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_clone"
+      }
+    ]
+  }
+}

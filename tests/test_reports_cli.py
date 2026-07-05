@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from agent_bench.cli import main
 from agent_bench.aggregator import aggregate_results
 from agent_bench.models import GradeResult
@@ -177,15 +179,15 @@ def test_cli_mock_smoke_runs_all_bundled_benchmarks(tmp_path, monkeypatch):
     assert exit_code == 0
     summary = json.loads((tmp_path / out_dir / "summary.json").read_text(encoding="utf-8"))
     html = (tmp_path / out_dir / "summary.html").read_text(encoding="utf-8")
-    assert summary["task_count"] == 12
-    assert summary["selected_suite_count"] == 12
-    assert summary["known_suite_count"] == 12
-    assert summary["excluded_suite_count"] == 3
-    assert len(summary["excluded_suites"]) == 3
-    assert len(summary["benchmark_results"]) == 12
-    assert summary["suite_coverage_rate"] == 0.75
+    assert summary["task_count"] == 11
+    assert summary["selected_suite_count"] == 11
+    assert summary["known_suite_count"] == 11
+    assert summary["excluded_suite_count"] == 2
+    assert len(summary["excluded_suites"]) == 2
+    assert len(summary["benchmark_results"]) == 11
+    assert summary["suite_coverage_rate"] == pytest.approx(9 / 11)
     assert summary["coverage_summary"]["successfully_scored_benchmarks"] == 9
-    assert summary["conservative_all_suite_score"] == 0.75
+    assert summary["conservative_all_suite_score"] == pytest.approx(9 / 11)
     assert "public_benchmarks" not in html
     assert "SWE-bench" in html
     assert "Failures And Status" in html
@@ -273,7 +275,7 @@ def test_aggregate_results_emits_external_benchmark_rows():
                             "network_mode": "bridge",
                             "docker_socket_mount": {"enabled": False},
                             "output_mount": {"host_path": "/tmp/out", "container_path": "/outputs"},
-                            "asset_cache_mount": {"cache_key": "examplebench", "container_path": "/asset-cache"},
+                            "asset_cache_mount": {"cache_key": "examplebench", "container_path": "/benchmark/assets"},
                             "benchmark_checkout_path": "/workspace/repo",
                         }
                     },
@@ -312,7 +314,7 @@ def test_aggregate_results_emits_external_benchmark_rows():
     assert summary["benchmark_results"][0]["docker_socket_mount"] == {"enabled": False}
     assert summary["benchmark_results"][0]["asset_cache_mount"] == {
         "cache_key": "examplebench",
-        "container_path": "/asset-cache",
+        "container_path": "/benchmark/assets",
     }
     assert summary["benchmark_results"][0]["benchmark_checkout_path"] == "/workspace/repo"
     assert summary["num_suites_failed_setup"] == 0
@@ -324,7 +326,7 @@ def test_aggregate_results_emits_external_benchmark_rows():
 
 def test_external_benchmark_csv_row_keeps_answer_separate_from_status():
     result = GradeResult(
-        task_id="PB_015",
+        task_id="PB_TOOL",
         category="Finance",
         kind="external_benchmark",
         score=0.0,
@@ -335,16 +337,16 @@ def test_external_benchmark_csv_row_keeps_answer_separate_from_status():
         answer="failed_model_tool_use",
         status="failed_model_tool_use",
         details={
-            "benchmark": "FinToolBench",
+            "benchmark": "ExampleToolBench",
             "group": "Finance",
             "setup_details": {
                 "external_harness": {
                     "image": "agent-bench-external:python3.12",
-                    "container_name": "agent-bench-pb-015",
+                    "container_name": "agent-bench-pb-tool",
                     "network_mode": "bridge",
                     "docker_socket_mount": {"enabled": False},
                     "output_mount": {"host_path": "/tmp/out", "container_path": "/outputs"},
-                    "asset_cache_mount": {"cache_key": "fintoolbench"},
+                    "asset_cache_mount": {"cache_key": "exampletoolbench"},
                     "benchmark_checkout_path": "/workspace/repo",
                 }
             },
@@ -361,10 +363,10 @@ def test_external_benchmark_csv_row_keeps_answer_separate_from_status():
     assert row["score_status"] == "failed_model_tool_use"
     assert row["answer"] == "0/1"
     assert row["docker_image"] == "agent-bench-external:python3.12"
-    assert row["container_name"] == "agent-bench-pb-015"
+    assert row["container_name"] == "agent-bench-pb-tool"
     assert row["network_mode"] == "bridge"
     assert row["docker_socket_mount"] == '{"enabled": false}'
-    assert row["asset_cache_mount"] == '{"cache_key": "fintoolbench"}'
+    assert row["asset_cache_mount"] == '{"cache_key": "exampletoolbench"}'
     assert row["benchmark_checkout_path"] == "/workspace/repo"
 
 
@@ -541,7 +543,7 @@ def test_aggregate_results_excludes_tool_call_without_exposed_tools():
     summary = aggregate_results(
         [
             GradeResult(
-                task_id="PB_015",
+                task_id="PB_TOOL",
                 category="Finance",
                 kind="external_benchmark",
                 score=1.0,
@@ -551,7 +553,7 @@ def test_aggregate_results_excludes_tool_call_without_exposed_tools():
                 latency_seconds=0.1,
                 status="passed",
                 details={
-                    "benchmark": "FinToolBench",
+                    "benchmark": "ExampleToolBench",
                     "group": "Finance",
                     "result": {
                         "status": "passed",
@@ -746,7 +748,7 @@ def test_usage_summary_uses_benchmark_item_denominator_and_hidden_reasoning_coun
     summary = aggregate_results(
         [
             GradeResult(
-                task_id="PB_015",
+                task_id="PB_TOOL",
                 category="Finance",
                 kind="external_benchmark",
                 score=0.0,
@@ -755,7 +757,7 @@ def test_usage_summary_uses_benchmark_item_denominator_and_hidden_reasoning_coun
                 json_valid=True,
                 latency_seconds=0.1,
                 details={
-                    "benchmark": "FinToolBench",
+                    "benchmark": "ExampleToolBench",
                     "group": "Finance",
                     "result": {
                         "status": "completed",

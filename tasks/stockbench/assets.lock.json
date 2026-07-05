@@ -1,0 +1,41 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_id": "PB_011",
+  "benchmark_slug": "stockbench",
+  "asset_root": "agent-bench-assets/stockbench",
+  "source": {
+    "repository_url": "https://github.com/ChenYXxxx/stockbench.git",
+    "commit": "ce8b2b3483590646ad3b650ac8221f43f76fd091",
+    "dataset_id": "",
+    "dataset_revision": "ce8b2b3483590646ad3b650ac8221f43f76fd091",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/ChenYXxxx/stockbench.git",
+      "revision": "ce8b2b3483590646ad3b650ac8221f43f76fd091",
+      "checksum": "",
+      "expected_local_path": "storage/cache",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": [
+          "storage/cache"
+        ]
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_paths",
+        "required_paths": [
+          "storage/cache"
+        ]
+      }
+    ]
+  }
+}

@@ -1,7 +1,9 @@
 import json
+import os
 from pathlib import Path
 from typing import Any
 
+from agent_bench.manifest import load_manifest_tasks
 from agent_bench.models import Task
 
 
@@ -32,10 +34,22 @@ def load_task_registry(tasks_dir: str | Path) -> list[Task]:
     if not root.is_dir():
         raise TaskLoadError(f"Task path is not a directory: {root}")
 
-    tasks: list[Task] = []
+    manifest_tasks = load_manifest_tasks(root)
+    tasks: list[Task] = list(manifest_tasks)
+    seen_task_ids = {task.id for task in tasks}
+    skip_legacy_public = bool(manifest_tasks) and os.environ.get(
+        "AGENT_BENCH_ENABLE_LEGACY_PUBLIC_BENCHMARKS",
+        "",
+    ).strip().lower() not in {"1", "true", "yes"}
     for path in sorted(root.glob("*.json")):
+        if skip_legacy_public and path.name == "public_benchmarks.json":
+            continue
         category = path.stem
-        tasks.extend(_load_task_file(path, category))
+        for task in _load_task_file(path, category):
+            if task.id in seen_task_ids:
+                continue
+            seen_task_ids.add(task.id)
+            tasks.append(task)
 
     if not tasks:
         raise TaskLoadError("No tasks were loaded")

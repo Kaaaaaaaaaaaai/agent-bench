@@ -279,7 +279,7 @@ def test_grade_external_benchmark_treats_unsupported_capability_as_coverage_gap(
 )
 def test_grade_external_benchmark_promotes_capability_failures(result_payload):
     task = Task(
-        id="PB_015",
+        id="PB_TOOL",
         category="public_benchmarks",
         type="external_benchmark",
         question="Run benchmark",
@@ -414,7 +414,7 @@ def test_grade_external_benchmark_maps_completed_zero_score_to_failed_model_answ
 
 def test_grade_external_benchmark_preserves_primary_item_model_failure_status():
     task = Task(
-        id="PB_015",
+        id="PB_TOOL",
         category="public_benchmarks",
         type="external_benchmark",
         question="Run benchmark",

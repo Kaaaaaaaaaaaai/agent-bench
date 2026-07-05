@@ -1,0 +1,41 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_id": "PB_010",
+  "benchmark_slug": "codeneedle",
+  "asset_root": "agent-bench-assets/codeneedle",
+  "source": {
+    "repository_url": "https://github.com/alexziskind1/codeneedle.git",
+    "commit": "a6ccc03145ca700ed4a556846ac87e0488ad5437",
+    "dataset_id": "",
+    "dataset_revision": "a6ccc03145ca700ed4a556846ac87e0488ad5437",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/alexziskind1/codeneedle.git",
+      "revision": "a6ccc03145ca700ed4a556846ac87e0488ad5437",
+      "checksum": "",
+      "expected_local_path": "fixtures",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": [
+          "fixtures"
+        ]
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_paths",
+        "required_paths": [
+          "fixtures"
+        ]
+      }
+    ]
+  }
+}

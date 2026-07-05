@@ -1,0 +1,41 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_id": "PB_013",
+  "benchmark_slug": "quantcode-bench",
+  "asset_root": "agent-bench-assets/quantcode-bench",
+  "source": {
+    "repository_url": "https://github.com/LimexAILab/QuantCode-Bench.git",
+    "commit": "f8bda951addb409a81aa316c00401dbde60774ae",
+    "dataset_id": "",
+    "dataset_revision": "f8bda951addb409a81aa316c00401dbde60774ae",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/LimexAILab/QuantCode-Bench.git",
+      "revision": "f8bda951addb409a81aa316c00401dbde60774ae",
+      "checksum": "",
+      "expected_local_path": "data/benchmark_tasks_multiframe.json",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": [
+          "data/benchmark_tasks_multiframe.json"
+        ]
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_paths",
+        "required_paths": [
+          "data/benchmark_tasks_multiframe.json"
+        ]
+      }
+    ]
+  }
+}

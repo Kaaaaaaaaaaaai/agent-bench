@@ -27,7 +27,9 @@ from agent_bench.statuses import (
 DEFAULT_EXTERNAL_IMAGE = "agent-bench-external:python3.12"
 CONTAINER_OUTPUT_DIR = "/outputs"
 DEFAULT_ASSET_ROOT = Path("agent-bench-assets")
-CONTAINER_ASSET_ROOT = "/asset-cache"
+CONTAINER_ASSET_DOWNLOAD_ROOT = "/asset-cache"
+CONTAINER_BENCHMARK_TASK_DIR = "/benchmark/task"
+CONTAINER_BENCHMARK_ASSET_DIR = "/benchmark/assets"
 IMAGE_FINGERPRINT_LABEL = "agent-bench.external-fingerprint"
 _IMAGE_BUILD_LOCK = threading.Lock()
 
@@ -131,8 +133,19 @@ class ExternalBenchmarkRunner:
         if asset_cache_error:
             env["AGENT_BENCH_ASSET_CACHE_WARNING"] = asset_cache_error
 
+        task_mount_dir = _benchmark_task_mount_dir(config, task)
+        asset_mount_dir = _benchmark_asset_cache_dir(task, config, manifest)
+        asset_mount_dir.mkdir(parents=True, exist_ok=True)
         container_name = f"agent-bench-{task.id.lower()}-{uuid.uuid4().hex[:12]}"
-        command = _docker_run_command(config, manifest, container_name, launcher_image, env)
+        command = _docker_run_command(
+            config,
+            manifest,
+            container_name,
+            launcher_image,
+            env,
+            task_mount_dir=task_mount_dir,
+            asset_mount_dir=asset_mount_dir,
+        )
         setup_details = _external_setup_details(
             task=task,
             manifest=manifest,
@@ -142,6 +155,8 @@ class ExternalBenchmarkRunner:
             task_output_dir=task_output_dir,
             env=env,
             asset_cache_error=asset_cache_error,
+            task_mount_dir=task_mount_dir,
+            asset_mount_dir=asset_mount_dir,
         )
 
         try:
@@ -214,6 +229,7 @@ class ExternalBenchmarkRunner:
             "output_dir": str(task_output_dir),
             "output_mount": setup_details["output_mount"],
             "asset_cache_mount": setup_details["asset_cache_mount"],
+            "benchmark_task_mount": setup_details["benchmark_task_mount"],
             "benchmark_checkout_path": setup_details["benchmark_checkout_path"],
             "manifest": manifest.to_dict(),
             "container_command": manifest.container.command,
@@ -371,7 +387,7 @@ def _launcher_image_fingerprint(config: ExternalBenchmarkConfig) -> str:
         if path.is_file():
             digest.update(path.read_bytes())
         digest.update(b"\0")
-    for fixture_name in ("fintoolbench", "finance_agent_v2"):
+    for fixture_name in ("finance_agent_v2",):
         fixture_root = config.source_root / "fixtures" / fixture_name
         if fixture_root.exists():
             for path in sorted(item for item in fixture_root.rglob("*") if item.is_file()):
@@ -422,6 +438,9 @@ def _docker_run_command(
     container_name: str,
     launcher_image: str,
     env: dict[str, str],
+    *,
+    task_mount_dir: Path,
+    asset_mount_dir: Path,
 ) -> list[str]:
     command = [
         config.docker_bin,
@@ -448,13 +467,45 @@ def _docker_run_command(
     if manifest.container.cpus is not None:
         command.extend(["--cpus", str(manifest.container.cpus)])
     command.extend(["--network", _docker_network_mode(manifest)])
-    command.extend(["--mount", f"type=bind,src={config.asset_root.resolve()},dst={CONTAINER_ASSET_ROOT},readonly"])
+    command.extend(
+        [
+            "--mount",
+            f"type=bind,src={task_mount_dir.resolve()},dst={CONTAINER_BENCHMARK_TASK_DIR},readonly",
+        ]
+    )
+    command.extend(
+        [
+            "--mount",
+            f"type=bind,src={asset_mount_dir.resolve()},dst={CONTAINER_BENCHMARK_ASSET_DIR},readonly",
+        ]
+    )
     if _docker_socket_mount_enabled(config, manifest):
         command.extend(["-v", "/var/run/docker.sock:/var/run/docker.sock"])
     for key, value in sorted(env.items()):
         command.extend(["-e", f"{key}={value}"])
     command.append(launcher_image)
     return command
+
+
+def _benchmark_task_mount_dir(config: ExternalBenchmarkConfig, task: Task) -> Path:
+    source = Path(task.source)
+    candidate = source if source.is_absolute() else config.source_root / source
+    if candidate.is_file():
+        return candidate.parent
+    if candidate.is_dir():
+        return candidate
+    fallback = config.source_root / "tasks"
+    return fallback if fallback.exists() else config.source_root
+
+
+def _benchmark_asset_cache_dir(
+    task: Task,
+    config: ExternalBenchmarkConfig,
+    manifest: BenchmarkManifest,
+) -> Path:
+    benchmark = task.benchmark if isinstance(task.benchmark, dict) else {}
+    key = _asset_cache_key(str(benchmark.get("name") or manifest.display_name or task.id))
+    return config.asset_root / key
 
 
 def _docker_network_mode(manifest: BenchmarkManifest) -> str:
@@ -501,7 +552,8 @@ def _docker_env(
         "AGENT_BENCH_TEMPERATURE": str(config.temperature),
         "AGENT_BENCH_TOOL_PARSER": config.tool_parser,
         "AGENT_BENCH_OUTPUT_DIR": CONTAINER_OUTPUT_DIR,
-        "AGENT_BENCH_ASSET_ROOT": CONTAINER_ASSET_ROOT,
+        "AGENT_BENCH_TASK_DIR": CONTAINER_BENCHMARK_TASK_DIR,
+        "AGENT_BENCH_ASSET_ROOT": CONTAINER_BENCHMARK_ASSET_DIR,
         "AGENT_BENCH_ASSET_CACHE_KEY": _asset_cache_key(str(benchmark.get("name") or manifest.display_name)),
         "AGENT_BENCH_MANIFEST_JSON": json.dumps(manifest.to_dict(), sort_keys=True),
         "AGENT_BENCH_BENCHMARK_JSON": json.dumps(benchmark, sort_keys=True),
@@ -546,6 +598,8 @@ def _external_setup_details(
     task_output_dir: Path,
     env: dict[str, str],
     asset_cache_error: str | None,
+    task_mount_dir: Path,
+    asset_mount_dir: Path,
 ) -> dict[str, Any]:
     asset_cache_key = env.get("AGENT_BENCH_ASSET_CACHE_KEY", "")
     cache_dir = config.asset_root / asset_cache_key if asset_cache_key else config.asset_root
@@ -556,12 +610,12 @@ def _external_setup_details(
         if asset.required and asset.expected_local_path
     ]
     cache_required_paths = [path for path in required_asset_paths if path not in {".", ""}]
-    cache_recipe = _asset_cache_recipe(task.benchmark)
+    cache_recipe = _asset_cache_recipe(task, config)
     validation = _asset_validation_details(
         cache_dir,
         required_asset_paths,
         asset_cache_error,
-        cache_required=bool(cache_recipe or cache_required_paths),
+        cache_required=bool(cache_recipe),
     )
     catalog_checkout_path = "/workspace/repo"
     subdir = manifest.source.subdir or env.get("AGENT_BENCH_SUBDIR", "")
@@ -584,8 +638,8 @@ def _external_setup_details(
             "mode": "docker_cp",
         },
         "asset_cache_mount": {
-            "host_path": str(config.asset_root.resolve()),
-            "container_path": CONTAINER_ASSET_ROOT,
+            "host_path": str(asset_mount_dir.resolve()),
+            "container_path": CONTAINER_BENCHMARK_ASSET_DIR,
             "readonly": True,
             "cache_key": asset_cache_key,
             "cache_path": str(cache_dir),
@@ -593,6 +647,11 @@ def _external_setup_details(
             "cache_used": validation["cache_used"],
             "direct_clone_used": validation["direct_clone_used"],
             "cache_status": validation["cache_status"],
+        },
+        "benchmark_task_mount": {
+            "host_path": str(task_mount_dir.resolve()),
+            "container_path": CONTAINER_BENCHMARK_TASK_DIR,
+            "readonly": True,
         },
         "catalog_checkout_path": catalog_checkout_path,
         "benchmark_checkout_path": catalog_checkout_path,
@@ -612,6 +671,7 @@ def _attach_external_setup_details(payload: dict[str, Any], setup_details: dict[
     payload["docker_socket_mount"] = setup_details["docker_socket_mount"]
     payload["output_mount"] = setup_details["output_mount"]
     payload["asset_cache_mount"] = setup_details["asset_cache_mount"]
+    payload["benchmark_task_mount"] = setup_details["benchmark_task_mount"]
     payload["catalog_checkout_path"] = setup_details["catalog_checkout_path"]
     payload["benchmark_checkout_path"] = setup_details["benchmark_checkout_path"]
     payload.setdefault("target_checkout_path", setup_details["target_checkout_path"])
@@ -659,7 +719,7 @@ def _asset_validation_details(
     cache_used = materialized_count > 0
     if asset_cache_error:
         cache_status = "warning"
-    elif missing:
+    elif missing and cache_required:
         cache_status = "missing_required"
     elif sentinel.is_file() and cache_used:
         cache_status = "ready"
@@ -690,7 +750,7 @@ def _prepare_benchmark_asset_cache(
     *,
     launcher_image: str | None = None,
 ) -> str | None:
-    recipe = _asset_cache_recipe(task.benchmark)
+    recipe = _asset_cache_recipe(task, config)
     if recipe is None:
         return None
     cache_dir = config.asset_root / recipe["key"]
@@ -821,7 +881,7 @@ def _prepare_benchmark_asset_cache_with_docker(
             "--network",
             "host",
             "-v",
-            f"{config.asset_root.resolve()}:{CONTAINER_ASSET_ROOT}",
+            f"{config.asset_root.resolve()}:{CONTAINER_ASSET_DOWNLOAD_ROOT}",
             "--entrypoint",
             "bash",
             launcher_image,
@@ -865,8 +925,8 @@ def _docker_asset_download_script(recipe: dict[str, Any]) -> str:
             f"ref={ref}",
             f"includes={includes}",
             f"requires_lfs={requires_lfs}",
-            f'cache="{CONTAINER_ASSET_ROOT}/$key"',
-            f'tmp="{CONTAINER_ASSET_ROOT}/_downloads/$key/repo"',
+            f'cache="{CONTAINER_ASSET_DOWNLOAD_ROOT}/$key"',
+            f'tmp="{CONTAINER_ASSET_DOWNLOAD_ROOT}/_downloads/$key/repo"',
             'rm -rf "$tmp"',
             'mkdir -p "$(dirname "$tmp")" "$cache"',
             "export GIT_LFS_SKIP_SMUDGE=1",
@@ -878,54 +938,40 @@ def _docker_asset_download_script(recipe: dict[str, Any]) -> str:
     )
 
 
-def _asset_cache_recipe(benchmark: dict[str, Any]) -> dict[str, Any] | None:
-    key = _asset_cache_key(str(benchmark.get("name") or ""))
-    if key == "gdpval":
-        return {
-            "key": key,
-            "repository": benchmark.get("repository") or "https://huggingface.co/datasets/openai/gdpval",
-            "ref": benchmark.get("ref") or "main",
-            "includes": ("reference_files/**", "deliverable_files/**"),
-            "subpaths": ("reference_files", "deliverable_files"),
-        }
-    if key == "paperbench":
-        return {
-            "key": key,
-            "repository": benchmark.get("repository") or "https://github.com/openai/frontier-evals.git",
-            "ref": benchmark.get("ref") or "main",
-            "includes": ("project/paperbench/data/papers/**",),
-            "subpaths": ("project/paperbench/data/papers",),
-        }
-    if key == "swe-lancer":
-        subdir = str(benchmark.get("subdir") or "project/swelancer").strip("/") or "project/swelancer"
-        return {
-            "key": key,
-            "repository": benchmark.get("repository") or "https://github.com/openai/frontier-evals.git",
-            "ref": benchmark.get("ref") or "main",
-            "requires_git_lfs": False,
-            "includes": (),
-            "subpaths": (subdir,),
-        }
-    if key == "exploitbench":
-        return {
-            "key": key,
-            "repository": benchmark.get("repository") or "https://github.com/exploitbench/exploitbench.git",
-            "ref": benchmark.get("ref") or "main",
-            "requires_git_lfs": False,
-            "includes": (),
-            "subpaths": (
-                "benchmarks",
-                "data",
-                "docs",
-                "exploitbench",
-                "scripts",
-                "testenvs",
-                "pyproject.toml",
-                "README.md",
-                "Makefile",
-            ),
-        }
-    return None
+def _asset_cache_recipe(task: Task, config: ExternalBenchmarkConfig) -> dict[str, Any] | None:
+    lock_path = _benchmark_task_mount_dir(config, task) / "assets.lock.json"
+    if not lock_path.is_file():
+        return None
+    try:
+        raw = json.loads(lock_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    materialization = raw.get("materialization")
+    if not isinstance(materialization, dict):
+        return None
+    recipe = materialization.get("cache_recipe")
+    if not isinstance(recipe, dict) or recipe.get("enabled", True) is False:
+        return None
+    source = raw.get("source") if isinstance(raw.get("source"), dict) else {}
+    benchmark = task.benchmark if isinstance(task.benchmark, dict) else {}
+    repository = str(recipe.get("repository") or source.get("repository_url") or benchmark.get("repository") or "")
+    subpaths = tuple(str(item).strip("/") for item in recipe.get("subpaths", []) if str(item).strip())
+    if not repository or not subpaths:
+        return None
+    key = str(recipe.get("key") or raw.get("benchmark_slug") or benchmark.get("name") or task.id)
+    includes = recipe.get("includes")
+    if not isinstance(includes, list):
+        includes = [f"{path}/**" for path in subpaths if path != "."]
+    return {
+        "key": _asset_cache_key(key),
+        "repository": repository,
+        "ref": str(recipe.get("ref") or source.get("commit") or source.get("dataset_revision") or benchmark.get("ref") or "main"),
+        "requires_git_lfs": bool(recipe.get("requires_git_lfs", True)),
+        "includes": tuple(str(item) for item in includes),
+        "subpaths": subpaths,
+    }
 
 
 def _asset_cache_key(value: str) -> str:

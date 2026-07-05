@@ -462,63 +462,6 @@
     }
   },
   {
-    "id": "PB_015",
-    "type": "external_benchmark",
-    "question": "Run FinToolBench locally through the Docker-backed public benchmark adapter.",
-    "benchmark": {
-      "name": "FinToolBench",
-      "group": "Finance",
-      "capabilities": [
-        "tool_call",
-        "external_data_required"
-      ],
-      "homepage": "https://github.com/Double-wk/FinToolBench",
-      "repository": "https://github.com/Double-wk/FinToolBench.git",
-      "ref": "0ec7458e0663ba56ee3d50b64aa9f1cb9097b725",
-      "subdir": "",
-      "license": "Unspecified",
-      "credit": "FinToolBench authors",
-      "citation": "https://github.com/Double-wk/FinToolBench",
-      "adapter": "fintoolbench_live_tools",
-      "official_conditions": {
-        "official_split": "public selected question data",
-        "official_scoring_method": "agent-bench public adapter normalized score",
-        "official_prompt_format": "live tool-call prompts extracted from the pinned upstream repository with tools/tools_all_annotated.jsonl exposed",
-        "official_grader_command": "agent-bench-probe --benchmark \"FinToolBench\" --kind public-benchmark",
-        "official_evaluation_config": "tasks/public_benchmarks.json#PB_015",
-        "container_requirements": "agent-bench-external:python3.12 launcher image"
-      },
-      "dataset_source": {
-        "kind": "upstream_repository",
-        "required_paths": [
-          "tools/tools_all_annotated.jsonl",
-          "data/question/select_data_real_remove_duplicates.jsonl"
-        ]
-      },
-      "assets": [
-        {
-          "source": "https://github.com/Double-wk/FinToolBench.git",
-          "revision": "0ec7458e0663ba56ee3d50b64aa9f1cb9097b725",
-          "expected_local_path": ".",
-          "validation_rules": {
-            "kind": "repository_paths",
-            "required_paths": [
-              "tools/tools_all_annotated.jsonl",
-              "data/question/select_data_real_remove_duplicates.jsonl"
-            ]
-          }
-        }
-      ],
-      "docker": {
-        "image": "agent-bench-external:python3.12",
-        "setup": [],
-        "command": "agent-bench-probe --benchmark \"FinToolBench\" --kind public-benchmark",
-        "environment": [],
-        "volumes": []
-      }
-    }
-  },
-  {
     "id": "PB_016",
     "type": "external_benchmark",
     "question": "Run Finance Agent v2 locally through the Docker-backed public benchmark adapter.",

@@ -1,0 +1,49 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_id": "PB_016",
+  "benchmark_slug": "finance-agent-v2",
+  "asset_root": "agent-bench-assets/finance-agent-v2",
+  "source": {
+    "repository_url": "https://github.com/vals-ai/finance-agent-v2.git",
+    "commit": "abae841eadd1467f2865f3699a1dfc0774d44d76",
+    "dataset_id": "",
+    "dataset_revision": "abae841eadd1467f2865f3699a1dfc0774d44d76",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/vals-ai/finance-agent-v2.git",
+      "revision": "abae841eadd1467f2865f3699a1dfc0774d44d76",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_clone",
+        "required_tools": [
+          "web_search",
+          "edgar_search",
+          "parse_html_page",
+          "retrieve_information",
+          "price_history"
+        ]
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_clone",
+        "required_tools": [
+          "web_search",
+          "edgar_search",
+          "parse_html_page",
+          "retrieve_information",
+          "price_history"
+        ]
+      }
+    ]
+  }
+}

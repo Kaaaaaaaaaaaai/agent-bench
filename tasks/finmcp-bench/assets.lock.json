@@ -1,0 +1,37 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_id": "PB_014",
+  "benchmark_slug": "finmcp-bench",
+  "asset_root": "agent-bench-assets/finmcp-bench",
+  "source": {
+    "repository_url": "https://huggingface.co/datasets/DianJin/FinMCP-Bench",
+    "commit": "fa3ffa6939ee29eb78576cfe0d31888de6085202",
+    "dataset_id": "DianJin/FinMCP-Bench",
+    "dataset_revision": "fa3ffa6939ee29eb78576cfe0d31888de6085202",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://huggingface.co/datasets/DianJin/FinMCP-Bench",
+      "revision": "fa3ffa6939ee29eb78576cfe0d31888de6085202",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "huggingface_dataset",
+        "dataset_id": "DianJin/FinMCP-Bench"
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "huggingface_dataset",
+        "dataset_id": "DianJin/FinMCP-Bench"
+      }
+    ]
+  }
+}

@@ -155,8 +155,6 @@ REPO_PATCH_GRADER_ENV = "AGENT_BENCH_REPO_PATCH_GRADER"
 SWELANCER_TEST_COMMAND_ENV = "AGENT_BENCH_SWELANCER_TEST_COMMAND"
 SWELANCER_GRADER_TIMEOUT_ENV = "AGENT_BENCH_SWELANCER_GRADER_TIMEOUT"
 TARGET_REPO_ROOT_ENV = "AGENT_BENCH_TARGET_REPO_ROOT"
-FINTOOLBENCH_EXECUTABLE_TOOLS_ENV = "AGENT_BENCH_FINTOOLBENCH_EXECUTABLE_TOOLS"
-FINTOOLBENCH_FIXTURE_ROOT_ENV = "AGENT_BENCH_FINTOOLBENCH_FIXTURE_ROOT"
 FINANCE_AGENT_V2_FIXTURE_ROOT_ENV = "AGENT_BENCH_FINANCE_AGENT_V2_FIXTURE_ROOT"
 DEFAULT_ASSET_ROOT = "/tmp/agent-bench-assets"
 FINANCE_AGENT_V2_REQUIRED_TOOLS = {
@@ -181,17 +179,6 @@ FINANCE_AGENT_V2_CANARY_TERMS = (
     ("ai_regulatory_compliance", ("regulatory", "compliance", "ai")),
     ("rapid_ai_evolution", ("rapidly evolving", "ai")),
 )
-FINTOOLBENCH_NET_PPE_KEYS = (
-    "propertyPlantEquipmentNet",
-    "netPropertyPlantEquipment",
-    "propertyPlantAndEquipmentNet",
-    "netPPE",
-    "netPpne",
-    "netPPNE",
-)
-FINTOOLBENCH_REQUIRED_CANARY_ARGS = {
-    "companies_balance_sheet_statements": {"symbol": "MMM"},
-}
 EXPLOITBENCH_REQUIRED_CONFIGS = (
     "benchmarks/v8.yaml",
     "benchmarks/v8-small.yaml",
@@ -713,82 +700,6 @@ class StaticFinanceReasoningAdapter(ToolCallAdapter):
             return _agent_run_from_dict(run_agent_loop(benchmark, static_item, tools=[]))
 
 
-class FinToolBenchAdapter(ToolCallAdapter):
-    name = "fintoolbench_live_tools"
-
-    def available_tools(self, item: BenchmarkItem, workspace: TaskWorkspace) -> list[dict[str, Any]]:
-        required = set(_item_required_tools(item))
-        schemas = _fintoolbench_tool_schemas(Path.cwd(), required_tools=required)
-        valid_tools = _fintoolbench_valid_backend_tools(Path.cwd(), required)
-        return [schema for schema in schemas if _tool_schema_name(schema) in valid_tools]
-
-    def run_agent_loop(
-        self,
-        benchmark: str,
-        item: BenchmarkItem,
-        workspace: TaskWorkspace,
-        tools: list[dict[str, Any]],
-    ) -> AgentRun:
-        previous = os.environ.get(FINTOOLBENCH_EXECUTABLE_TOOLS_ENV)
-        os.environ[FINTOOLBENCH_EXECUTABLE_TOOLS_ENV] = json.dumps(sorted(_tool_schema_names(tools)))
-        try:
-            return super().run_agent_loop(benchmark, item, workspace, tools)
-        finally:
-            if previous is None:
-                os.environ.pop(FINTOOLBENCH_EXECUTABLE_TOOLS_ENV, None)
-            else:
-                os.environ[FINTOOLBENCH_EXECUTABLE_TOOLS_ENV] = previous
-
-    def capability_contract(self, required_capabilities: set[str], items: list[BenchmarkItem]) -> dict[str, Any]:
-        contract = capability_contract_for(required_capabilities, self)
-        required_tools = sorted({tool for item in items for tool in _item_required_tools(item)})
-        tool_manifest_path = Path.cwd() / "tools" / "tools_all_annotated.jsonl"
-        tool_manifest_count = len(_fintoolbench_tool_manifest(tool_manifest_path)) if tool_manifest_path.is_file() else 0
-        schema_tools = set(_tool_schema_names(_fintoolbench_tool_schemas(Path.cwd(), required_tools=set(required_tools))))
-        backend_canaries = _fintoolbench_backend_canaries(Path.cwd(), set(required_tools))
-        invalid_backend_tools = sorted(
-            tool
-            for tool, canary in backend_canaries.items()
-            if tool in schema_tools and canary.get("passed") is not True
-        )
-        available_tools = schema_tools - set(invalid_backend_tools)
-        missing_schema_tools = sorted(set(required_tools) - schema_tools)
-        missing_tools = sorted(set(missing_schema_tools) | set(invalid_backend_tools))
-        backend_available = not missing_tools and bool(available_tools)
-        support = contract.get("tool_call")
-        if isinstance(support, dict):
-            support["mode"] = "live_financial_tools"
-            support["tool_manifest"] = "tools/tools_all_annotated.jsonl"
-            support["tool_manifest_count"] = tool_manifest_count
-            support["backend"] = "agent_bench_fixture_deterministic"
-            support["backend_available"] = backend_available
-            support["required_benchmark_tools"] = required_tools
-            support["schema_tools"] = sorted(schema_tools)
-            support["exposed_tools"] = sorted(available_tools)
-            support["executable_tools"] = sorted(available_tools) if backend_available else []
-            support["missing_tools"] = missing_tools
-            support["missing_schema_tools"] = missing_schema_tools
-            support["missing_tool_backends"] = invalid_backend_tools
-            support["backend_canaries"] = backend_canaries
-            support["benchmark_required_tools_available"] = backend_available
-            if not schema_tools:
-                support["supported"] = False
-                support["tools"] = False
-                support["reason"] = "FinToolBench tool manifest tools/tools_all_annotated.jsonl did not expose callable schemas"
-            elif missing_schema_tools:
-                support["supported"] = False
-                support["tools"] = False
-                support["reason"] = "FinToolBench required tool schemas are missing: " + ", ".join(missing_tools)
-            elif invalid_backend_tools:
-                support["supported"] = False
-                support["tools"] = False
-                support["reason"] = (
-                    "FinToolBench required tool backend failed semantic canary: "
-                    + ", ".join(invalid_backend_tools)
-                )
-        return contract
-
-
 class FinanceAgentV2Adapter(ToolCallAdapter):
     name = "finance_agent_v2_fixture_tools"
 
@@ -1189,7 +1100,6 @@ ADAPTERS: tuple[BenchmarkAdapter, ...] = (
     ChatAnswerAdapter(),
     StaticTranscriptReasoningAdapter(),
     StaticFinanceReasoningAdapter(),
-    FinToolBenchAdapter(),
     FinanceAgentV2Adapter(),
     ToolCallAdapter(),
     BrowserGuiAdapter(),
@@ -1580,10 +1490,8 @@ def select_adapter(required_capabilities: set[str]) -> BenchmarkAdapter:
     benchmark = normalize_text(os.environ.get("AGENT_BENCH_BENCHMARK_NAME", "")).replace("-", " ")
     if benchmark == "finmcp bench":
         return StaticTranscriptReasoningAdapter()
-    if benchmark in {"fintoolbench", "finance agent v2"} and _static_conversion_live_tools_disabled():
+    if benchmark == "finance agent v2" and _static_conversion_live_tools_disabled():
         return StaticFinanceReasoningAdapter()
-    if benchmark == "fintoolbench":
-        return FinToolBenchAdapter()
     if benchmark == "finance agent v2":
         return FinanceAgentV2Adapter()
     if "browser_or_gui" in required_capabilities:
@@ -1670,7 +1578,6 @@ def _required_capabilities(benchmark: str) -> set[str]:
         "osworld": {"browser_or_gui"},
         "exploitbench": {"tool_call"},
         "finmcp bench": {"chat_answer"},
-        "fintoolbench": {"tool_call", "external_data_required"},
         "finance agent v2": {"tool_call", "external_data_required"},
     }
     for key, capabilities in capability_map.items():
@@ -1837,7 +1744,6 @@ def _specialized_extraction_is_terminal() -> bool:
         "stockbench",
         "exploitbench",
         "finmcp bench",
-        "fintoolbench",
         "finance agent v2",
         "swe lancer",
         "quantcode bench",
@@ -2114,8 +2020,6 @@ def extract_specialized_items(root: Path, limit: int) -> tuple[list[BenchmarkIte
         return extract_exploitbench_items(root, limit)
     if benchmark == "FinMCP-Bench":
         return extract_finmcp_static_items(root, limit)
-    if benchmark == "FinToolBench":
-        return extract_fintoolbench_items(root, limit)
     if benchmark == "Finance Agent v2":
         return extract_finance_agent_v2_items(root, limit)
     if benchmark == "InvestorBench":
@@ -2563,68 +2467,6 @@ def _finmcp_transcript(record: dict[str, Any]) -> str:
         if text and ("tool" in text.lower() or len(text) >= 80):
             return truncate(text, 7000)
     return ""
-
-
-def extract_fintoolbench_items(root: Path, limit: int) -> tuple[list[BenchmarkItem], list[str]]:
-    question_path = root / "data" / "question" / "select_data_real_remove_duplicates.jsonl"
-    tool_path = root / "tools" / "tools_all_annotated.jsonl"
-    errors: list[str] = []
-    if not question_path.is_file():
-        errors.append("FinToolBench question set data/question/select_data_real_remove_duplicates.jsonl was not found")
-    if not tool_path.is_file():
-        errors.append("FinToolBench tool manifest tools/tools_all_annotated.jsonl was not found")
-    if errors:
-        return [], errors
-    tool_manifest = _fintoolbench_tool_manifest(tool_path)
-    items: list[BenchmarkItem] = []
-    for index, record in enumerate(_records_from_jsonl(question_path), 1):
-        if len(items) >= limit:
-            break
-        item = item_from_record(record, f"{question_path.relative_to(root)}:{index}")
-        if item is None:
-            continue
-        required_tools = _required_tools_from_record(record)
-        item.metadata.update(
-            {
-                "expected_key": item.metadata.get("expected_key") or "fintoolbench_tool_required_query",
-                "required_tools": required_tools,
-                "live_tools_required": True,
-                "local_evaluation_mode": "live_tool_call",
-                "tool_manifest": str(tool_path.relative_to(root)),
-                "tool_manifest_count": len(tool_manifest),
-            }
-        )
-        items.append(item)
-    if not items:
-        errors.append("FinToolBench concrete tool-required questions were not found")
-    return items, errors[:20]
-
-
-def _fintoolbench_tool_manifest(path: Path) -> dict[str, dict[str, Any]]:
-    manifest: dict[str, dict[str, Any]] = {}
-    for record in _records_from_jsonl_unbounded(path):
-        if not isinstance(record, dict):
-            continue
-        name = _first_text(record, ("name", "tool_name", "api_name", "function_name"))
-        if name:
-            manifest[name] = record
-    return manifest
-
-
-def _records_from_jsonl_unbounded(path: Path) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    with path.open("r", encoding="utf-8", errors="replace") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(payload, dict):
-                records.append(payload)
-    return records
 
 
 def extract_finance_agent_v2_items(root: Path, limit: int) -> tuple[list[BenchmarkItem], list[str]]:
@@ -4619,135 +4461,6 @@ def _contains_tool_syntax(content: str) -> bool:
     )
 
 
-def _fintoolbench_tool_schemas(
-    root: Path,
-    *,
-    required_tools: set[str] | None = None,
-) -> list[dict[str, Any]]:
-    tool_path = root / "tools" / "tools_all_annotated.jsonl"
-    if not tool_path.is_file():
-        return []
-    manifest = _fintoolbench_tool_manifest(tool_path)
-    selected = sorted(required_tools or manifest)
-    schemas: list[dict[str, Any]] = []
-    for name in selected:
-        record = manifest.get(name)
-        if record is None:
-            continue
-        schemas.append(_fintoolbench_tool_schema(name, record))
-    return schemas
-
-
-def _fintoolbench_tool_schema(name: str, record: dict[str, Any]) -> dict[str, Any]:
-    description = _first_text(
-        record,
-        (
-            "description",
-            "tool_description",
-            "api_description",
-            "doc",
-            "documentation",
-            "summary",
-        ),
-    )
-    parameters = _tool_parameters_schema(record)
-    return {
-        "type": "function",
-        "function": {
-            "name": name,
-            "description": truncate(description or f"Run the FinToolBench financial tool {name}.", 900),
-            "parameters": parameters,
-        },
-    }
-
-
-def _tool_parameters_schema(record: dict[str, Any]) -> dict[str, Any]:
-    for key in ("parameters", "args", "arguments", "input_schema", "schema"):
-        raw = record.get(key)
-        parsed = _parse_tool_schema_value(raw)
-        if isinstance(parsed, dict) and parsed.get("type") == "object":
-            parsed.setdefault("additionalProperties", True)
-            return parsed
-        if isinstance(parsed, dict) and parsed:
-            return {
-                "type": "object",
-                "properties": {
-                    str(name): _json_schema_for_tool_parameter(value)
-                    for name, value in parsed.items()
-                    if str(name).strip()
-                },
-                "additionalProperties": True,
-            }
-        if isinstance(parsed, list) and parsed:
-            properties: dict[str, Any] = {}
-            required: list[str] = []
-            for item in parsed:
-                if isinstance(item, str):
-                    properties[item] = {"type": "string"}
-                    continue
-                if not isinstance(item, dict):
-                    continue
-                name = _first_text(item, ("name", "parameter", "param", "key"))
-                if not name:
-                    continue
-                properties[name] = _json_schema_for_tool_parameter(item)
-                if item.get("required") is True:
-                    required.append(name)
-            if properties:
-                schema = {"type": "object", "properties": properties, "additionalProperties": True}
-                if required:
-                    schema["required"] = sorted(set(required))
-                return schema
-    return {
-        "type": "object",
-        "properties": {
-            "query": {"type": "string", "description": "Natural-language tool query."},
-            "symbol": {"type": "string", "description": "Ticker, company, or instrument identifier."},
-            "date": {"type": "string", "description": "Optional date or date range."},
-        },
-        "additionalProperties": True,
-    }
-
-
-def _parse_tool_schema_value(value: Any) -> Any:
-    if isinstance(value, (dict, list)):
-        return value
-    if isinstance(value, str) and value.strip():
-        try:
-            return json.loads(value)
-        except json.JSONDecodeError:
-            names = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", value)
-            return {name: {"type": "string"} for name in names[:12]}
-    return None
-
-
-def _json_schema_for_tool_parameter(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict) and isinstance(value.get("schema"), dict):
-        return value["schema"]
-    if isinstance(value, dict):
-        raw_type = str(value.get("type") or value.get("data_type") or "string").lower()
-        json_type = {
-            "str": "string",
-            "string": "string",
-            "int": "integer",
-            "integer": "integer",
-            "float": "number",
-            "number": "number",
-            "bool": "boolean",
-            "boolean": "boolean",
-            "array": "array",
-            "list": "array",
-            "object": "object",
-            "dict": "object",
-        }.get(raw_type, "string")
-        schema: dict[str, Any] = {"type": json_type}
-        description = _first_text(value, ("description", "desc", "help"))
-        if description:
-            schema["description"] = truncate(description, 500)
-        return schema
-    return {"type": "string"}
-
-
 def _finance_agent_v2_missing_environment() -> list[str]:
     return [key for key in FINANCE_AGENT_V2_REQUIRED_ENV if not os.environ.get(key)]
 
@@ -5471,177 +5184,7 @@ def execute_agent_tool(name: str, arguments: dict[str, Any]) -> str:
 def execute_benchmark_tool(name: str, arguments: dict[str, Any]) -> str | None:
     if name in FINANCE_AGENT_V2_REQUIRED_TOOLS:
         return _execute_finance_agent_v2_tool(name, arguments)
-    fintool_names = _fintoolbench_executable_tool_names()
-    if name in fintool_names:
-        return _execute_fintoolbench_tool(name, arguments)
     return None
-
-
-def _fintoolbench_executable_tool_names() -> set[str]:
-    raw = os.environ.get(FINTOOLBENCH_EXECUTABLE_TOOLS_ENV, "")
-    if raw.strip():
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError:
-            return {name.strip() for name in raw.split(",") if name.strip()}
-        return {str(name).strip() for name in _flatten_string_values(payload) if str(name).strip()}
-    return set(_tool_schema_names(_fintoolbench_tool_schemas(Path.cwd())))
-
-
-def _fintoolbench_valid_backend_tools(root: Path, required_tools: set[str]) -> set[str]:
-    canaries = _fintoolbench_backend_canaries(root, required_tools)
-    return {tool for tool, canary in canaries.items() if canary.get("passed") is True}
-
-
-def _fintoolbench_backend_canaries(root: Path, required_tools: set[str]) -> dict[str, dict[str, Any]]:
-    tools = sorted(required_tools or FINTOOLBENCH_REQUIRED_CANARY_ARGS)
-    canaries: dict[str, dict[str, Any]] = {}
-    for tool in tools:
-        args = FINTOOLBENCH_REQUIRED_CANARY_ARGS.get(tool)
-        if args is None:
-            canaries[tool] = {
-                "passed": False,
-                "reason": "no deterministic fixture canary is defined for this FinToolBench tool",
-            }
-            continue
-        fixture = _load_fintoolbench_fixture(tool, args, root)
-        if fixture.get("error"):
-            canaries[tool] = {
-                "passed": False,
-                "reason": fixture["error"],
-                "fixture_path": fixture.get("fixture_path", ""),
-            }
-            continue
-        canaries[tool] = _validate_fintoolbench_fixture(tool, fixture.get("payload"), args)
-        canaries[tool]["fixture_path"] = fixture.get("fixture_path", "")
-    return canaries
-
-
-def _load_fintoolbench_fixture(name: str, arguments: dict[str, Any], root: Path | None = None) -> dict[str, Any]:
-    fixture_key = _fintoolbench_fixture_key(arguments)
-    if not fixture_key:
-        return {"error": "FinToolBench fixture lookup requires a symbol/ticker argument"}
-    for fixture_root in _fintoolbench_fixture_roots(root):
-        path = fixture_root / name / f"{fixture_key}.json"
-        if not path.is_file():
-            continue
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            return {"error": f"FinToolBench fixture is unreadable: {exc}", "fixture_path": str(path)}
-        return {"payload": payload, "fixture_path": str(path)}
-    searched = [str(path / name / f"{fixture_key}.json") for path in _fintoolbench_fixture_roots(root)]
-    return {"error": "FinToolBench fixture was not found", "searched_paths": searched}
-
-
-def _fintoolbench_fixture_roots(root: Path | None = None) -> list[Path]:
-    candidates: list[Path] = []
-    explicit = os.environ.get(FINTOOLBENCH_FIXTURE_ROOT_ENV, "").strip()
-    if explicit:
-        return [Path(explicit).expanduser()]
-    if root is not None:
-        candidates.append(root / "fixtures" / "fintoolbench")
-    candidates.append(Path.cwd() / "fixtures" / "fintoolbench")
-    try:
-        candidates.append(Path(__file__).resolve().parents[1] / "fixtures" / "fintoolbench")
-    except IndexError:
-        pass
-    candidates.append(Path("/opt/agent-bench/fixtures/fintoolbench"))
-    unique: list[Path] = []
-    seen: set[str] = set()
-    for candidate in candidates:
-        key = str(candidate)
-        if key not in seen:
-            seen.add(key)
-            unique.append(candidate)
-    return unique
-
-
-def _fintoolbench_fixture_key(arguments: dict[str, Any]) -> str:
-    for key in ("symbol", "ticker", "company", "query"):
-        value = arguments.get(key)
-        if isinstance(value, str) and value.strip():
-            token = value.strip().split()[0].upper()
-            return "".join(ch for ch in token if ch.isalnum() or ch in {"_", "-"})
-    return ""
-
-
-def _validate_fintoolbench_fixture(name: str, payload: Any, arguments: dict[str, Any]) -> dict[str, Any]:
-    if name != "companies_balance_sheet_statements":
-        return {"passed": False, "reason": f"no semantic validator is implemented for {name}"}
-    if isinstance(payload, dict) and "matching_records" in payload:
-        return {"passed": False, "reason": "fixture contains retrieval snippets, not structured statement records"}
-    records = _fintoolbench_fixture_records(payload)
-    if not records:
-        return {"passed": False, "reason": "fixture does not contain structured statement records"}
-    symbol = _fintoolbench_fixture_key(arguments)
-    if symbol and not any(str(record.get("symbol") or "").upper() == symbol for record in records):
-        return {"passed": False, "reason": f"fixture records do not contain symbol {symbol}"}
-    fy2018 = [record for record in records if _fintoolbench_record_year(record) == "2018"]
-    if not fy2018:
-        return {"passed": False, "reason": "fixture does not contain an FY2018 annual record"}
-    for record in fy2018:
-        value = _fintoolbench_first_numeric(record, FINTOOLBENCH_NET_PPE_KEYS)
-        if value is None:
-            continue
-        billions = value / 1_000_000_000 if abs(value) > 10_000 else value
-        if abs(billions - 8.70) <= 0.01:
-            return {
-                "passed": True,
-                "validated_symbol": symbol,
-                "validated_year": "2018",
-                "validated_field": _fintoolbench_first_present_key(record, FINTOOLBENCH_NET_PPE_KEYS),
-                "validated_value": value,
-                "validated_value_billions": round(billions, 4),
-            }
-    return {"passed": False, "reason": "fixture FY2018 record lacks net PP&E value 8.70B"}
-
-
-def _fintoolbench_fixture_records(payload: Any) -> list[dict[str, Any]]:
-    if isinstance(payload, list):
-        return [item for item in payload if isinstance(item, dict)]
-    if isinstance(payload, dict):
-        for key in ("records", "data", "statements", "balance_sheet_statements", "annualReports", "result"):
-            value = payload.get(key)
-            if isinstance(value, list):
-                return [item for item in value if isinstance(item, dict)]
-        return [payload]
-    return []
-
-
-def _fintoolbench_record_year(record: dict[str, Any]) -> str:
-    for key in ("calendarYear", "fiscalYear", "year"):
-        value = record.get(key)
-        if isinstance(value, (str, int)) and str(value).strip():
-            return str(value).strip()[:4]
-    for key in ("date", "fiscalDateEnding", "periodEndDate", "reportedDate"):
-        value = record.get(key)
-        if isinstance(value, str):
-            match = re.search(r"\b(20\d{2}|19\d{2})\b", value)
-            if match:
-                return match.group(1)
-    return ""
-
-
-def _fintoolbench_first_numeric(record: dict[str, Any], keys: tuple[str, ...]) -> float | None:
-    for key in keys:
-        value = record.get(key)
-        if isinstance(value, (int, float)):
-            return float(value)
-        if isinstance(value, str):
-            cleaned = value.replace(",", "").replace("$", "").strip()
-            try:
-                return float(cleaned)
-            except ValueError:
-                continue
-    return None
-
-
-def _fintoolbench_first_present_key(record: dict[str, Any], keys: tuple[str, ...]) -> str:
-    for key in keys:
-        if key in record:
-            return key
-    return ""
 
 
 def _execute_finance_agent_v2_tool(name: str, arguments: dict[str, Any]) -> str:
@@ -5692,47 +5235,6 @@ def _execute_finance_agent_v2_tool(name: str, arguments: dict[str, Any]) -> str:
         return _json_tool_result(name, arguments, result)
     result["error"] = f"Unknown Finance Agent v2 fixture tool: {name}"
     return _json_tool_result(name, arguments, result)
-
-
-def _execute_fintoolbench_tool(name: str, arguments: dict[str, Any]) -> str:
-    fixture = _load_fintoolbench_fixture(name, arguments, Path.cwd())
-    if fixture.get("error"):
-        return _json_tool_result(
-            name,
-            arguments,
-            {
-                "tool": name,
-                "mode": "deterministic_fixture_finance_backend",
-                "fixture_valid": False,
-                "error": fixture["error"],
-                "searched_paths": fixture.get("searched_paths", []),
-            },
-        )
-    validation = _validate_fintoolbench_fixture(name, fixture.get("payload"), arguments)
-    if validation.get("passed") is not True:
-        return _json_tool_result(
-            name,
-            arguments,
-            {
-                "tool": name,
-                "mode": "deterministic_fixture_finance_backend",
-                "fixture_valid": False,
-                "error": validation.get("reason", "fixture failed semantic validation"),
-                "fixture_path": fixture.get("fixture_path", ""),
-            },
-        )
-    return _json_tool_result(
-        name,
-        arguments,
-        {
-            "tool": name,
-            "mode": "deterministic_fixture_finance_backend",
-            "fixture_valid": True,
-            "fixture_path": fixture.get("fixture_path", ""),
-            "records": _fintoolbench_fixture_records(fixture.get("payload")),
-            "canary": validation,
-        },
-    )
 
 
 def _json_tool_result(name: str, arguments: dict[str, Any], payload: dict[str, Any]) -> str:

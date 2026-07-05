@@ -1,0 +1,83 @@
+{
+  "version": "agent-bench.manifest.v1",
+  "id": "PB_011",
+  "display_name": "StockBench",
+  "task_group": "Finance",
+  "description": "Run StockBench locally through the Docker-backed public benchmark adapter.",
+  "homepage_url": "https://github.com/ChenYXxxx/stockbench",
+  "official_leaderboard_url": "",
+  "source": {
+    "repository_url": "https://github.com/ChenYXxxx/stockbench.git",
+    "commit": "ce8b2b3483590646ad3b650ac8221f43f76fd091",
+    "dataset_id": "",
+    "dataset_revision": "ce8b2b3483590646ad3b650ac8221f43f76fd091",
+    "subdir": ""
+  },
+  "license": "Apache-2.0",
+  "credit": "StockBench authors",
+  "citation": "https://github.com/ChenYXxxx/stockbench",
+  "official_conditions": {
+    "official_split": "public cached financial records",
+    "official_scoring_method": "agent-bench public adapter normalized score",
+    "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+    "official_grader_command": "agent-bench-probe --benchmark \"StockBench\" --kind public-benchmark",
+    "official_evaluation_config": "tasks/stockbench/configs/official.json",
+    "container_requirements": "agent-bench-external:python3.12 launcher image"
+  },
+  "assets": [
+    {
+      "source": "https://github.com/ChenYXxxx/stockbench.git",
+      "revision": "ce8b2b3483590646ad3b650ac8221f43f76fd091",
+      "checksum": "",
+      "expected_local_path": "storage/cache",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": [
+          "storage/cache"
+        ]
+      }
+    }
+  ],
+  "container": {
+    "image": "agent-bench-external:python3.12",
+    "build_context": ".",
+    "dockerfile": "harness/Dockerfile",
+    "command": "bash /benchmark/task/harness/run.sh",
+    "environment_allowed": [],
+    "mounts": [],
+    "network": "model_proxy",
+    "cpus": null,
+    "memory": "",
+    "pids_limit": 1024,
+    "timeout_seconds": 21600.0,
+    "requires_nested_docker": false,
+    "requires_host_docker_socket": false,
+    "run_as_user": "10001:10001"
+  },
+  "adapter": {
+    "module": "",
+    "entry_point": "harness/run.sh",
+    "expected_output_files": [
+      "agent_bench_result.json"
+    ],
+    "result_parser": "agent_bench_result_json"
+  },
+  "scoring": {
+    "raw_score_field": "score",
+    "max_score": 1.0,
+    "normalization": "fraction_to_0_100",
+    "direction": "higher_is_better"
+  },
+  "reporting": {
+    "category_label": "Finance",
+    "display_order": 6,
+    "credit": "StockBench authors",
+    "citation": "https://github.com/ChenYXxxx/stockbench",
+    "license": "Apache-2.0"
+  },
+  "capabilities": [
+    "chat_answer",
+    "external_data_required"
+  ]
+}
