@@ -2365,6 +2365,41 @@ def test_probe_parses_gemma_parameter_alias_tool_call():
     assert parsed == ("search_files", {"query": "answer_rubric", "path": "."})
 
 
+def test_probe_parses_functiongemma_tool_call():
+    probe = _load_probe_module()
+
+    parsed = probe.parse_text_tool_request(
+        "<start_function_call>call:search_files{"
+        "query:<escape>needle<escape>,path:<escape>.<escape>"
+        "}<end_function_call>"
+    )
+
+    assert parsed == ("search_files", {"query": "needle", "path": "."})
+
+
+def test_probe_parses_pythonic_tool_call_list():
+    probe = _load_probe_module()
+
+    parsed = probe.parse_text_tool_requests(
+        "[read_file(path='TASK.md'), search_files(query='needle', path='.')]"
+    )
+
+    assert parsed == [
+        ("read_file", {"path": "TASK.md"}),
+        ("search_files", {"query": "needle", "path": "."}),
+    ]
+
+
+def test_probe_parses_olmo3_tool_call_block():
+    probe = _load_probe_module()
+
+    parsed = probe.parse_text_tool_request(
+        "<function_calls>\nsearch_files(query='needle', recursive=true)\n</function_calls>"
+    )
+
+    assert parsed == ("search_files", {"query": "needle", "recursive": True})
+
+
 def test_agent_loop_executes_native_tool_calls(tmp_path, monkeypatch):
     probe = _load_probe_module()
     monkeypatch.chdir(tmp_path)

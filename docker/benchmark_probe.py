@@ -4175,16 +4175,17 @@ def run_agent_loop(
                 )
             continue
 
-        text_call = parse_text_tool_request(content)
-        if text_call is not None:
-            tool_name, arguments = text_call
-            if tool_name == "final_answer":
+        text_calls = parse_text_tool_requests(content)
+        if text_calls:
+            final_call = next((call for call in text_calls if call[0] == "final_answer"), None)
+            if final_call is not None:
                 final_answer_count += 1
-                answer = str(arguments.get("answer", ""))
+                answer = str(final_call[1].get("answer", ""))
                 if answer and not first_final_answer:
                     first_final_answer = answer
                 return _agent_loop_result(first_final_answer or answer, content, usage, tool_trace, final_answer_count)
             if not tools:
+                tool_name = text_calls[0][0]
                 return _agent_loop_result(
                     "",
                     content,
@@ -4194,15 +4195,18 @@ def run_agent_loop(
                     status="failed_model_tool_use",
                     reason=f"model requested unavailable tool: {tool_name}",
                 )
-            result = execute_agent_tool(tool_name, arguments)
-            tool_trace.append(
-                {
-                    "tool": tool_name,
-                    "arguments": arguments,
-                    "result": result[:1000],
-                    "failed": _tool_result_failed(tool_name, result),
-                }
-            )
+            tool_results: list[tuple[str, str]] = []
+            for tool_name, arguments in text_calls:
+                result = execute_agent_tool(tool_name, arguments)
+                tool_results.append((tool_name, result))
+                tool_trace.append(
+                    {
+                        "tool": tool_name,
+                        "arguments": arguments,
+                        "result": result[:1000],
+                        "failed": _tool_result_failed(tool_name, result),
+                    }
+                )
             protocol_failure = _protocol_limit_failure(tool_trace, final_answer_count, content)
             if protocol_failure:
                 return _agent_loop_result(
@@ -4215,10 +4219,11 @@ def run_agent_loop(
                     reason=protocol_failure,
                 )
             messages.append({"role": "assistant", "content": content})
+            result_text = "\n\n".join(f"Tool result for {tool_name}:\n{result}" for tool_name, result in tool_results)
             messages.append(
                 {
                     "role": "user",
-                    "content": f"Tool result for {tool_name}:\n{result}\n\nContinue or provide the final JSON answer.",
+                    "content": f"{result_text}\n\nContinue or provide the final JSON answer.",
                 }
             )
             native_tools = False
@@ -4453,6 +4458,10 @@ def _contains_tool_syntax(content: str) -> bool:
             "<tool_call",
             "<|tool_call",
             "</tool_call",
+            "<longcat_tool_call",
+            "<start_function_call",
+            "<function_calls",
+            "[tool_calls]",
             "<tool_code",
             "</tool_code",
             '"tool":',
@@ -5036,10 +5045,41 @@ def handle_native_tool_calls(
 
 
 def parse_text_tool_request(content: str) -> tuple[str, dict[str, Any]] | None:
+    requests = parse_text_tool_requests(content)
+    return requests[0] if requests else None
+
+
+def parse_text_tool_requests(content: str) -> list[tuple[str, dict[str, Any]]]:
     parsed = parse_json_object(content)
-    if not isinstance(parsed, dict):
-        return parse_angle_tool_request(content)
-    return _tool_request_from_mapping(parsed)
+    if isinstance(parsed, list):
+        return _tool_requests_from_sequence(parsed)
+    if isinstance(parsed, dict):
+        if isinstance(parsed.get("tool_calls"), list):
+            return _tool_requests_from_sequence(parsed["tool_calls"])
+        if "tool_call" in parsed:
+            return _tool_requests_from_sequence([parsed["tool_call"]])
+        mapped = _tool_request_from_mapping(parsed)
+        return [mapped] if mapped is not None else []
+    for parser in (
+        parse_functiongemma_tool_requests,
+        parse_pythonic_tool_requests,
+        parse_olmo3_tool_requests,
+    ):
+        requests = parser(content)
+        if requests:
+            return requests
+    angle = parse_angle_tool_request(content)
+    return [angle] if angle is not None else []
+
+
+def _tool_requests_from_sequence(raw_calls: list[Any]) -> list[tuple[str, dict[str, Any]]]:
+    parsed: list[tuple[str, dict[str, Any]]] = []
+    for raw in raw_calls:
+        if isinstance(raw, dict):
+            mapped = _tool_request_from_mapping(raw)
+            if mapped is not None:
+                parsed.append(mapped)
+    return parsed
 
 
 def _tool_request_from_mapping(parsed: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
@@ -5067,6 +5107,91 @@ def _tool_request_from_mapping(parsed: dict[str, Any]) -> tuple[str, dict[str, A
             if key not in {"tool", "tool_name", "name", "function", "arguments", "parameters", "params", "args", "input"}
         }
     return name, arguments
+
+
+def parse_functiongemma_tool_requests(content: str) -> list[tuple[str, dict[str, Any]]]:
+    requests: list[tuple[str, dict[str, Any]]] = []
+    for match in re.finditer(
+        r"<start_function_call>\s*call:(?P<name>[A-Za-z_][A-Za-z0-9_]*)\{(?P<body>.*?)\}\s*<end_function_call>",
+        content,
+        re.DOTALL,
+    ):
+        arguments: dict[str, Any] = {}
+        for key, value in re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*:\s*<escape>(.*?)<escape>", match.group("body"), re.DOTALL):
+            try:
+                arguments[key] = json.loads(value)
+            except json.JSONDecodeError:
+                arguments[key] = value
+        requests.append((match.group("name"), arguments))
+    return requests
+
+
+def parse_pythonic_tool_requests(content: str) -> list[tuple[str, dict[str, Any]]]:
+    stripped = content.strip()
+    if not stripped.startswith("[") or not stripped.endswith("]"):
+        return []
+    return _parse_pythonic_call_list(stripped)
+
+
+def parse_olmo3_tool_requests(content: str) -> list[tuple[str, dict[str, Any]]]:
+    match = re.search(r"<function_calls>\s*(?P<body>.*?)\s*</function_calls>", content, re.DOTALL)
+    if not match:
+        return []
+    rows = [line.strip().rstrip(",") for line in match.group("body").splitlines() if line.strip()]
+    if not rows:
+        return []
+    return _parse_pythonic_call_list("[" + ", ".join(rows) + "]")
+
+
+def _parse_pythonic_call_list(content: str) -> list[tuple[str, dict[str, Any]]]:
+    try:
+        expression = ast.parse(content, mode="eval").body
+    except SyntaxError:
+        return []
+    if not isinstance(expression, ast.List):
+        return []
+    requests: list[tuple[str, dict[str, Any]]] = []
+    for item in expression.elts:
+        if not isinstance(item, ast.Call):
+            continue
+        name = _python_call_name(item.func)
+        if not name:
+            continue
+        arguments: dict[str, Any] = {}
+        unsupported = False
+        for keyword in item.keywords:
+            if keyword.arg is None:
+                unsupported = True
+                break
+            try:
+                arguments[keyword.arg] = _tool_literal_from_ast(keyword.value)
+            except ValueError:
+                unsupported = True
+                break
+        if unsupported or item.args:
+            continue
+        requests.append((name, arguments))
+    return requests
+
+
+def _python_call_name(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parent = _python_call_name(node.value)
+        return f"{parent}.{node.attr}" if parent else node.attr
+    return None
+
+
+def _tool_literal_from_ast(node: ast.AST) -> Any:
+    if isinstance(node, ast.Name):
+        aliases = {"true": True, "false": False, "null": None, "True": True, "False": False, "None": None}
+        if node.id in aliases:
+            return aliases[node.id]
+    try:
+        return ast.literal_eval(node)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("value must be a literal") from exc
 
 
 def _first_tool_arguments(parsed: dict[str, Any]) -> dict[str, Any] | None:

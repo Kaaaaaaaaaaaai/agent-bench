@@ -11,7 +11,7 @@ from agent_bench.runner import (
     RunConfig,
     run_benchmark,
 )
-from agent_bench.tool_parsers import TOOL_PARSER_NAMES
+from agent_bench.tool_parsers import TOOL_PARSER_CANONICAL_NAMES, normalize_parser_name
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -65,7 +65,15 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
     run.add_argument("--seed", type=int, default=None)
     run.add_argument("--max-retries", type=int, default=2)
-    run.add_argument("--tool-parser", choices=TOOL_PARSER_NAMES, default="auto")
+    run.add_argument(
+        "--tool-parser",
+        "--tool-call-parser",
+        choices=TOOL_PARSER_CANONICAL_NAMES,
+        default="auto",
+        dest="tool_parser",
+        type=normalize_parser_name,
+        help="Tool-call parser for OpenAI-compatible responses; accepts vLLM-style names such as hermes, longcat, xlam, functiongemma, pythonic, and olmo3.",
+    )
     run.add_argument("--context-window", type=int, default=None)
     run.add_argument("--stop", action="append", default=None)
     run.add_argument("--json-mode", choices=["auto", "on", "off"], default="auto")
