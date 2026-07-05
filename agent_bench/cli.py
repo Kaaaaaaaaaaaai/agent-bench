@@ -90,6 +90,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--judge-timeout", type=float, default=DEFAULT_MODEL_REQUEST_TIMEOUT_SECONDS)
     run.add_argument("--judge-max-retries", type=int, default=2)
     run.add_argument("--judge-fallback", choices=["same-as-target", "fail"], default="same-as-target")
+    run.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress progress logs; the final summary is still printed.",
+    )
 
     return parser
 
@@ -147,6 +152,7 @@ def main(argv: list[str] | None = None) -> int:
             judge_fallback=args.judge_fallback,
             allow_host_docker_socket=args.allow_host_docker_socket,
             cli_args=list(argv) if argv is not None else None,
+            log_to_terminal=not args.quiet,
         )
         summary = asyncio.run(run_benchmark(config))
         print(f"Tasks: {summary['passed_count']} / {summary['task_count']} passed")

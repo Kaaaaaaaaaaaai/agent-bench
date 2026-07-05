@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from agent_bench.aggregator import aggregate_results
 from agent_bench.clients import make_client
@@ -72,147 +72,196 @@ class RunConfig:
     judge_fallback: str = "same-as-target"
     allow_host_docker_socket: bool = False
     cli_args: list[str] | None = None
+    log_to_terminal: bool = False
+
+
+class _RunLogger:
+    def __init__(self, enabled: bool, stream: TextIO | None = None) -> None:
+        self.enabled = enabled
+        self.stream = stream if stream is not None else sys.stderr
+
+    def info(self, message: str) -> None:
+        self._write("INFO", message)
+
+    def warning(self, message: str) -> None:
+        self._write("WARNING", message)
+
+    def error(self, message: str) -> None:
+        self._write("ERROR", message)
+
+    def _write(self, level: str, message: str) -> None:
+        if not self.enabled:
+            return
+        timestamp = datetime.now(UTC).isoformat(timespec="seconds")
+        print(f"[{timestamp}] {level} {message}", file=self.stream, flush=True)
 
 
 async def run_benchmark(config: RunConfig) -> dict[str, Any]:
+    logger = _RunLogger(config.log_to_terminal)
     run_started = time.perf_counter()
-    manifest_tasks = load_manifest_tasks(config.benchmark_root)
     try:
-        registry = load_task_registry(config.tasks_dir)
-    except TaskLoadError:
-        if not manifest_tasks:
-            raise
-        registry = []
-    registry.extend(manifest_tasks)
-    tasks = select_tasks(
-        registry,
-        include=config.include,
-        limit=config.limit,
-        suite_ids=config.suite_ids,
-        profile=config.profile,
-    )
-    output_dir, latest_dir = _prepare_output_paths(config.out)
-    _reset_output_dir(output_dir)
+        logger.info("Starting Agent Bench run")
+        logger.info(_run_configuration_message(config))
+        manifest_tasks = load_manifest_tasks(config.benchmark_root)
+        try:
+            registry = load_task_registry(config.tasks_dir)
+        except TaskLoadError as exc:
+            if not manifest_tasks:
+                logger.error(f"Unable to load task registry from {config.tasks_dir}: {exc}")
+                raise
+            logger.warning(f"Unable to load task registry from {config.tasks_dir}; using manifest tasks only: {exc}")
+            registry = []
+        registry.extend(manifest_tasks)
+        tasks = select_tasks(
+            registry,
+            include=config.include,
+            limit=config.limit,
+            suite_ids=config.suite_ids,
+            profile=config.profile,
+        )
+        logger.info(f"Selected {len(tasks)} task(s) from {len(registry)} known suite(s)")
+        output_dir, latest_dir = _prepare_output_paths(config.out)
+        _reset_output_dir(output_dir)
+        logger.info(f"Writing run artifacts to {output_dir}")
 
-    client = make_client(
-        provider=config.provider,
-        base_url=config.base_url,
-        model=config.model,
-        api_key_env=config.api_key_env,
-        timeout=config.timeout,
-        temperature=config.temperature,
-        top_p=config.top_p,
-        max_tokens=config.max_tokens,
-        seed=config.seed,
-        stop=list(config.stop or []),
-        max_retries=config.max_retries,
-        json_mode=config.json_mode,
-    )
-    sandbox = make_sandbox(config.sandbox, config.sandbox_image)
-    external_runner = ExternalBenchmarkRunner()
-    request_sem = asyncio.Semaphore(max(1, config.request_concurrency))
-    eval_sem = asyncio.Semaphore(max(1, config.eval_concurrency))
-    raw_lock = asyncio.Lock()
-    graded_lock = asyncio.Lock()
-    responses: list[ModelResponse] = []
-    grades: list[GradeResult] = []
+        client = make_client(
+            provider=config.provider,
+            base_url=config.base_url,
+            model=config.model,
+            api_key_env=config.api_key_env,
+            timeout=config.timeout,
+            temperature=config.temperature,
+            top_p=config.top_p,
+            max_tokens=config.max_tokens,
+            seed=config.seed,
+            stop=list(config.stop or []),
+            max_retries=config.max_retries,
+            json_mode=config.json_mode,
+        )
+        sandbox = make_sandbox(config.sandbox, config.sandbox_image)
+        external_runner = ExternalBenchmarkRunner()
+        request_sem = asyncio.Semaphore(max(1, config.request_concurrency))
+        eval_sem = asyncio.Semaphore(max(1, config.eval_concurrency))
+        raw_lock = asyncio.Lock()
+        graded_lock = asyncio.Lock()
+        responses: list[ModelResponse] = []
+        grades: list[GradeResult] = []
 
-    raw_path = output_dir / "raw_responses.jsonl"
-    graded_path = output_dir / "graded_results.jsonl"
-    proxy: OpenAIRecordingProxy | None = None
-    judge_proxy: OpenAIRecordingProxy | None = None
-    external_base_url = config.base_url or ""
-    judge_base_url = ""
-    judge_fallback_used = False
-    api_key = os.environ.get(config.api_key_env or "", "") if config.api_key_env else ""
-    judge_api_key = os.environ.get(config.judge_api_key_env or "", "") if config.judge_api_key_env else ""
+        raw_path = output_dir / "raw_responses.jsonl"
+        graded_path = output_dir / "graded_results.jsonl"
+        proxy: OpenAIRecordingProxy | None = None
+        judge_proxy: OpenAIRecordingProxy | None = None
+        external_base_url = config.base_url or ""
+        judge_base_url = ""
+        judge_fallback_used = False
+        api_key = os.environ.get(config.api_key_env or "", "") if config.api_key_env else ""
+        judge_api_key = os.environ.get(config.judge_api_key_env or "", "") if config.judge_api_key_env else ""
 
-    try:
-        with JsonlRecorder(raw_path) as raw_recorder, JsonlRecorder(graded_path) as graded_recorder:
-            if _needs_model_proxy(config, tasks):
-                proxy = OpenAIRecordingProxy(
-                    OpenAIProxyConfig(
-                        upstream_base_url=config.base_url or "http://localhost:8000/v1",
-                        model=config.model or "",
-                        api_key=api_key,
-                        label="target",
-                        timeout_seconds=config.model_request_timeout,
-                        tool_parser=config.tool_parser,
-                    ),
-                    raw_recorder,
-                )
-                proxy.start()
-                external_base_url = proxy.container_base_url
-            if config.judge_provider == "openai-compatible" and config.judge_base_url:
-                judge_proxy = OpenAIRecordingProxy(
-                    OpenAIProxyConfig(
-                        upstream_base_url=config.judge_base_url,
-                        model=config.judge_model or "",
-                        api_key=judge_api_key,
-                        label="judge",
-                        timeout_seconds=config.judge_timeout,
-                        tool_parser="none",
-                    ),
-                    raw_recorder,
-                )
-                judge_proxy.start()
-                judge_base_url = judge_proxy.container_base_url
-            elif config.judge_provider == "same-as-target" or (
-                config.judge_provider in {"openai-compatible", "none"}
-                and config.judge_fallback == "same-as-target"
-                and external_base_url
-            ):
-                judge_base_url = external_base_url
-                judge_fallback_used = config.judge_provider != "same-as-target"
+        try:
+            with JsonlRecorder(raw_path) as raw_recorder, JsonlRecorder(graded_path) as graded_recorder:
+                if _needs_model_proxy(config, tasks):
+                    logger.info("Starting target model recording proxy")
+                    proxy = OpenAIRecordingProxy(
+                        OpenAIProxyConfig(
+                            upstream_base_url=config.base_url or "http://localhost:8000/v1",
+                            model=config.model or "",
+                            api_key=api_key,
+                            label="target",
+                            timeout_seconds=config.model_request_timeout,
+                            tool_parser=config.tool_parser,
+                        ),
+                        raw_recorder,
+                    )
+                    proxy.start()
+                    external_base_url = proxy.container_base_url
+                    logger.info(f"Target proxy listening at {redact_url(external_base_url)}")
+                if config.judge_provider == "openai-compatible" and config.judge_base_url:
+                    logger.info("Starting judge recording proxy")
+                    judge_proxy = OpenAIRecordingProxy(
+                        OpenAIProxyConfig(
+                            upstream_base_url=config.judge_base_url,
+                            model=config.judge_model or "",
+                            api_key=judge_api_key,
+                            label="judge",
+                            timeout_seconds=config.judge_timeout,
+                            tool_parser="none",
+                        ),
+                        raw_recorder,
+                    )
+                    judge_proxy.start()
+                    judge_base_url = judge_proxy.container_base_url
+                    logger.info(f"Judge proxy listening at {redact_url(judge_base_url)}")
+                elif config.judge_provider == "same-as-target" or (
+                    config.judge_provider in {"openai-compatible", "none"}
+                    and config.judge_fallback == "same-as-target"
+                    and external_base_url
+                ):
+                    judge_base_url = external_base_url
+                    judge_fallback_used = config.judge_provider != "same-as-target"
+                    if judge_fallback_used:
+                        logger.warning("Judge provider is falling back to the target model")
 
-            coroutines = [
-                _process_task(
-                    task=task,
-                    client=client,
-                    sandbox=sandbox,
-                    external_runner=external_runner,
-                    config=config,
-                    output_dir=output_dir,
-                    external_base_url=external_base_url,
-                    judge_base_url=judge_base_url,
-                    judge_fallback_used=judge_fallback_used,
-                    timeout=config.timeout,
-                    request_sem=request_sem,
-                    eval_sem=eval_sem,
-                    raw_lock=raw_lock,
-                    graded_lock=graded_lock,
-                    raw_recorder=raw_recorder,
-                    graded_recorder=graded_recorder,
-                    responses=responses,
-                )
-                for task in tasks
-            ]
-            for completed in asyncio.as_completed(coroutines):
-                grades.append(await completed)
-    finally:
-        if proxy is not None:
-            proxy.stop()
-        if judge_proxy is not None:
-            judge_proxy.stop()
-        await client.aclose()
+                coroutines = [
+                    _process_task(
+                        task=task,
+                        client=client,
+                        sandbox=sandbox,
+                        external_runner=external_runner,
+                        config=config,
+                        output_dir=output_dir,
+                        external_base_url=external_base_url,
+                        judge_base_url=judge_base_url,
+                        judge_fallback_used=judge_fallback_used,
+                        timeout=config.timeout,
+                        request_sem=request_sem,
+                        eval_sem=eval_sem,
+                        raw_lock=raw_lock,
+                        graded_lock=graded_lock,
+                        raw_recorder=raw_recorder,
+                        graded_recorder=graded_recorder,
+                        responses=responses,
+                        logger=logger,
+                    )
+                    for task in tasks
+                ]
+                for completed in asyncio.as_completed(coroutines):
+                    grades.append(await completed)
+                    logger.info(f"Progress: {len(grades)}/{len(tasks)} task(s) completed")
+        finally:
+            if proxy is not None:
+                logger.info("Stopping target model recording proxy")
+                proxy.stop()
+            if judge_proxy is not None:
+                logger.info("Stopping judge recording proxy")
+                judge_proxy.stop()
+            await client.aclose()
 
-    grades.sort(key=lambda result: _task_order(tasks, result.task_id))
-    responses.sort(key=lambda response: _task_order(tasks, response.task_id))
-    run_duration_seconds = time.perf_counter() - run_started
-    metadata = _metadata(
-        config,
-        task_count=len(tasks),
-        registry_count=len(registry),
-        output_dir=output_dir,
-        run_duration_seconds=run_duration_seconds,
-        judge_base_url=judge_base_url or config.judge_base_url or "",
-        judge_fallback_used=judge_fallback_used,
-    )
-    summary = aggregate_results(grades, metadata)
-    write_result_artifacts(output_dir, responses, grades, summary)
-    if latest_dir is not None:
-        update_latest(output_dir, latest_dir)
-    return summary
+        grades.sort(key=lambda result: _task_order(tasks, result.task_id))
+        responses.sort(key=lambda response: _task_order(tasks, response.task_id))
+        run_duration_seconds = time.perf_counter() - run_started
+        metadata = _metadata(
+            config,
+            task_count=len(tasks),
+            registry_count=len(registry),
+            output_dir=output_dir,
+            run_duration_seconds=run_duration_seconds,
+            judge_base_url=judge_base_url or config.judge_base_url or "",
+            judge_fallback_used=judge_fallback_used,
+        )
+        summary = aggregate_results(grades, metadata)
+        logger.info("Writing summary, CSV, and HTML report")
+        write_result_artifacts(output_dir, responses, grades, summary)
+        if latest_dir is not None:
+            logger.info(f"Updating latest run pointer at {latest_dir}")
+            update_latest(output_dir, latest_dir)
+        logger.info(
+            f"Run complete: {summary['passed_count']}/{summary['task_count']} task(s) passed "
+            f"in {summary['total_run_duration_seconds']:.3f}s"
+        )
+        return summary
+    except Exception as exc:
+        logger.error(f"Run failed: {type(exc).__name__}: {exc}")
+        raise
 
 
 async def _process_task(
@@ -233,9 +282,14 @@ async def _process_task(
     raw_recorder: JsonlRecorder,
     graded_recorder: JsonlRecorder,
     responses: list[ModelResponse],
+    logger: _RunLogger | None = None,
 ) -> GradeResult:
     task_started = time.perf_counter()
+    logger = logger or _RunLogger(False)
+    logger.info(f"Task {task.id} started ({task.type}, category={task.category})")
     if task.is_external_benchmark and config.provider != "mock":
+        benchmark_name = task.benchmark.get("name") if isinstance(task.benchmark, dict) else None
+        logger.info(f"Task {task.id}: running external benchmark {benchmark_name or task.id}")
         async with request_sem:
             response = await _run_external_benchmark(
                 task,
@@ -257,9 +311,19 @@ async def _process_task(
 
             empty_response_count += 1
             if empty_response_count >= MAX_EMPTY_RESPONSES_PER_TASK:
+                logger.error(
+                    f"Task {task.id}: model returned {empty_response_count} empty response(s); "
+                    "continuing with the last empty response"
+                )
                 break
+            logger.warning(
+                f"Task {task.id}: model returned an empty response; "
+                f"retrying ({empty_response_count}/{MAX_EMPTY_RESPONSES_PER_TASK - 1})"
+            )
 
     responses.append(response)
+    if response.error:
+        logger.error(f"Task {task.id}: model request failed: {_short_log_text(response.error)}")
     async with raw_lock:
         raw_recorder.write(_raw_response_record(task, response))
 
@@ -270,8 +334,8 @@ async def _process_task(
     grade.task_duration_seconds = time.perf_counter() - task_started
     async with graded_lock:
         graded_recorder.write(_graded_result_record(task, grade))
+    _log_task_result(logger, task, grade)
     return grade
-
 
 
 async def _run_external_benchmark(
@@ -335,6 +399,57 @@ async def _run_external_benchmark(
         latency_seconds=result.latency_seconds,
         error=None,
     )
+
+
+def _run_configuration_message(config: RunConfig) -> str:
+    suites = ",".join(sorted(config.suite_ids)) if config.suite_ids else "all"
+    include = ",".join(sorted(config.include)) if config.include else "all"
+    model = config.model or ("mock-perfect" if config.provider == "mock" else "")
+    return (
+        "Configuration: "
+        f"provider={config.provider}, "
+        f"model={model or 'n/a'}, "
+        f"base_url={redact_url(config.base_url or '') or 'n/a'}, "
+        f"tasks_dir={config.tasks_dir}, "
+        f"benchmark_root={config.benchmark_root}, "
+        f"out={config.out}, "
+        f"profile={config.profile}, "
+        f"suites={suites}, "
+        f"include={include}, "
+        f"limit={config.limit if config.limit is not None else 'none'}, "
+        f"sandbox={config.sandbox}, "
+        f"request_concurrency={config.request_concurrency}, "
+        f"eval_concurrency={config.eval_concurrency}, "
+        f"timeout={config.timeout}, "
+        f"external_timeout={config.external_timeout}, "
+        f"model_request_timeout={config.model_request_timeout}, "
+        f"max_tokens={config.max_tokens}, "
+        f"temperature={config.temperature}, "
+        f"judge_provider={config.judge_provider}"
+    )
+
+
+def _log_task_result(logger: _RunLogger, task: Task, grade: GradeResult) -> None:
+    status = grade.status or ("passed" if grade.passed else "failed")
+    duration = grade.task_duration_seconds if grade.task_duration_seconds is not None else 0.0
+    message = (
+        f"Task {task.id} finished: passed={grade.passed}, "
+        f"score={grade.score:.3f}, status={status}, duration={duration:.3f}s"
+    )
+    if grade.error:
+        logger.error(f"{message}, error={_short_log_text(grade.error)}")
+    elif not grade.passed:
+        logger.warning(message)
+    else:
+        logger.info(message)
+
+
+def _short_log_text(value: str, limit: int = 300) -> str:
+    text = " ".join(value.split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."
+
 
 def _is_empty_model_response(response: ModelResponse) -> bool:
     return response.error is None and not response.raw_response.strip()

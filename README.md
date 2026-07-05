@@ -59,6 +59,7 @@ docker run --rm -it \
 ```
 
 By default, results are written to a timestamped directory under `runs/` and copied to `runs/latest/`.
+Runs print timestamped configuration, progress, and error logs to stderr; pass `--quiet` to suppress those logs while keeping the final summary.
 
 ## Timeouts For Local Models
 
