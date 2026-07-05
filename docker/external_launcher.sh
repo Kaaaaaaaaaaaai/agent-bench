@@ -9,6 +9,13 @@ mkdir -p "${AGENT_BENCH_OUTPUT_DIR}"
 repo_dir="/workspace/repo"
 export GIT_LFS_SKIP_SMUDGE="${AGENT_BENCH_GIT_LFS_SKIP_SMUDGE:-1}"
 
+task_dir="${AGENT_BENCH_TASK_DIR:-/benchmark/task}"
+packaged_task_dir="${AGENT_BENCH_PACKAGED_TASK_DIR:-}"
+if [[ -n "${packaged_task_dir}" && ! -e "${task_dir}" ]]; then
+  mkdir -p "$(dirname "${task_dir}")"
+  ln -s "${packaged_task_dir}" "${task_dir}"
+fi
+
 asset_cache_key="${AGENT_BENCH_ASSET_CACHE_KEY:-}"
 asset_cache_root="${AGENT_BENCH_ASSET_ROOT:-/benchmark/assets}"
 copy_cached_assets() {

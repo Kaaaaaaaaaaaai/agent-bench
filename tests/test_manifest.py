@@ -63,6 +63,16 @@ def test_manifest_validation_requires_pinned_official_metadata():
     assert result.ok is True
 
 
+def test_manifest_validation_accepts_declared_host_docker_socket_without_cli_flag():
+    payload = _manifest_payload()
+    payload["container"]["requires_host_docker_socket"] = True
+    manifest = BenchmarkManifest.from_mapping(payload, source_path="benchmarks/example/manifest.yaml")
+
+    result = manifest.validate(allow_host_docker_socket=False)
+
+    assert result.ok is True
+
+
 def test_legacy_descriptor_without_official_fields_fails_validation():
     task = Task(
         id="PB_001",

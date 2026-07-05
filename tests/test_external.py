@@ -169,11 +169,11 @@ def test_external_runner_uses_descriptor_docker_image(monkeypatch, tmp_path):
     assert result.details["docker_socket_mount"]["enabled"] is False
     assert result.details["docker_socket_mount"]["global_allow_host_docker_socket"] is True
     assert result.details["asset_cache_mount"]["cache_key"] == "examplebench"
-    assert result.details["benchmark_task_mount"] == {
-        "host_path": str(task_dir.resolve()),
-        "container_path": "/benchmark/task",
-        "readonly": True,
-    }
+    assert result.details["benchmark_task_mount"]["enabled"] is True
+    assert result.details["benchmark_task_mount"]["host_path"] == str(task_dir.resolve())
+    assert result.details["benchmark_task_mount"]["container_path"] == "/benchmark/task"
+    assert result.details["benchmark_task_mount"]["readonly"] is True
+    assert result.details["benchmark_task_mount"]["packaged_path"] == ""
     assert result.details["result"]["network_mode"] == "bridge"
     assert result.details["result"]["docker_socket_mount"]["enabled"] is False
     assert result.details["result"]["asset_cache_mount"]["cache_key"] == "examplebench"
@@ -206,7 +206,7 @@ def test_external_runner_uses_descriptor_docker_image(monkeypatch, tmp_path):
     assert commands[3][:3] == ["docker", "rm", "-f"]
 
 
-def test_external_runner_mounts_docker_socket_only_when_descriptor_and_config_allow(monkeypatch, tmp_path):
+def test_external_runner_mounts_docker_socket_when_descriptor_requires_it(monkeypatch, tmp_path):
     commands: list[list[str]] = []
 
     def fake_run(command, **kwargs):
@@ -246,7 +246,7 @@ def test_external_runner_mounts_docker_socket_only_when_descriptor_and_config_al
             timeout=5.0,
             asset_root=tmp_path / "asset-cache",
             source_root=tmp_path,
-            allow_host_docker_socket=True,
+            allow_host_docker_socket=False,
         ),
     )
 
@@ -257,14 +257,94 @@ def test_external_runner_mounts_docker_socket_only_when_descriptor_and_config_al
     assert result.details["network_mode"] == "host"
     assert result.details["docker_socket_mount"]["enabled"] is True
     assert result.details["docker_socket_mount"]["descriptor_requires_host_docker_socket"] is True
-    assert result.details["docker_socket_mount"]["global_allow_host_docker_socket"] is True
+    assert result.details["docker_socket_mount"]["global_allow_host_docker_socket"] is False
+    assert result.details["docker_socket_mount"]["deprecated_allow_host_docker_socket_flag"] is False
+    assert result.details["docker_socket_mount"]["enabled_by_manifest"] is True
     assert result.details["result"]["network_mode"] == "host"
     assert result.details["result"]["docker_socket_mount"]["enabled"] is True
 
 
-def test_external_runner_rejects_docker_socket_without_explicit_opt_in(tmp_path):
+def test_external_runner_uses_packaged_task_dir_without_bind_mounts(monkeypatch, tmp_path):
+    commands: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        if command[:3] == ["docker", "image", "inspect"]:
+            return CompletedProcess(command, 0, "", "")
+        if command[:3] == ["docker", "run", "--name"]:
+            return CompletedProcess(command, 0, "ready", "")
+        if command[:2] == ["docker", "cp"]:
+            output_dir = Path(command[3])
+            output_dir.mkdir(parents=True, exist_ok=True)
+            (output_dir / "agent_bench_result.json").write_text(
+                json.dumps({"score": 1.0, "ok": True}) + "\n",
+                encoding="utf-8",
+            )
+            return CompletedProcess(command, 0, "", "")
+        if command[:3] == ["docker", "rm", "-f"]:
+            return CompletedProcess(command, 0, "", "")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setenv("AGENT_BENCH_CONTAINERIZED", "1")
+    monkeypatch.setattr("agent_bench.external.shutil.which", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr("agent_bench.external.subprocess.run", fake_run)
+
+    task = _manifest_task()
+    _write_example_task_folder(tmp_path)
+
+    result = ExternalBenchmarkRunner()._run_sync(
+        task,
+        ExternalBenchmarkConfig(
+            provider="openai-compatible",
+            base_url="http://proxy.test/v1",
+            model="example-model",
+            api_key_env="",
+            output_dir=tmp_path,
+            timeout=5.0,
+            asset_root=tmp_path / "asset-cache",
+            source_root=tmp_path,
+        ),
+    )
+
+    docker_run = commands[1]
+    assert result.passed is True
+    assert "AGENT_BENCH_TASK_DIR=/benchmark/task" in docker_run
+    assert "AGENT_BENCH_PACKAGED_TASK_DIR=/opt/agent-bench/tasks/examplebench" in docker_run
+    assert not any("/opt/agent-bench/tasks/examplebench" in item for item in docker_run if item.startswith("type=bind"))
+    assert not any("/benchmark/task" in item for item in docker_run if item.startswith("type=bind"))
+    assert not any("/benchmark/assets" in item for item in docker_run if item.startswith("type=bind"))
+    assert result.details["benchmark_task_mount"]["enabled"] is False
+    assert result.details["benchmark_task_mount"]["packaged_path"] == "/opt/agent-bench/tasks/examplebench"
+    assert result.details["asset_cache_mount"]["enabled"] is False
+
+
+def test_external_runner_does_not_require_deprecated_docker_socket_flag(monkeypatch, tmp_path):
+    commands: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        if command[:3] == ["docker", "image", "inspect"]:
+            return CompletedProcess(command, 0, "", "")
+        if command[:3] == ["docker", "run", "--name"]:
+            return CompletedProcess(command, 0, "ready", "")
+        if command[:2] == ["docker", "cp"]:
+            output_dir = Path(command[3])
+            output_dir.mkdir(parents=True, exist_ok=True)
+            (output_dir / "agent_bench_result.json").write_text(
+                json.dumps({"score": 1.0, "ok": True}) + "\n",
+                encoding="utf-8",
+            )
+            return CompletedProcess(command, 0, "", "")
+        if command[:3] == ["docker", "rm", "-f"]:
+            return CompletedProcess(command, 0, "", "")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr("agent_bench.external.shutil.which", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr("agent_bench.external.subprocess.run", fake_run)
+
     task = _manifest_task(["tool_call"])
     task.benchmark["manifest"]["container"]["requires_host_docker_socket"] = True
+    _write_example_task_folder(tmp_path)
 
     result = ExternalBenchmarkRunner()._run_sync(
         task,
@@ -281,10 +361,10 @@ def test_external_runner_rejects_docker_socket_without_explicit_opt_in(tmp_path)
         ),
     )
 
-    assert result.passed is False
-    assert result.details["result"]["status"] == "failed_manifest_validation"
-    assert "requires the host Docker socket" in result.error
-    assert result.details["result"]["included_in_official_score"] is False
+    assert result.passed is True
+    assert "/var/run/docker.sock:/var/run/docker.sock" in commands[1]
+    assert result.details["docker_socket_mount"]["enabled"] is True
+    assert result.details["docker_socket_mount"]["deprecated_allow_host_docker_socket_flag"] is False
 
 
 def test_external_runner_fails_when_result_file_missing(monkeypatch, tmp_path):
@@ -367,6 +447,50 @@ def test_external_runner_rejects_incomplete_legacy_descriptor(tmp_path):
     assert result.passed is False
     assert result.details["result"]["status"] == "failed_manifest_validation"
     assert "official_conditions.official_split" in result.error
+
+
+def test_external_runner_reports_container_startup_stderr(monkeypatch, tmp_path):
+    def fake_run(command, **kwargs):
+        if command[:3] == ["docker", "image", "inspect"]:
+            return CompletedProcess(command, 0, "", "")
+        if command[:3] == ["docker", "run", "--name"]:
+            return CompletedProcess(
+                command,
+                125,
+                "",
+                'docker: Error response from daemon: invalid mount config for type "bind".\n',
+            )
+        if command[:2] == ["docker", "cp"]:
+            return CompletedProcess(command, 1, "", "No such container\n")
+        if command[:3] == ["docker", "rm", "-f"]:
+            return CompletedProcess(command, 0, "", "")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr("agent_bench.external.shutil.which", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr("agent_bench.external.subprocess.run", fake_run)
+
+    task = _manifest_task(["chat_answer"])
+    _write_example_task_folder(tmp_path)
+
+    result = ExternalBenchmarkRunner()._run_sync(
+        task,
+        ExternalBenchmarkConfig(
+            provider="openai-compatible",
+            base_url="http://localhost:8000/v1",
+            model="example-model",
+            api_key_env="",
+            output_dir=tmp_path,
+            timeout=5.0,
+            asset_root=tmp_path / "asset-cache",
+            source_root=tmp_path,
+        ),
+    )
+
+    assert result.passed is False
+    assert "External benchmark exited with code 125" in result.error
+    assert "invalid mount config" in result.error
+    payload = json.loads((tmp_path / "external" / "PB_001" / "agent_bench_result.json").read_text(encoding="utf-8"))
+    assert payload["error"] == result.error
 
 
 def test_external_runner_prepares_paperbench_asset_cache(monkeypatch, tmp_path):

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import socket
 import subprocess
 import threading
 import time
@@ -92,7 +94,7 @@ class OpenAIRecordingProxy:
     def container_base_url(self) -> str:
         if self._server is None:
             raise RuntimeError("Proxy has not been started")
-        return f"http://host.docker.internal:{self._server.server_address[1]}/v1"
+        return f"http://{_container_reachable_host()}:{self._server.server_address[1]}/v1"
 
     def __enter__(self) -> "OpenAIRecordingProxy":
         self.start()
@@ -118,7 +120,7 @@ class OpenAIRecordingProxy:
             def log_message(self, format: str, *args: Any) -> None:
                 return
 
-        self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self._server = ThreadingHTTPServer(("0.0.0.0", 0), Handler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
 
@@ -363,3 +365,29 @@ def _join_upstream_path(base_url: str, request_path: str) -> str:
     if base.endswith("/v1") and path.startswith("/v1/"):
         return f"{base}{path[3:]}"
     return f"{base}{path}"
+
+
+def _container_reachable_host() -> str:
+    if os.environ.get("AGENT_BENCH_CONTAINERIZED") == "1":
+        host = _container_ip_address()
+        if host:
+            return host
+    return "host.docker.internal"
+
+
+def _container_ip_address() -> str:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            host = sock.getsockname()[0]
+            if host and not host.startswith("127."):
+                return host
+    except OSError:
+        pass
+    try:
+        host = socket.gethostbyname(socket.gethostname())
+        if host and not host.startswith("127."):
+            return host
+    except OSError:
+        pass
+    return ""

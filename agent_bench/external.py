@@ -30,6 +30,7 @@ DEFAULT_ASSET_ROOT = Path("agent-bench-assets")
 CONTAINER_ASSET_DOWNLOAD_ROOT = "/asset-cache"
 CONTAINER_BENCHMARK_TASK_DIR = "/benchmark/task"
 CONTAINER_BENCHMARK_ASSET_DIR = "/benchmark/assets"
+PACKAGED_SOURCE_ROOT = Path("/opt/agent-bench")
 IMAGE_FINGERPRINT_LABEL = "agent-bench.external-fingerprint"
 _IMAGE_BUILD_LOCK = threading.Lock()
 
@@ -196,6 +197,10 @@ class ExternalBenchmarkRunner:
             output = f"{output}{copy_error}\n"
         score = _coerce_score(payload.get("score"), completed.returncode == 0 and bool(payload))
         error = payload.get("error") if isinstance(payload.get("error"), str) else None
+        if not payload and completed.returncode != 0 and not error:
+            error = _external_process_failure_error(completed, output)
+            payload = _synthetic_result_payload(task, FAILED_HARNESS_SETUP, error, score=0.0)
+            _write_result_payload(result_file, payload)
         if not payload and not error:
             error = "External benchmark did not produce agent_bench_result.json"
             payload = _synthetic_result_payload(task, FAILED_HARNESS_SETUP, error, score=0.0)
@@ -304,6 +309,13 @@ def _benchmark_details(
     }
 
 
+def _external_process_failure_error(completed: subprocess.CompletedProcess[str], output: str) -> str:
+    tail = output.strip()[-1000:]
+    if tail:
+        return f"External benchmark exited with code {completed.returncode} before writing agent_bench_result.json: {tail}"
+    return f"External benchmark exited with code {completed.returncode} before writing agent_bench_result.json"
+
+
 def _ensure_launcher_image(config: ExternalBenchmarkConfig, image: str | None = None) -> str | None:
     image = image or config.launcher_image
     if _image_is_current(config, image):
@@ -387,9 +399,9 @@ def _launcher_image_fingerprint(config: ExternalBenchmarkConfig) -> str:
         if path.is_file():
             digest.update(path.read_bytes())
         digest.update(b"\0")
-    fixture_root = config.source_root / "tasks" / "finance-agent-v2" / "fixtures" / "finance_agent_v2"
-    if fixture_root.exists():
-        for path in sorted(item for item in fixture_root.rglob("*") if item.is_file()):
+    tasks_root = config.source_root / "tasks"
+    if tasks_root.exists():
+        for path in sorted(item for item in tasks_root.rglob("*") if item.is_file()):
             relative = path.relative_to(config.source_root)
             digest.update(str(relative).encode("utf-8"))
             digest.update(b"\0")
@@ -466,18 +478,20 @@ def _docker_run_command(
     if manifest.container.cpus is not None:
         command.extend(["--cpus", str(manifest.container.cpus)])
     command.extend(["--network", _docker_network_mode(manifest)])
-    command.extend(
-        [
-            "--mount",
-            f"type=bind,src={task_mount_dir.resolve()},dst={CONTAINER_BENCHMARK_TASK_DIR},readonly",
-        ]
-    )
-    command.extend(
-        [
-            "--mount",
-            f"type=bind,src={asset_mount_dir.resolve()},dst={CONTAINER_BENCHMARK_ASSET_DIR},readonly",
-        ]
-    )
+    if _task_bind_mount_enabled(config):
+        command.extend(
+            [
+                "--mount",
+                f"type=bind,src={task_mount_dir.resolve()},dst={CONTAINER_BENCHMARK_TASK_DIR},readonly",
+            ]
+        )
+    if _asset_bind_mount_enabled(config):
+        command.extend(
+            [
+                "--mount",
+                f"type=bind,src={asset_mount_dir.resolve()},dst={CONTAINER_BENCHMARK_ASSET_DIR},readonly",
+            ]
+        )
     if _docker_socket_mount_enabled(config, manifest):
         command.extend(["-v", "/var/run/docker.sock:/var/run/docker.sock"])
     for key, value in sorted(env.items()):
@@ -507,6 +521,25 @@ def _benchmark_asset_cache_dir(
     return config.asset_root / key
 
 
+def _task_bind_mount_enabled(config: ExternalBenchmarkConfig) -> bool:
+    return not _packaged_container_mode()
+
+
+def _asset_bind_mount_enabled(config: ExternalBenchmarkConfig) -> bool:
+    return not _packaged_container_mode()
+
+
+def _packaged_container_mode() -> bool:
+    return os.environ.get("AGENT_BENCH_CONTAINERIZED") == "1"
+
+
+def _packaged_task_dir(task: Task) -> str:
+    source = Path(task.source)
+    if not source.is_absolute() and len(source.parts) >= 2 and source.parts[0] == "tasks":
+        return str(PACKAGED_SOURCE_ROOT / source.parts[0] / source.parts[1])
+    return str(PACKAGED_SOURCE_ROOT / "tasks")
+
+
 def _docker_network_mode(manifest: BenchmarkManifest) -> str:
     if manifest.container.network == "none":
         return "none"
@@ -516,7 +549,7 @@ def _docker_network_mode(manifest: BenchmarkManifest) -> str:
 
 
 def _docker_socket_mount_enabled(config: ExternalBenchmarkConfig, manifest: BenchmarkManifest) -> bool:
-    return bool(manifest.container.requires_host_docker_socket and config.allow_host_docker_socket)
+    return bool(manifest.container.requires_host_docker_socket)
 
 
 def _docker_env(
@@ -563,6 +596,8 @@ def _docker_env(
         "AGENT_BENCH_JUDGE_MAX_RETRIES": str(config.judge_max_retries),
         "AGENT_BENCH_JUDGE_FALLBACK_USED": "1" if config.judge_fallback_used else "0",
     }
+    if _packaged_container_mode():
+        env["AGENT_BENCH_PACKAGED_TASK_DIR"] = _packaged_task_dir(task)
     if config.top_p is not None:
         env["AGENT_BENCH_TOP_P"] = str(config.top_p)
     if config.seed is not None:
@@ -630,6 +665,8 @@ def _external_setup_details(
             "container_path": "/var/run/docker.sock" if _docker_socket_mount_enabled(config, manifest) else "",
             "descriptor_requires_host_docker_socket": manifest.container.requires_host_docker_socket,
             "global_allow_host_docker_socket": config.allow_host_docker_socket,
+            "deprecated_allow_host_docker_socket_flag": config.allow_host_docker_socket,
+            "enabled_by_manifest": manifest.container.requires_host_docker_socket,
         },
         "output_mount": {
             "host_path": str(task_output_dir),
@@ -637,7 +674,8 @@ def _external_setup_details(
             "mode": "docker_cp",
         },
         "asset_cache_mount": {
-            "host_path": str(asset_mount_dir.resolve()),
+            "enabled": _asset_bind_mount_enabled(config),
+            "host_path": str(asset_mount_dir.resolve()) if _asset_bind_mount_enabled(config) else "",
             "container_path": CONTAINER_BENCHMARK_ASSET_DIR,
             "readonly": True,
             "cache_key": asset_cache_key,
@@ -648,9 +686,11 @@ def _external_setup_details(
             "cache_status": validation["cache_status"],
         },
         "benchmark_task_mount": {
-            "host_path": str(task_mount_dir.resolve()),
+            "enabled": _task_bind_mount_enabled(config),
+            "host_path": str(task_mount_dir.resolve()) if _task_bind_mount_enabled(config) else "",
             "container_path": CONTAINER_BENCHMARK_TASK_DIR,
             "readonly": True,
+            "packaged_path": _packaged_task_dir(task) if _packaged_container_mode() else "",
         },
         "catalog_checkout_path": catalog_checkout_path,
         "benchmark_checkout_path": catalog_checkout_path,
@@ -760,6 +800,8 @@ def _prepare_benchmark_asset_cache(
     git_lfs_bin = shutil.which("git-lfs")
     requires_lfs = bool(recipe.get("requires_git_lfs", True))
     if (git_bin is None or (requires_lfs and git_lfs_bin is None)) and launcher_image:
+        if _packaged_container_mode():
+            return "asset cache download skipped: packaged Docker runner will let the benchmark launcher clone upstream assets directly"
         return _prepare_benchmark_asset_cache_with_docker(recipe, config, launcher_image)
     if git_bin is None:
         return "asset cache download skipped: git was not found and Docker fallback was unavailable"

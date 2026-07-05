@@ -1,6 +1,7 @@
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
+    AGENT_BENCH_CONTAINERIZED=1 \
     AGENT_BENCH_SOURCE_ROOT=/opt/agent-bench \
     AGENT_BENCH_SANDBOX_TMPDIR=/tmp/agent-bench-sandboxes
 
