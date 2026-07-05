@@ -544,15 +544,6 @@ class BenchmarkManifest:
         _require_text(issues, "container.command", self.container.command)
         if self.container.timeout_seconds <= 0:
             issues.append(ValidationIssue("container.timeout", "timeout must be positive"))
-        if self.container.requires_host_docker_socket and not allow_host_docker_socket:
-            issues.append(
-                ValidationIssue(
-                    "container.requires_host_docker_socket",
-                    "benchmark requires the host Docker socket but --allow-host-docker-socket is disabled",
-                    "Enable the flag only after accepting that this weakens container isolation.",
-                )
-            )
-
         if not self.adapter.module and not self.adapter.entry_point:
             issues.append(
                 ValidationIssue(

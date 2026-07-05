@@ -87,6 +87,20 @@ def test_openai_recording_proxy_uses_curl_fallback(tmp_path, monkeypatch):
     assert records[0]["raw_response"]["choices"][0]["message"]["content"] == "curl-ok"
 
 
+def test_openai_recording_proxy_uses_container_ip_for_containerized_runs(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_BENCH_CONTAINERIZED", "1")
+    monkeypatch.setattr("agent_bench.proxy._container_ip_address", lambda: "172.18.0.5")
+
+    with JsonlRecorder(tmp_path / "raw_responses.jsonl") as recorder:
+        proxy = OpenAIRecordingProxy(
+            OpenAIProxyConfig(upstream_base_url="http://upstream.test/v1", model="example-model"),
+            recorder,
+        )
+        proxy._server = _FakeServer()
+        assert proxy.base_url == "http://127.0.0.1:43210/v1"
+        assert proxy.container_base_url == "http://172.18.0.5:43210/v1"
+
+
 class _FakeResponse:
     status_code = 200
     headers = {"content-type": "application/json"}
@@ -99,6 +113,10 @@ class _FakeResponse:
             }
         )
         self.content = self.text.encode("utf-8")
+
+
+class _FakeServer:
+    server_address = ("0.0.0.0", 43210)
 
 
 class _FakeClient:

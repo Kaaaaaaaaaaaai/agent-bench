@@ -80,7 +80,10 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--allow-host-docker-socket",
         action="store_true",
-        help="Allow benchmark manifests that require mounting /var/run/docker.sock; weakens isolation.",
+        help=(
+            "Deprecated no-op kept for compatibility. Host Docker socket mounts are controlled by "
+            "benchmark manifests."
+        ),
     )
     run.add_argument("--judge-provider", choices=["openai-compatible", "same-as-target", "none"], default="none")
     run.add_argument("--judge-base-url", default=None)

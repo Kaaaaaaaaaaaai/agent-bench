@@ -24,7 +24,8 @@ docker run --rm -it \
   -v /tmp/agent-bench-sandboxes:/tmp/agent-bench-sandboxes \
   -v "$PWD/runs:/opt/agent-bench/runs" \
   agent-bench \
-  bench run --provider mock --limit 10
+  bench run --provider mock --limit 10 \
+  --judge-provider "same-as-target"
 ```
 
 Run against vLLM:
@@ -40,7 +41,8 @@ docker run --rm -it \
   --provider openai-compatible \
   --base-url http://host.docker.internal:8000/v1 \
   --model <model> \
-  --request-concurrency 2
+  --request-concurrency 2 \
+  --judge-provider "same-as-target"
 ```
 
 Run against Ollama's OpenAI-compatible endpoint:
@@ -55,7 +57,8 @@ docker run --rm -it \
   bench run \
   --provider openai-compatible \
   --base-url http://host.docker.internal:11434/v1 \
-  --model llama3.1
+  --model llama3.1 \
+  --judge-provider "same-as-target"
 ```
 
 By default, results are written to a timestamped directory under `runs/` and copied to `runs/latest/`.
@@ -174,4 +177,4 @@ Those values are written into `raw_responses.jsonl`, `graded_results.jsonl`, `re
 
 The default coding evaluator runs generated Python inside Docker with no network, memory and process limits, a read-only `/work` mount, and a timeout. The benchmark runner container needs the Docker socket mount so it can launch those evaluator containers, and it needs the shared `/tmp/agent-bench-sandboxes` mount so the host Docker daemon can read generated harness files.
 
-External benchmark suites run in separate disposable containers. The runner drops capabilities, uses `no-new-privileges`, applies pids/memory/CPU/timeout options where configured, mounts the asset cache read-only, and copies outputs back before removing the container. Host Docker socket access is disabled by default. If a benchmark manifest declares that nested Docker is required and no safer option is available, the run must be launched with `--allow-host-docker-socket`; this weakens isolation and is recorded in the report metadata.
+External benchmark suites run in separate disposable containers. The runner drops capabilities, uses `no-new-privileges`, applies pids/memory/CPU/timeout options where configured, mounts the asset cache read-only, and copies outputs back before removing the container. Host Docker socket access is mounted only when a benchmark manifest declares `requires_host_docker_socket`. The older `--allow-host-docker-socket` flag is deprecated and accepted only for script compatibility.
