@@ -165,7 +165,7 @@ def test_probe_finance_agent_v2_missing_tools_are_exact_and_excluded(tmp_path, m
 
 def test_probe_finance_agent_v2_fixture_mode_exposes_required_tools(tmp_path, monkeypatch):
     probe = _load_probe_module()
-    fixture_root = Path(__file__).resolve().parents[1] / "fixtures" / "finance_agent_v2"
+    fixture_root = Path(__file__).resolve().parents[1] / "tasks" / "finance-agent-v2" / "fixtures" / "finance_agent_v2"
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "Finance Agent v2")
     monkeypatch.setenv(probe.FINANCE_AGENT_V2_FIXTURE_ROOT_ENV, str(fixture_root))
@@ -193,7 +193,7 @@ def test_probe_finance_agent_v2_fixture_mode_exposes_required_tools(tmp_path, mo
 
 def test_probe_finance_agent_v2_fixture_tools_return_crwd_evidence(tmp_path, monkeypatch):
     probe = _load_probe_module()
-    fixture_root = Path(__file__).resolve().parents[1] / "fixtures" / "finance_agent_v2"
+    fixture_root = Path(__file__).resolve().parents[1] / "tasks" / "finance-agent-v2" / "fixtures" / "finance_agent_v2"
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv(probe.FINANCE_AGENT_V2_FIXTURE_ROOT_ENV, str(fixture_root))
 

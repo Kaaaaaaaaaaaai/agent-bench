@@ -387,15 +387,14 @@ def _launcher_image_fingerprint(config: ExternalBenchmarkConfig) -> str:
         if path.is_file():
             digest.update(path.read_bytes())
         digest.update(b"\0")
-    for fixture_name in ("finance_agent_v2",):
-        fixture_root = config.source_root / "fixtures" / fixture_name
-        if fixture_root.exists():
-            for path in sorted(item for item in fixture_root.rglob("*") if item.is_file()):
-                relative = path.relative_to(config.source_root)
-                digest.update(str(relative).encode("utf-8"))
-                digest.update(b"\0")
-                digest.update(path.read_bytes())
-                digest.update(b"\0")
+    fixture_root = config.source_root / "tasks" / "finance-agent-v2" / "fixtures" / "finance_agent_v2"
+    if fixture_root.exists():
+        for path in sorted(item for item in fixture_root.rglob("*") if item.is_file()):
+            relative = path.relative_to(config.source_root)
+            digest.update(str(relative).encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
     return digest.hexdigest()
 
 
