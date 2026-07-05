@@ -157,6 +157,89 @@ def test_cli_mock_smoke_writes_expected_artifacts(tmp_path, monkeypatch):
     assert "concurrently" in summary["timing_note"]
 
 
+def test_cli_mock_smoke_logs_progress_to_stderr(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    task_dir = tmp_path / "tasks"
+    out_dir = Path("runs") / "latest"
+    task_dir.mkdir()
+    (task_dir / "sample.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "S_001",
+                    "type": "multiple_choice",
+                    "question": "Pick A",
+                    "choices": ["yes", "no"],
+                    "answer": ["A"],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        [
+            "run",
+            "--provider",
+            "mock",
+            "--tasks",
+            str(task_dir),
+            "--out",
+            str(out_dir),
+            "--sandbox",
+            "subprocess",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "INFO Starting Agent Bench run" in captured.err
+    assert "Configuration: provider=mock" in captured.err
+    assert "Task S_001 started" in captured.err
+    assert "Progress: 1/1 task(s) completed" in captured.err
+    assert "Run complete: 1/1 task(s) passed" in captured.err
+
+
+def test_cli_quiet_suppresses_progress_logs(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    task_dir = tmp_path / "tasks"
+    out_dir = Path("runs") / "latest"
+    task_dir.mkdir()
+    (task_dir / "sample.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "S_001",
+                    "type": "multiple_choice",
+                    "question": "Pick A",
+                    "choices": ["yes", "no"],
+                    "answer": ["A"],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        [
+            "run",
+            "--provider",
+            "mock",
+            "--tasks",
+            str(task_dir),
+            "--out",
+            str(out_dir),
+            "--sandbox",
+            "subprocess",
+            "--quiet",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.err == ""
+
+
 def test_cli_mock_smoke_runs_all_bundled_benchmarks(tmp_path, monkeypatch):
     bundled_tasks = Path("tasks").resolve()
     monkeypatch.chdir(tmp_path)
