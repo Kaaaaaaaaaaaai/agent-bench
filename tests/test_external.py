@@ -10,6 +10,86 @@ from agent_bench.external import (
 from agent_bench.models import Task
 
 
+def _manifest_task(capabilities: list[str] | None = None) -> Task:
+    manifest = {
+        "id": "PB_001",
+        "display_name": "ExampleBench",
+        "task_group": "Coding",
+        "description": "Run ExampleBench under official conditions.",
+        "homepage_url": "https://example.com",
+        "official_leaderboard_url": "https://example.com/leaderboard",
+        "source": {
+            "repository_url": "https://example.com/examplebench.git",
+            "commit": "0123456789abcdef0123456789abcdef01234567",
+        },
+        "license": "MIT",
+        "credit": "Example authors",
+        "citation": "https://example.com/citation",
+        "official_conditions": {
+            "official_split": "test",
+            "official_scoring_method": "exact official score",
+            "official_prompt_format": "official prompt",
+            "official_grader_command": "examplebench grade",
+            "official_evaluation_config": "official.yaml",
+        },
+        "assets": [
+            {
+                "source": "https://example.com/assets.jsonl",
+                "revision": "0123456789abcdef0123456789abcdef01234567",
+                "checksum": "sha256:abc",
+                "expected_local_path": "examplebench/assets.jsonl",
+                "required": True,
+            }
+        ],
+        "container": {
+            "image": "example-benchmark:local",
+            "command": "agent-bench-probe --benchmark ExampleBench",
+            "network": "model_proxy",
+            "timeout_seconds": 5,
+        },
+        "adapter": {
+            "module": "examplebench.adapter",
+            "expected_output_files": ["agent_bench_result.json"],
+            "result_parser": "agent_bench_result_json",
+        },
+        "scoring": {
+            "raw_score_field": "score",
+            "max_score": 1.0,
+            "normalization": "fraction_to_0_100",
+            "direction": "higher_is_better",
+        },
+        "reporting": {
+            "category_label": "Coding",
+            "display_order": 1,
+            "license": "MIT",
+            "credit": "Example authors",
+            "citation": "https://example.com/citation",
+        },
+        "capabilities": capabilities or ["repo_patch", "chat_answer"],
+    }
+    return Task(
+        id="PB_001",
+        category="Coding",
+        type="external_benchmark",
+        question="Run benchmark",
+        source="public_benchmarks.json",
+        benchmark={
+            "name": "ExampleBench",
+            "group": "Coding",
+            "homepage": "https://example.com",
+            "license": "MIT",
+            "credit": "Example authors",
+            "citation": "https://example.com/citation",
+            "capabilities": capabilities or ["repo_patch", "chat_answer"],
+            "manifest": manifest,
+            "docker": {
+                "image": "example-benchmark:local",
+                "command": "agent-bench-probe --benchmark ExampleBench",
+            },
+        },
+    )
+
+
 def test_external_runner_uses_descriptor_docker_image(monkeypatch, tmp_path):
     commands: list[list[str]] = []
 
@@ -33,25 +113,9 @@ def test_external_runner_uses_descriptor_docker_image(monkeypatch, tmp_path):
 
     monkeypatch.setattr("agent_bench.external.shutil.which", lambda name: "/usr/bin/docker")
     monkeypatch.setattr("agent_bench.external.subprocess.run", fake_run)
+    monkeypatch.setenv("AGENT_BENCH_SAMPLE_LIMIT", "1")
 
-    task = Task(
-        id="PB_001",
-        category="public_benchmarks",
-        type="external_benchmark",
-        question="Run benchmark",
-        source="public_benchmarks.json",
-        benchmark={
-            "name": "ExampleBench",
-            "homepage": "https://example.com",
-            "license": "MIT",
-            "credit": "Example authors",
-            "capabilities": ["repo_patch", "chat_answer"],
-            "docker": {
-                "image": "example-benchmark:local",
-                "command": "agent-bench-probe --benchmark ExampleBench",
-            },
-        },
-    )
+    task = _manifest_task()
 
     result = ExternalBenchmarkRunner()._run_sync(
         task,
@@ -70,6 +134,14 @@ def test_external_runner_uses_descriptor_docker_image(monkeypatch, tmp_path):
     assert result.details["docker_image"] == "example-benchmark:local"
     assert commands[0] == ["docker", "image", "inspect", "example-benchmark:local"]
     assert commands[1][-1] == "example-benchmark:local"
+    assert "--cap-drop" in commands[1]
+    assert "ALL" in commands[1]
+    assert "--security-opt" in commands[1]
+    assert "no-new-privileges" in commands[1]
+    assert "--user" in commands[1]
+    assert "10001:10001" in commands[1]
+    assert "--network" in commands[1]
+    assert "bridge" in commands[1]
     assert "AGENT_BENCH_DOCKER_IMAGE=example-benchmark:local" in commands[1]
     assert "AGENT_BENCH_REQUIRED_CAPABILITIES=repo_patch,chat_answer" in commands[1]
     assert "AGENT_BENCH_ALLOW_TARGET_CHECKOUT=1" in commands[1]
@@ -77,7 +149,10 @@ def test_external_runner_uses_descriptor_docker_image(monkeypatch, tmp_path):
     assert "AGENT_BENCH_MAX_TOKENS=16384" in commands[1]
     assert "AGENT_BENCH_ASSET_ROOT=/asset-cache" in commands[1]
     assert "AGENT_BENCH_ASSET_CACHE_KEY=examplebench" in commands[1]
-    assert f"{tmp_path / 'asset-cache'}:/asset-cache" in commands[1]
+    assert "AGENT_BENCH_SAMPLE_LIMIT=1" in commands[1]
+    assert f"type=bind,src={(tmp_path / 'asset-cache').resolve()},dst=/asset-cache,readonly" in commands[1]
+    assert "/var/run/docker.sock:/var/run/docker.sock" not in commands[1]
+    assert not any(item.startswith("AGENT_BENCH_API_KEY=") for item in commands[1])
     assert not any(item.endswith(":/outputs") for item in commands[1])
     assert commands[2][:2] == ["docker", "cp"]
     assert commands[3][:3] == ["docker", "rm", "-f"]
@@ -99,6 +174,33 @@ def test_external_runner_fails_when_result_file_missing(monkeypatch, tmp_path):
     monkeypatch.setattr("agent_bench.external.shutil.which", lambda name: "/usr/bin/docker")
     monkeypatch.setattr("agent_bench.external.subprocess.run", fake_run)
 
+    task = _manifest_task(["chat_answer"])
+
+    result = ExternalBenchmarkRunner()._run_sync(
+        task,
+        ExternalBenchmarkConfig(
+            provider="openai-compatible",
+            base_url="http://localhost:8000/v1",
+            model="example-model",
+            api_key_env="",
+            output_dir=tmp_path,
+            timeout=5.0,
+            asset_root=tmp_path / "asset-cache",
+        ),
+    )
+
+    assert result.score == 0.0
+    assert result.passed is False
+    assert result.error == "External benchmark did not produce agent_bench_result.json"
+    result_file = tmp_path / "external" / "PB_001" / "agent_bench_result.json"
+    payload = json.loads(result_file.read_text(encoding="utf-8"))
+    assert payload["status"] == "failed_harness_setup"
+    assert payload["error"] == "External benchmark did not produce agent_bench_result.json"
+    assert payload["capability_contract"]["chat_answer"]["supported"] is True
+    assert result.details["result"]["status"] == "failed_harness_setup"
+
+
+def test_external_runner_rejects_incomplete_legacy_descriptor(tmp_path):
     task = Task(
         id="PB_001",
         category="public_benchmarks",
@@ -131,15 +233,9 @@ def test_external_runner_fails_when_result_file_missing(monkeypatch, tmp_path):
         ),
     )
 
-    assert result.score == 0.0
     assert result.passed is False
-    assert result.error == "External benchmark did not produce agent_bench_result.json"
-    result_file = tmp_path / "external" / "PB_001" / "agent_bench_result.json"
-    payload = json.loads(result_file.read_text(encoding="utf-8"))
-    assert payload["status"] == "failed_harness_setup"
-    assert payload["error"] == "External benchmark did not produce agent_bench_result.json"
-    assert payload["capability_contract"]["chat_answer"]["supported"] is True
-    assert result.details["result"]["status"] == "failed_harness_setup"
+    assert result.details["result"]["status"] == "failed_manifest_validation"
+    assert "official_conditions.official_split" in result.error
 
 
 def test_external_runner_prepares_paperbench_asset_cache(monkeypatch, tmp_path):

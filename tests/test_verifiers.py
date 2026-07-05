@@ -352,3 +352,38 @@ def test_grade_external_benchmark_maps_completed_zero_score_to_failed_model_answ
     assert result.status == "failed_model_answer"
     assert result.answer == "failed_model_answer"
     assert result.passed is False
+
+
+def test_grade_external_benchmark_preserves_primary_item_model_failure_status():
+    task = Task(
+        id="PB_015",
+        category="public_benchmarks",
+        type="external_benchmark",
+        question="Run benchmark",
+        source="public_benchmarks.json",
+    )
+    response = _response(
+        json.dumps(
+            {
+                "status": "completed",
+                "score": 0.0,
+                "error": None,
+                "timed_out": False,
+                "details": {
+                    "group": "Finance",
+                    "result": {
+                        "status": "completed",
+                        "evaluated_task_count": 1,
+                        "valid_evaluated_task_count": 1,
+                        "status_counts": {"failed_model_tool_use": 1},
+                    },
+                },
+            }
+        )
+    )
+
+    result = grade_external_benchmark(task, response)
+
+    assert result.status == "failed_model_tool_use"
+    assert result.answer == "failed_model_tool_use"
+    assert result.passed is False

@@ -11,6 +11,7 @@ from agent_bench.runner import (
     RunConfig,
     run_benchmark,
 )
+from agent_bench.tool_parsers import TOOL_PARSER_NAMES
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -18,13 +19,19 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     run = subparsers.add_parser("run", help="Run benchmark tasks against a model")
-    run.add_argument("--provider", choices=["openai-compatible", "ollama-native", "mock"], default="mock")
+    run.add_argument(
+        "--provider",
+        choices=["openai-compatible", "mock"],
+        default="mock",
+        help="Target interface. Production runs support OpenAI-compatible endpoints only; mock is for offline smoke tests.",
+    )
     run.add_argument("--base-url", default=None)
     run.add_argument("--model", default=None)
-    run.add_argument("--api-key-env", default=None)
+    run.add_argument("--api-key-env", default="OPENAI_API_KEY")
     run.add_argument("--tasks", default="tasks")
+    run.add_argument("--benchmark-root", default="benchmarks")
     run.add_argument("--out", default="runs/latest")
-    run.add_argument("--request-concurrency", type=int, default=8)
+    run.add_argument("--request-concurrency", "--concurrency", type=int, default=8)
     run.add_argument("--eval-concurrency", type=int, default=4)
     run.add_argument(
         "--timeout",
@@ -54,7 +61,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Suite ID or benchmark name to run; may be passed multiple times or comma-separated",
     )
     run.add_argument("--temperature", type=float, default=0.0)
+    run.add_argument("--top-p", type=float, default=None)
     run.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
+    run.add_argument("--seed", type=int, default=None)
+    run.add_argument("--max-retries", type=int, default=2)
+    run.add_argument("--tool-parser", choices=TOOL_PARSER_NAMES, default="auto")
+    run.add_argument("--context-window", type=int, default=None)
+    run.add_argument("--stop", action="append", default=None)
     run.add_argument("--json-mode", choices=["auto", "on", "off"], default="auto")
     run.add_argument("--sandbox", choices=["docker", "subprocess"], default="docker")
     run.add_argument("--sandbox-image", default="agent-bench-python:3.12")
@@ -64,6 +77,19 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(DEFAULT_EXTERNAL_ASSET_ROOT),
         help="Host directory for external benchmark asset cache; mount this path into Docker runs",
     )
+    run.add_argument(
+        "--allow-host-docker-socket",
+        action="store_true",
+        help="Allow benchmark manifests that require mounting /var/run/docker.sock; weakens isolation.",
+    )
+    run.add_argument("--judge-provider", choices=["openai-compatible", "same-as-target", "none"], default="none")
+    run.add_argument("--judge-base-url", default=None)
+    run.add_argument("--judge-model", default=None)
+    run.add_argument("--judge-api-key-env", default=None)
+    run.add_argument("--judge-temperature", type=float, default=0.0)
+    run.add_argument("--judge-timeout", type=float, default=DEFAULT_MODEL_REQUEST_TIMEOUT_SECONDS)
+    run.add_argument("--judge-max-retries", type=int, default=2)
+    run.add_argument("--judge-fallback", choices=["same-as-target", "fail"], default="same-as-target")
 
     return parser
 
@@ -75,6 +101,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 2
     if args.command == "run":
+        if args.provider == "openai-compatible" and (not args.base_url or not args.model):
+            parser.error("--base-url and --model are required for --provider openai-compatible")
+        _validate_cli_runtime_path(parser, Path(args.out), Path("runs"), "--out")
+        _validate_cli_runtime_path(parser, Path(args.asset_root), Path("agent-bench-assets"), "--asset-root")
         include = _split_selectors(args.include)
         suite_ids = _split_selectors(args.suite)
         config = RunConfig(
@@ -83,6 +113,7 @@ def main(argv: list[str] | None = None) -> int:
             model=args.model,
             api_key_env=args.api_key_env,
             tasks_dir=Path(args.tasks),
+            benchmark_root=Path(args.benchmark_root),
             out=Path(args.out),
             request_concurrency=args.request_concurrency,
             eval_concurrency=args.eval_concurrency,
@@ -94,12 +125,28 @@ def main(argv: list[str] | None = None) -> int:
             profile=args.profile,
             suite_ids=suite_ids,
             temperature=args.temperature,
+            top_p=args.top_p,
             max_tokens=args.max_tokens,
+            seed=args.seed,
+            max_retries=args.max_retries,
+            tool_parser=args.tool_parser,
+            context_window=args.context_window,
+            stop=args.stop,
             json_mode=args.json_mode,
             sandbox=args.sandbox,
             sandbox_image=args.sandbox_image,
             external_launcher_image=args.external_launcher_image,
             asset_root=Path(args.asset_root),
+            judge_provider=args.judge_provider,
+            judge_base_url=args.judge_base_url,
+            judge_model=args.judge_model,
+            judge_api_key_env=args.judge_api_key_env,
+            judge_temperature=args.judge_temperature,
+            judge_timeout=args.judge_timeout,
+            judge_max_retries=args.judge_max_retries,
+            judge_fallback=args.judge_fallback,
+            allow_host_docker_socket=args.allow_host_docker_socket,
+            cli_args=list(argv) if argv is not None else None,
         )
         summary = asyncio.run(run_benchmark(config))
         print(f"Tasks: {summary['passed_count']} / {summary['task_count']} passed")
@@ -143,6 +190,20 @@ def _split_selectors(value: str | list[str] | None) -> set[str] | None:
         if part.strip()
     }
     return parsed or None
+
+
+def _validate_cli_runtime_path(
+    parser: argparse.ArgumentParser,
+    path: Path,
+    allowed_relative_root: Path,
+    flag: str,
+) -> None:
+    cwd = Path.cwd().resolve()
+    root = (cwd / allowed_relative_root).resolve()
+    candidate = (cwd / path).resolve() if not path.is_absolute() else path.resolve()
+    if candidate == root or candidate.is_relative_to(root):
+        return
+    parser.error(f"{flag} must be under ./{allowed_relative_root.as_posix()}/")
 
 
 if __name__ == "__main__":

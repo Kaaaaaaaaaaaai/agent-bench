@@ -1,6 +1,6 @@
 # Agent Bench
 
-Agent Bench is a Python 3.12+ benchmark runner for evaluating local or remote language models against JSON task files and cloned public benchmark sources. It supports OpenAI-compatible servers such as vLLM and Ollama's OpenAI endpoint, plus Ollama's native chat API.
+Agent Bench is a Python 3.12+ benchmark runner for evaluating local or remote language models against JSON task files and manifest-registered public benchmark suites. Production target models must expose an OpenAI-compatible chat-completions endpoint. vLLM and Ollama are supported through their OpenAI-compatible endpoints only; native Ollama APIs are not a supported target interface.
 
 ## Build
 
@@ -58,21 +58,6 @@ docker run --rm -it \
   --model llama3.1
 ```
 
-Run against Ollama's native API:
-
-```bash
-docker run --rm -it \
-  --add-host host.docker.internal:host-gateway \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v /tmp/agent-bench-sandboxes:/tmp/agent-bench-sandboxes \
-  -v "$PWD/runs:/opt/agent-bench/runs" \
-  agent-bench \
-  bench run \
-  --provider ollama-native \
-  --base-url http://host.docker.internal:11434 \
-  --model llama3.1
-```
-
 By default, results are written to a timestamped directory under `runs/` and copied to `runs/latest/`.
 
 ## Timeouts For Local Models
@@ -90,7 +75,9 @@ For a single local model server, start with `--request-concurrency 1` or `--requ
 
 ## Task Files
 
-The bundled `tasks/` directory contains public benchmark descriptors only. Each bundled task is an `external_benchmark` entry that runs its descriptor command locally in Docker through `docker/external-benchmark.Dockerfile`.
+The bundled `tasks/` directory contains legacy public benchmark descriptors. New production benchmark suites should be registered with `benchmarks/<benchmark_name>/manifest.yaml`. The runner also continues to read `tasks/public_benchmarks.json` for backward-compatible descriptor discovery.
+
+Strict production manifests must declare official leaderboard-equivalent conditions: pinned source commit or dataset revision, official split, official scoring method, official prompt format, official grader command/config, required assets with validation, container settings, adapter path, scoring normalization, and reporting metadata. Incomplete or moving-ref descriptors fail as `failed_manifest_validation` and are shown in `summary.json` and `summary.html`; the runner does not silently execute sample-only or approximate benchmark variants as supported production entries.
 
 External benchmark task shape:
 
@@ -127,13 +114,13 @@ Relevant selection controls:
 - `--profile full_active`: all active configured suites.
 - `--suite PB_009`: run a specific active suite by ID or benchmark name.
 
-When running a remote provider, Agent Bench starts the benchmark launcher container, clones the upstream benchmark source or dataset inside Docker, extracts real benchmark task records, calls the configured model endpoint for each sampled task, and grades the model's answer. The launcher receives neutral model settings through environment variables:
+When running a remote provider, Agent Bench starts a main-process OpenAI-compatible recording proxy and points the benchmark container at that proxy. The proxy forwards requests to the configured target endpoint, records raw requests/responses into `raw_responses.jsonl`, and keeps upstream API secrets out of the benchmark container. The launcher receives neutral model settings through environment variables:
 
 - `AGENT_BENCH_BASE_URL`
 - `AGENT_BENCH_MODEL`
 - `AGENT_BENCH_PROVIDER`
 - `AGENT_BENCH_OUTPUT_DIR`
-- `AGENT_BENCH_API_KEY`, when `--api-key-env` is provided
+- parser/generation settings such as `AGENT_BENCH_TOOL_PARSER`, `AGENT_BENCH_MAX_TOKENS`, and `AGENT_BENCH_CONTEXT_LIMIT`
 
 The bundled descriptors use `agent-bench-probe` to normalize public benchmark formats through an explicit adapter contract:
 
@@ -154,7 +141,7 @@ Extracted chat-answer records are graded with deterministic methods when possibl
 - `rubric`: a published rubric or benchmark prompt is used for model-based grading.
 - `task_compliance`: the benchmark exposes a real task prompt without a standalone answer key, so a grading call scores whether the response satisfies the task requirements.
 
-Each descriptor records the adapter, capability contract, extracted source paths, item counts, grading method, strict statuses, normalized score, and whether each row is included in official scoring in `${AGENT_BENCH_OUTPUT_DIR}/agent_bench_result.json`.
+Each descriptor or manifest records the adapter, capability contract, extracted source paths, item counts, grading method, strict statuses, normalized score, and whether each row is included in official scoring in `${AGENT_BENCH_OUTPUT_DIR}/agent_bench_result.json`.
 
 ## Outputs
 
@@ -166,7 +153,7 @@ Each run writes:
 - `summary.json`
 - `summary.html`
 
-The HTML report is fully static and includes metric cards, an average-score radar chart, grouped benchmark scores, category summaries, status distributions, detailed task rows, and benchmark citations.
+The HTML report is fully static and includes run metadata, score cards, a category radar chart, benchmark score table, target/judge/container/asset metadata, failure/status details, and benchmark credits/citations/licenses. It is generated from `summary.json` and relative artifact paths and has no CDN dependency.
 
 Scores are reported over selected suites.
 
@@ -197,3 +184,5 @@ Those values are written into `raw_responses.jsonl`, `graded_results.jsonl`, `re
 ## Docker Sandboxing
 
 The default coding evaluator runs generated Python inside Docker with no network, memory and process limits, a read-only `/work` mount, and a timeout. The benchmark runner container needs the Docker socket mount so it can launch those evaluator containers, and it needs the shared `/tmp/agent-bench-sandboxes` mount so the host Docker daemon can read generated harness files.
+
+External benchmark suites run in separate disposable containers. The runner drops capabilities, uses `no-new-privileges`, applies pids/memory/CPU/timeout options where configured, mounts the asset cache read-only, and copies outputs back before removing the container. Host Docker socket access is disabled by default. If a benchmark manifest declares that nested Docker is required and no safer option is available, the run must be launched with `--allow-host-docker-socket`; this weakens isolation and is recorded in the report metadata.

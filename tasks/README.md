@@ -1,8 +1,8 @@
 # Public Benchmark Tasks
 
-The old hand-written task categories have been removed. `public_benchmarks.json` contains Docker-backed `external_benchmark` descriptors for the requested public benchmarks.
+The old hand-written task categories have been removed. `public_benchmarks.json` contains legacy Docker-backed `external_benchmark` descriptors for public benchmark discovery. New production benchmark registrations should live in `benchmarks/<benchmark_name>/manifest.yaml`.
 
-Each descriptor records upstream credit, license metadata, and a citation URL. The runner builds `docker/external-benchmark.Dockerfile`, clones the upstream repository or Hugging Face dataset inside Docker, and runs the descriptor command with neutral model environment variables such as `AGENT_BENCH_BASE_URL`, `AGENT_BENCH_MODEL`, and `AGENT_BENCH_OUTPUT_DIR`.
+Each descriptor records upstream credit, license metadata, and a citation URL. Production execution now requires strict manifest metadata: pinned source revision, official conditions, assets, container policy, adapter, scoring, and reporting fields. Descriptors that cannot prove official-run equivalence fail validation as `failed_manifest_validation` instead of being silently treated as supported official benchmarks.
 
 ## Active Benchmarks
 
@@ -23,7 +23,7 @@ Each descriptor records upstream credit, license metadata, and a citation URL. T
 
 ## Notes
 
-The default command for each descriptor performs a local Docker run: clone the public benchmark source or dataset, sample the files present, query the configured model endpoint for sampled tasks when the adapter can provide the required capability, and write normalized metadata to `agent_bench_result.json`.
+The legacy default command for each descriptor performs a local Docker run: clone the public benchmark source or dataset, sample the files present, query the configured model endpoint for sampled tasks when the adapter can provide the required capability, and write normalized metadata to `agent_bench_result.json`. That legacy probe path is useful for discovery and compatibility tests, but production benchmark entries must use strict manifests and official conditions.
 
 The probe uses an explicit adapter contract for workspace preparation, tool schemas, agent execution, output collection, and grading. `tool_call` rows use the stateful agent loop with native calls or text-call parsing fallbacks and fail preflight as `failed_missing_required_tool` when benchmark metadata names a tool the adapter does not expose. FinMCP-Bench is converted to static transcript reasoning and does not require live Qieman MCP tools. Repo-patch rows require target repository checkout metadata and a checkout/patch/diff canary; an official patch/test grader is used when configured, with `task_compliance_fallback` otherwise. File-artifact and office-document rows require declared input assets, a read/write/list/collect canary, isolated per-item workspaces, and generated output files. Unsupported benchmark-native capabilities are reported as `skipped_unsupported_capability`; missing assets, Git LFS pointer stubs, invalid task context, and harness defects remain strict invalid statuses such as `failed_missing_assets`, `failed_invalid_task_context`, and `failed_harness_setup`.
 
@@ -31,6 +31,6 @@ Benchmarks with explicit cache recipes use the git-ignored `agent-bench-assets/`
 
 Because each row represents a whole benchmark, external benchmark descriptors use a longer wall-clock timeout than ordinary single-task prompts. The CLI default is `--external-timeout 21600` per benchmark row and `--model-request-timeout 1800` per model or judge request inside the probe. For local model servers, use low benchmark-row concurrency first, usually `--request-concurrency 1` or `2`.
 
-Some upstream full leaderboard harnesses require large downloads, GPUs, VM/KVM support, paid APIs, external accounts, or gated services. For those, the descriptor still runs locally in Docker against the public source, but it is marked skipped/setup-failed unless the adapter can materialize the required assets and grader.
+Some upstream full leaderboard harnesses require large downloads, GPUs, VM/KVM support, paid APIs, external accounts, or gated services. For those, the descriptor or manifest is marked failed/skipped unless the adapter can materialize the required assets and grader under official-equivalent conditions.
 
 Benchmark data is not vendored into this repository.

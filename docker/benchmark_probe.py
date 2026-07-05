@@ -112,6 +112,7 @@ STRICT_STATUSES = {
     "passed",
     "failed_model_answer",
     "failed_model_format",
+    "failed_model_missing_artifact",
     "failed_model_tool_use",
     "failed_harness_setup",
     "failed_dataset_extraction",
@@ -122,6 +123,7 @@ STRICT_STATUSES = {
     "failed_token_budget",
     "failed_missing_required_tool",
     "failed_invalid_task_context",
+    "failed_model_endpoint",
     "timed_out",
 }
 INVALID_EVALUATION_STATUSES = {
@@ -134,6 +136,7 @@ INVALID_EVALUATION_STATUSES = {
     "failed_token_budget",
     "failed_missing_required_tool",
     "failed_invalid_task_context",
+    "failed_model_endpoint",
     "timed_out",
 }
 STATUS_ALIASES = {
@@ -167,6 +170,9 @@ FINANCE_AGENT_V2_REQUIRED_ENV = (
 EXPLOITBENCH_REQUIRED_CONFIGS = (
     "benchmarks/v8.yaml",
     "benchmarks/v8-small.yaml",
+)
+EXPLOITBENCH_REQUIRED_PATHS = EXPLOITBENCH_REQUIRED_CONFIGS + (
+    "benchmarks/bench-v8",
 )
 EXPLOITBENCH_EXCLUDE_PATTERNS = (
     "/docs/",
@@ -339,7 +345,7 @@ class BenchmarkAdapter:
         }
 
     def capability_contract(self, required_capabilities: set[str], items: list[BenchmarkItem]) -> dict[str, Any]:
-        return capability_contract_for(required_capabilities, self)
+        return _annotate_tool_contract(capability_contract_for(required_capabilities, self), required_capabilities, items)
 
     def prepare_task(self, item: BenchmarkItem) -> TaskWorkspace:
         root = _isolated_workspace_root(item)
@@ -353,6 +359,9 @@ class BenchmarkAdapter:
 
     def available_tools(self, item: BenchmarkItem, workspace: TaskWorkspace) -> list[dict[str, Any]]:
         return agent_tool_schemas()
+
+    def tools_sent_to_model(self, item: BenchmarkItem, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return _tools_sent_to_model(item, tools)
 
     def run_agent_loop(
         self,
@@ -385,13 +394,19 @@ class BenchmarkAdapter:
     def evaluate_item(self, benchmark: str, item: BenchmarkItem) -> dict[str, Any]:
         workspace: TaskWorkspace | None = None
         item_dir = _item_output_dir(item)
+        required_capabilities = _item_required_capabilities(item)
+        preflight_fields = _evaluation_preflight_fields(item, self)
         _write_item_json(item_dir, "item.json", _item_to_dict(item))
         try:
             workspace = self.prepare_task(item)
             tools = self.available_tools(item, workspace)
-            _write_item_json(item_dir, "workspace.json", _workspace_to_dict(workspace))
-            _write_item_json(item_dir, "tools.json", {"tools": tools})
+            sent_tools = self.tools_sent_to_model(item, tools)
             missing_tools = _missing_required_tools(item, tools)
+            if "tool_call" in required_capabilities and not sent_tools:
+                missing_tools = sorted(set(missing_tools) or {"tool_call_backend"})
+            preflight_fields = _evaluation_preflight_fields(item, self, tools, missing_tools)
+            _write_item_json(item_dir, "workspace.json", _workspace_to_dict(workspace))
+            _write_item_json(item_dir, "tools.json", _tool_manifest(item, tools, sent_tools))
             if missing_tools:
                 reason = f"Missing required tool(s): {', '.join(missing_tools)}"
                 payload = evaluation_payload(
@@ -399,11 +414,14 @@ class BenchmarkAdapter:
                     "",
                     0.0,
                     reason,
+                    **preflight_fields,
                     status="failed_missing_required_tool",
                     adapter=self.name,
                     capabilities_verified=False,
                     setup_details={
                         "blocker_type": "missing_required_tool",
+                        "required_capabilities": sorted(required_capabilities),
+                        "required_tools": _item_required_tools(item),
                         "missing_tools": missing_tools,
                         "exposed_tools": _tool_schema_names(tools),
                     },
@@ -419,7 +437,7 @@ class BenchmarkAdapter:
                 )
                 _write_item_json(item_dir, "item_result.json", payload)
                 return payload
-            run = self.run_agent_loop(benchmark, item, workspace, tools)
+            run = self.run_agent_loop(benchmark, item, workspace, sent_tools)
             _write_item_json(item_dir, "agent_run.json", _agent_run_to_dict(run))
             protocol_status = normalize_status(run.diagnostics.get("status")) if isinstance(run.diagnostics, dict) else ""
             if protocol_status in STRICT_STATUSES and protocol_status != "passed":
@@ -434,6 +452,7 @@ class BenchmarkAdapter:
                     usage=run.usage,
                     tool_trace=run.tool_trace,
                     protocol_diagnostics=run.diagnostics,
+                    **preflight_fields,
                     adapter=self.name,
                     capabilities_verified=protocol_status not in INVALID_EVALUATION_STATUSES,
                 )
@@ -454,6 +473,7 @@ class BenchmarkAdapter:
                     usage=run.usage,
                     tool_trace=outputs.tool_trace,
                     protocol_diagnostics=protocol,
+                    **preflight_fields,
                     output_bundle={
                         "answer_present": bool(outputs.answer),
                         "patch_present": bool(outputs.patch),
@@ -475,13 +495,14 @@ class BenchmarkAdapter:
                 str(exc),
                 status="timed_out",
                 timed_out=True,
+                **preflight_fields,
                 adapter=self.name,
                 capabilities_verified=False,
             )
             _write_item_json(item_dir, "item_result.json", payload)
             return payload
         except ChatCompletionHTTPError as exc:
-            status = "failed_token_budget" if _looks_like_context_error(exc.body) else "failed_harness_setup"
+            status = "failed_token_budget" if _looks_like_context_error(exc.body) else "failed_model_endpoint"
             payload = evaluation_payload(
                 item,
                 "",
@@ -489,6 +510,7 @@ class BenchmarkAdapter:
                 exc.body[-2000:] or str(exc),
                 status=status,
                 status_code=exc.code,
+                **preflight_fields,
                 adapter=self.name,
                 capabilities_verified=False,
             )
@@ -501,6 +523,7 @@ class BenchmarkAdapter:
                 0.0,
                 str(exc),
                 status=exc.status,
+                **preflight_fields,
                 adapter=self.name,
                 capabilities_verified=False,
                 setup_details=exc.details,
@@ -515,6 +538,7 @@ class BenchmarkAdapter:
                 0.0,
                 str(exc),
                 status="failed_harness_setup",
+                **preflight_fields,
                 adapter=self.name,
                 capabilities_verified=False,
             )
@@ -544,6 +568,7 @@ class BenchmarkAdapter:
             usage=run.usage,
             tool_trace=outputs.tool_trace,
             protocol_diagnostics=protocol if isinstance(protocol, dict) else {},
+            **preflight_fields,
             output_bundle={
                 "answer_present": bool(outputs.answer),
                 "patch_present": bool(outputs.patch),
@@ -555,7 +580,11 @@ class BenchmarkAdapter:
             timed_out=bool(grade.get("timed_out")),
             judge_parse_repaired=bool(grade.get("judge_parse_repaired")),
             adapter=self.name,
-            capabilities_verified=normalize_status(status_override) not in INVALID_EVALUATION_STATUSES,
+            capabilities_verified=(
+                normalize_status(status_override) not in INVALID_EVALUATION_STATUSES
+                and not preflight_fields["missing_tools"]
+                and ("tool_call" not in required_capabilities or bool(preflight_fields["exposed_tools"]))
+            ),
         )
         _write_item_json(item_dir, "item_result.json", payload)
         return payload
@@ -586,6 +615,9 @@ class StaticTranscriptReasoningAdapter(ChatAnswerAdapter):
     def available_tools(self, item: BenchmarkItem, workspace: TaskWorkspace) -> list[dict[str, Any]]:
         return []
 
+    def tools_sent_to_model(self, item: BenchmarkItem, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return []
+
     def run_agent_loop(
         self,
         benchmark: str,
@@ -613,11 +645,21 @@ class StaticFinanceReasoningAdapter(ToolCallAdapter):
     def available_tools(self, item: BenchmarkItem, workspace: TaskWorkspace) -> list[dict[str, Any]]:
         return []
 
+    def tools_sent_to_model(self, item: BenchmarkItem, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return []
+
     def capability_contract(self, required_capabilities: set[str], items: list[BenchmarkItem]) -> dict[str, Any]:
         contract = capability_contract_for(required_capabilities, self)
+        required_tools = sorted({tool for item in items for tool in _item_required_tools(item)})
         for support in contract.values():
             if isinstance(support, dict) and support.get("supported") is True:
                 support["mode"] = "static_local_finance"
+                support["static_degraded_mode"] = True
+                support["native_tool_call_protocol_supported"] = "tool_call" in HARNESS_SUPPORTED_CAPABILITIES
+                support["generic_sandbox_tools_available"] = bool(agent_tool_schemas())
+                support["benchmark_required_tools_available"] = False
+                support["required_benchmark_tools"] = required_tools
+                support["tools"] = False
                 support["reason"] = "Live finance tool backends are not available; evaluating extracted public prompt rows statically"
         return contract
 
@@ -637,6 +679,68 @@ class StaticFinanceReasoningAdapter(ToolCallAdapter):
         )
         with pushd(workspace.root):
             return _agent_run_from_dict(run_agent_loop(benchmark, static_item, tools=[]))
+
+
+class FinToolBenchAdapter(ToolCallAdapter):
+    name = "fintoolbench_live_tools"
+
+    def available_tools(self, item: BenchmarkItem, workspace: TaskWorkspace) -> list[dict[str, Any]]:
+        required = set(_item_required_tools(item))
+        return _fintoolbench_tool_schemas(Path.cwd(), required_tools=required)
+
+    def capability_contract(self, required_capabilities: set[str], items: list[BenchmarkItem]) -> dict[str, Any]:
+        contract = capability_contract_for(required_capabilities, self)
+        required_tools = sorted({tool for item in items for tool in _item_required_tools(item)})
+        available_tools = set(_tool_schema_names(_fintoolbench_tool_schemas(Path.cwd(), required_tools=set(required_tools))))
+        missing_tools = sorted(set(required_tools) - available_tools)
+        support = contract.get("tool_call")
+        if isinstance(support, dict):
+            support["mode"] = "live_financial_tools"
+            support["tool_manifest"] = "tools/tools_all_annotated.jsonl"
+            support["required_benchmark_tools"] = required_tools
+            support["exposed_tools"] = sorted(available_tools)
+            support["missing_tools"] = missing_tools
+            support["benchmark_required_tools_available"] = not missing_tools and bool(available_tools)
+            if not available_tools:
+                support["supported"] = False
+                support["tools"] = False
+                support["reason"] = "FinToolBench tool manifest tools/tools_all_annotated.jsonl did not expose callable schemas"
+            elif missing_tools:
+                support["supported"] = False
+                support["tools"] = False
+                support["reason"] = "FinToolBench required tool schemas are missing: " + ", ".join(missing_tools)
+        return contract
+
+
+class FinanceAgentV2Adapter(ToolCallAdapter):
+    name = "finance_agent_v2_live_tools"
+
+    def available_tools(self, item: BenchmarkItem, workspace: TaskWorkspace) -> list[dict[str, Any]]:
+        if _finance_agent_v2_missing_environment():
+            return []
+        return _finance_agent_v2_tool_schemas()
+
+    def capability_contract(self, required_capabilities: set[str], items: list[BenchmarkItem]) -> dict[str, Any]:
+        contract = capability_contract_for(required_capabilities, self)
+        missing_env = _finance_agent_v2_missing_environment()
+        exposed_tools = _tool_schema_names([] if missing_env else _finance_agent_v2_tool_schemas())
+        missing_tools = sorted(FINANCE_AGENT_V2_REQUIRED_TOOLS - set(exposed_tools))
+        for capability in ("tool_call", "external_data_required"):
+            support = contract.get(capability)
+            if not isinstance(support, dict):
+                continue
+            support["mode"] = "live_finance_agent_v2_tools"
+            support["required_benchmark_tools"] = sorted(FINANCE_AGENT_V2_REQUIRED_TOOLS)
+            support["required_environment"] = list(FINANCE_AGENT_V2_REQUIRED_ENV)
+            support["missing_environment"] = missing_env
+            support["exposed_tools"] = exposed_tools
+            support["missing_tools"] = missing_tools
+            support["benchmark_required_tools_available"] = not missing_tools
+            if missing_tools:
+                support["supported"] = False
+                support["tools"] = False
+                support["reason"] = "Finance Agent v2 required tool backend is unavailable: " + ", ".join(missing_tools)
+        return contract
 
 
 class BrowserGuiAdapter(ToolCallAdapter):
@@ -779,6 +883,7 @@ class FileArtifactAdapter(ChatAnswerAdapter):
                 "content_sample": run.content[:500],
                 "diagnostics": run.diagnostics,
                 "artifact_output_dir": workspace.metadata.get("artifact_output_dir", ""),
+                "artifact_collection_dir": str(item_dir / "artifacts"),
                 "input_assets": workspace.metadata.get("input_assets", []),
             },
         )
@@ -796,7 +901,11 @@ class FileArtifactAdapter(ChatAnswerAdapter):
                 "status": "failed_model_answer",
                 "reason": "model did not produce any files in the task output directory",
             }
-        integrity_errors = _artifact_integrity_errors(outputs.artifact_paths)
+        allowed_artifact_root = outputs.metadata.get("artifact_collection_dir") if isinstance(outputs.metadata, dict) else ""
+        integrity_errors = _artifact_integrity_errors(
+            outputs.artifact_paths,
+            allowed_root=Path(allowed_artifact_root) if isinstance(allowed_artifact_root, str) and allowed_artifact_root else None,
+        )
         if integrity_errors:
             return 0.0, {
                 "method": "artifact_integrity",
@@ -872,10 +981,15 @@ class RepoPatchAdapter(ChatAnswerAdapter):
         base_commit = _repo_patch_base_commit(item)
         if not target_repo or not base_commit:
             raise AdapterSetupError(
-                "failed_harness_setup",
+                "failed_invalid_task_context",
                 "repo_patch item is missing target repo/base_commit metadata",
                 {"source": item.source, "metadata_keys": sorted(item.metadata)},
             )
+        if normalize_text(os.environ.get("AGENT_BENCH_BENCHMARK_NAME", "")).replace("-", " ") == "swe lancer":
+            swelancer_error = validate_swelancer_item(item, Path.cwd())
+            if swelancer_error is not None:
+                status, reason, details = swelancer_error
+                raise AdapterSetupError(status, reason, details)
         root = _prepare_target_repo_checkout(item, target_repo, base_commit)
         return TaskWorkspace(
             root=root,
@@ -911,8 +1025,16 @@ class RepoPatchAdapter(ChatAnswerAdapter):
             return 0.0, {
                 "method": "repo_patch_output_presence",
                 "score": 0.0,
-                "status": "failed_model_answer",
-                "reason": "model did not produce a repository patch",
+                "status": "failed_model_missing_artifact",
+                "reason": "empty file: model.patch contains no repository diff",
+                "official_grader_configured": bool(os.environ.get(REPO_PATCH_GRADER_ENV, "").strip()),
+            }
+        if not _looks_like_unified_diff(outputs.patch):
+            return 0.0, {
+                "method": "repo_patch_output_presence",
+                "score": 0.0,
+                "status": "failed_model_missing_artifact",
+                "reason": "invalid patch format: model.patch is not a unified diff",
                 "official_grader_configured": bool(os.environ.get(REPO_PATCH_GRADER_ENV, "").strip()),
             }
         grader_command = os.environ.get(REPO_PATCH_GRADER_ENV, "").strip()
@@ -958,6 +1080,8 @@ ADAPTERS: tuple[BenchmarkAdapter, ...] = (
     ChatAnswerAdapter(),
     StaticTranscriptReasoningAdapter(),
     StaticFinanceReasoningAdapter(),
+    FinToolBenchAdapter(),
+    FinanceAgentV2Adapter(),
     ToolCallAdapter(),
     BrowserGuiAdapter(),
     FileArtifactAdapter(),
@@ -1034,6 +1158,7 @@ def main() -> int:
                 "model_eval": {},
                 "status_counts": {"skipped_unsupported_capability": 1},
                 "capabilities_verified": False,
+                "included_in_official_score": False,
             }
         )
         _write_result(output_dir, payload)
@@ -1124,16 +1249,40 @@ def main() -> int:
             "model_evals": evaluations,
             "model_eval": summarize_evaluations(evaluations),
             "status_counts": _status_counts(evaluations) or ({status: 1} if status != "completed" else {}),
-            "capabilities_verified": bool(evaluations) and all(
-                bool(item.get("capabilities_verified", True)) for item in evaluations
+            "capabilities_verified": (
+                bool(evaluations)
+                and all(bool(item.get("capabilities_verified", True)) for item in evaluations)
+                and _capability_profile(required_capabilities, capability_contract)[
+                    "benchmark_required_tools_available"
+                ]
             ),
         }
     )
     if error_message:
         payload["error"] = error_message
+    _promote_evaluation_tool_fields(payload, evaluations)
+    payload["included_in_official_score"] = (
+        normalize_status(status) not in INVALID_EVALUATION_STATUSES
+        and bool(payload.get("capabilities_verified"))
+    )
 
     _write_result(output_dir, payload)
     return 0 if status == "completed" else 2
+
+
+def _promote_evaluation_tool_fields(payload: dict[str, Any], evaluations: list[dict[str, Any]]) -> None:
+    for key in ("required_tools", "exposed_tools", "missing_tools"):
+        values = _flatten_string_values(payload.get(key))
+        for evaluation in evaluations:
+            if isinstance(evaluation, dict):
+                values.extend(_flatten_string_values(evaluation.get(key)))
+                setup = evaluation.get("setup_details")
+                if isinstance(setup, dict):
+                    values.extend(_flatten_string_values(setup.get(key)))
+                    details = setup.get("details")
+                    if isinstance(details, dict):
+                        values.extend(_flatten_string_values(details.get(key)))
+        payload[key] = sorted({value for value in values if value})
 
 
 def _base_result_payload(
@@ -1147,6 +1296,10 @@ def _base_result_payload(
     adapter: BenchmarkAdapter,
     capability_contract: dict[str, Any],
 ) -> dict[str, Any]:
+    capability_profile = _capability_profile(set(required_capabilities), capability_contract)
+    required_tools = _contract_required_tools(capability_contract)
+    exposed_tools = _contract_exposed_tools(capability_contract)
+    missing_tools = _contract_missing_tools(capability_contract)
     return {
         "benchmark": args.benchmark,
         "group": os.environ.get("AGENT_BENCH_BENCHMARK_GROUP") or "Benchmarks",
@@ -1172,9 +1325,35 @@ def _base_result_payload(
             for capability in required_capabilities
             if isinstance(capability_contract.get(capability), dict)
             and capability_contract[capability].get("supported") is True
+            and capability_contract[capability].get("benchmark_required_tools_available") is not False
         ),
+        "required_tools": required_tools,
+        "exposed_tools": exposed_tools,
+        "missing_tools": missing_tools,
+        "native_tool_call_protocol_supported": capability_profile["native_tool_call_protocol_supported"],
+        "generic_sandbox_tools_available": capability_profile["generic_sandbox_tools_available"],
+        "benchmark_required_tools_available": capability_profile["benchmark_required_tools_available"],
+        "static_degraded_mode": capability_profile["static_degraded_mode"],
         "capability_contract": capability_contract,
         "unsupported_capabilities": unsupported_capabilities,
+    }
+
+
+def _capability_profile(
+    required_capabilities: set[str],
+    capability_contract: dict[str, Any],
+) -> dict[str, bool]:
+    requires_tool_call = "tool_call" in required_capabilities
+    contract_values = [value for value in capability_contract.values() if isinstance(value, dict)]
+    benchmark_required_tools_available = all(
+        value.get("benchmark_required_tools_available") is not False for value in contract_values
+    )
+    return {
+        "native_tool_call_protocol_supported": (not requires_tool_call)
+        or "tool_call" in HARNESS_SUPPORTED_CAPABILITIES,
+        "generic_sandbox_tools_available": bool(agent_tool_schemas()),
+        "benchmark_required_tools_available": benchmark_required_tools_available,
+        "static_degraded_mode": any(value.get("static_degraded_mode") is True for value in contract_values),
     }
 
 
@@ -1198,7 +1377,10 @@ def _contract_unsupported_capabilities(
     unsupported: list[str] = []
     for capability in sorted(required_capabilities):
         support = capability_contract.get(capability)
-        if isinstance(support, dict) and support.get("supported") is False:
+        if isinstance(support, dict) and (
+            support.get("supported") is False
+            or support.get("benchmark_required_tools_available") is False
+        ):
             unsupported.append(capability)
     return unsupported
 
@@ -1239,8 +1421,12 @@ def select_adapter(required_capabilities: set[str]) -> BenchmarkAdapter:
     benchmark = normalize_text(os.environ.get("AGENT_BENCH_BENCHMARK_NAME", "")).replace("-", " ")
     if benchmark == "finmcp bench":
         return StaticTranscriptReasoningAdapter()
-    if benchmark in {"fintoolbench", "finance agent v2"}:
+    if benchmark in {"fintoolbench", "finance agent v2"} and _static_conversion_live_tools_disabled():
         return StaticFinanceReasoningAdapter()
+    if benchmark == "fintoolbench":
+        return FinToolBenchAdapter()
+    if benchmark == "finance agent v2":
+        return FinanceAgentV2Adapter()
     if "browser_or_gui" in required_capabilities:
         return BrowserGuiAdapter()
     if "tool_call" in required_capabilities:
@@ -1272,6 +1458,44 @@ def capability_contract_for(required_capabilities: set[str], adapter: BenchmarkA
     return contract
 
 
+def _annotate_tool_contract(
+    contract: dict[str, Any],
+    required_capabilities: set[str],
+    items: list[BenchmarkItem],
+) -> dict[str, Any]:
+    required_tools = sorted(
+        {
+            tool
+            for item in items
+            for tool in _item_required_tools(item)
+        }
+        | set(_descriptor_required_tools())
+    )
+    if not required_tools and "tool_call" not in required_capabilities:
+        return contract
+    exposed_tools = _tool_schema_names(agent_tool_schemas())
+    missing_tools = sorted(set(required_tools) - set(exposed_tools))
+    support = contract.get("tool_call")
+    if not isinstance(support, dict):
+        return contract
+    support.setdefault("mode", "generic_agent_tools")
+    support["required_benchmark_tools"] = required_tools
+    support["exposed_tools"] = exposed_tools
+    support["missing_tools"] = missing_tools
+    support["benchmark_required_tools_available"] = not missing_tools
+    if missing_tools:
+        support["supported"] = False
+        support["tools"] = False
+        support["reason"] = "Benchmark required tool schemas are missing: " + ", ".join(missing_tools)
+    elif "tool_call" in required_capabilities and not exposed_tools:
+        support["supported"] = False
+        support["tools"] = False
+        support["benchmark_required_tools_available"] = False
+        support["missing_tools"] = ["tool_call_backend"]
+        support["reason"] = "Benchmark requires tool_call but no callable tool backend is exposed"
+    return contract
+
+
 def _required_capabilities(benchmark: str) -> set[str]:
     configured = _capabilities_from_env()
     if configured:
@@ -1294,6 +1518,106 @@ def _required_capabilities(benchmark: str) -> set[str]:
         if normalized == key:
             return set(capabilities)
     return {"chat_answer"}
+
+
+def _item_required_capabilities(item: BenchmarkItem) -> set[str]:
+    metadata = item.metadata if isinstance(item.metadata, dict) else {}
+    configured = metadata.get("required_capabilities")
+    if isinstance(configured, list):
+        values = {str(value).strip() for value in configured if str(value).strip()}
+        if values:
+            return values
+    return _required_capabilities(os.environ.get("AGENT_BENCH_BENCHMARK_NAME", ""))
+
+
+def _evaluation_preflight_fields(
+    item: BenchmarkItem,
+    adapter: BenchmarkAdapter,
+    tools: list[dict[str, Any]] | None = None,
+    missing_tools: list[str] | None = None,
+    capability_contract: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    required_capabilities = _item_required_capabilities(item)
+    exposed_tools = _tool_schema_names(tools or [])
+    return {
+        "required_capabilities": sorted(required_capabilities),
+        "supported_capabilities": _supported_capabilities_for_item(required_capabilities, adapter, capability_contract),
+        "required_tools": _item_required_tools(item),
+        "exposed_tools": exposed_tools,
+        "missing_tools": sorted(set(missing_tools or [])),
+    }
+
+
+def _supported_capabilities_for_item(
+    required_capabilities: set[str],
+    adapter: BenchmarkAdapter,
+    capability_contract: dict[str, Any] | None = None,
+) -> list[str]:
+    if capability_contract:
+        return sorted(
+            capability
+            for capability in required_capabilities
+            if isinstance(capability_contract.get(capability), dict)
+            and capability_contract[capability].get("supported") is True
+            and capability_contract[capability].get("benchmark_required_tools_available") is not False
+        )
+    supported = adapter.supported_capabilities()
+    return sorted(capability for capability in required_capabilities if capability in supported)
+
+
+def _static_conversion_live_tools_disabled() -> bool:
+    benchmark = _benchmark_descriptor()
+    static_conversion = benchmark.get("static_conversion")
+    if not isinstance(static_conversion, dict):
+        return False
+    return static_conversion.get("live_tools_required") is False
+
+
+def _benchmark_descriptor() -> dict[str, Any]:
+    for env_name in ("AGENT_BENCH_BENCHMARK_JSON", "AGENT_BENCH_MANIFEST_JSON"):
+        raw = os.environ.get(env_name, "")
+        if not raw.strip():
+            continue
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return {}
+
+
+def _descriptor_required_tools() -> list[str]:
+    descriptor = _benchmark_descriptor()
+    tools: list[str] = []
+    for key in ("required_tools", "tool_names"):
+        tools.extend(_flatten_string_values(descriptor.get(key)))
+    declared_tools = descriptor.get("tools")
+    if isinstance(declared_tools, list):
+        for entry in declared_tools:
+            if isinstance(entry, str):
+                tools.append(entry)
+            elif isinstance(entry, dict):
+                for key in ("name", "tool", "tool_name", "api_name"):
+                    value = entry.get(key)
+                    if isinstance(value, str) and value.strip():
+                        tools.append(value.strip())
+                function = entry.get("function")
+                if isinstance(function, dict) and isinstance(function.get("name"), str):
+                    tools.append(function["name"].strip())
+    dataset_source = descriptor.get("dataset_source")
+    if isinstance(dataset_source, dict):
+        tools.extend(_flatten_string_values(dataset_source.get("required_tools")))
+    assets = descriptor.get("assets")
+    if isinstance(assets, list):
+        for asset in assets:
+            if not isinstance(asset, dict):
+                continue
+            tools.extend(_flatten_string_values(asset.get("required_tools")))
+            rules = asset.get("validation_rules")
+            if isinstance(rules, dict):
+                tools.extend(_flatten_string_values(rules.get("required_tools")))
+    return sorted({tool.strip() for tool in tools if tool.strip()})
 
 
 def _capabilities_from_env() -> set[str]:
@@ -1949,11 +2273,11 @@ def extract_stockbench_items(root: Path, limit: int) -> tuple[list[BenchmarkItem
 
 def extract_exploitbench_items(root: Path, limit: int) -> tuple[list[BenchmarkItem], list[str]]:
     errors: list[str] = []
-    missing_configs = [relative for relative in EXPLOITBENCH_REQUIRED_CONFIGS if not (root / relative).is_file()]
-    if missing_configs:
+    missing_paths = [relative for relative in EXPLOITBENCH_REQUIRED_PATHS if not (root / relative).exists()]
+    if missing_paths:
         return [], [
             "ExploitBench upstream challenge environment/configuration was not fully materialized",
-            f"missing required config(s): {', '.join(missing_configs)}",
+            f"missing required path(s): {', '.join(missing_paths)}",
         ]
     items: list[BenchmarkItem] = []
     for relative in EXPLOITBENCH_REQUIRED_CONFIGS:
@@ -1983,6 +2307,7 @@ def extract_exploitbench_items(root: Path, limit: int) -> tuple[list[BenchmarkIt
                     "target_images": target_images,
                     "grader": "upstream_deterministic_oracle",
                     "oracle": "upstream_capability_oracle",
+                    "required_tools": ["exploitbench"],
                     "capability_flags": ["v8_capability_ladder"],
                 },
             )
@@ -2084,8 +2409,8 @@ def extract_fintoolbench_items(root: Path, limit: int) -> tuple[list[BenchmarkIt
             {
                 "expected_key": item.metadata.get("expected_key") or "fintoolbench_tool_required_query",
                 "required_tools": required_tools,
-                "live_tools_required": False,
-                "local_evaluation_mode": "static_gold_answer",
+                "live_tools_required": True,
+                "local_evaluation_mode": "live_tool_call",
                 "tool_manifest": str(tool_path.relative_to(root)),
                 "tool_manifest_count": len(tool_manifest),
             }
@@ -2098,13 +2423,29 @@ def extract_fintoolbench_items(root: Path, limit: int) -> tuple[list[BenchmarkIt
 
 def _fintoolbench_tool_manifest(path: Path) -> dict[str, dict[str, Any]]:
     manifest: dict[str, dict[str, Any]] = {}
-    for record in _records_from_jsonl(path):
+    for record in _records_from_jsonl_unbounded(path):
         if not isinstance(record, dict):
             continue
         name = _first_text(record, ("name", "tool_name", "api_name", "function_name"))
         if name:
             manifest[name] = record
     return manifest
+
+
+def _records_from_jsonl_unbounded(path: Path) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                records.append(payload)
+    return records
 
 
 def extract_finance_agent_v2_items(root: Path, limit: int) -> tuple[list[BenchmarkItem], list[str]]:
@@ -2127,8 +2468,8 @@ def extract_finance_agent_v2_items(root: Path, limit: int) -> tuple[list[Benchma
             if item is None:
                 continue
             item.metadata.setdefault("required_tools", sorted(FINANCE_AGENT_V2_REQUIRED_TOOLS))
-            item.metadata["live_tools_required"] = False
-            item.metadata["local_evaluation_mode"] = "static_public_prompt"
+            item.metadata["live_tools_required"] = True
+            item.metadata["local_evaluation_mode"] = "live_tool_call"
             items.append(item)
     if not items and task_md_files:
         path = task_md_files[0]
@@ -2142,6 +2483,7 @@ def extract_finance_agent_v2_items(root: Path, limit: int) -> tuple[list[Benchma
                     "grading": "task_compliance",
                     "task_md_only": True,
                     "required_tools": sorted(FINANCE_AGENT_V2_REQUIRED_TOOLS),
+                    "live_tools_required": True,
                 },
             )
         )
@@ -2154,9 +2496,6 @@ def extract_swelancer_items(root: Path, limit: int) -> tuple[list[BenchmarkItem]
     csv_path = root / "all_swelancer_tasks.csv"
     if not csv_path.is_file():
         return [], ["SWE-Lancer task CSV was not found"]
-    base_commit = _git_head(root)
-    if not base_commit:
-        return [], ["SWE-Lancer repository base commit could not be identified"]
     items: list[BenchmarkItem] = []
     with csv_path.open("r", encoding="utf-8", errors="replace", newline="") as handle:
         for index, row in enumerate(csv.DictReader(handle), 2):
@@ -2174,14 +2513,19 @@ def extract_swelancer_items(root: Path, limit: int) -> tuple[list[BenchmarkItem]
             question = "\n\n".join(part for part in prompt_parts if part).strip()
             if not question:
                 continue
+            target_context = _swelancer_target_context(row, issue_data, issue_dir)
             metadata = {
                 "grading": "task_compliance",
                 "expected_key": "repo_patch_tests",
-                "target_repo": str(root),
-                "base_commit": base_commit,
                 "instance_id": issue_id,
                 "issue_dir": str(issue_dir.relative_to(root)) if issue_dir and issue_dir.exists() else "",
+                "catalog_root": str(root),
             }
+            metadata.update(target_context)
+            if not target_context.get("target_repo") or not target_context.get("base_commit"):
+                metadata["invalid_task_context_reason"] = (
+                    "SWE-Lancer public catalog row did not expose target_repo/base_commit metadata"
+                )
             if issue_dir and (issue_dir / "commit_id.txt").is_file():
                 metadata["issue_commit_id"] = (issue_dir / "commit_id.txt").read_text(encoding="utf-8", errors="replace").strip()
             items.append(
@@ -2195,6 +2539,76 @@ def extract_swelancer_items(root: Path, limit: int) -> tuple[list[BenchmarkItem]
     if not items:
         return [], ["SWE-Lancer CSV did not contain concrete issue tasks"]
     return items, []
+
+
+def _swelancer_target_context(
+    row: dict[str, Any],
+    issue_data: dict[str, Any],
+    issue_dir: Path | None,
+) -> dict[str, str]:
+    containers = [row, issue_data]
+    context: dict[str, str] = {}
+    target_repo = _first_keyed_text(
+        containers,
+        (
+            "target_repo",
+            "target_repository",
+            "repo",
+            "repo_url",
+            "repository",
+            "github_repo",
+            "git_repo",
+        ),
+    )
+    base_commit = _first_keyed_text(
+        containers,
+        (
+            "base_commit",
+            "base_sha",
+            "base_revision",
+            "base_ref",
+            "commit",
+            "revision",
+        ),
+    )
+    if issue_dir is not None:
+        target_repo = target_repo or _first_existing_file_text(
+            issue_dir,
+            ("target_repo.txt", "target_repository.txt", "repo.txt", "repository.txt"),
+        )
+        base_commit = base_commit or _first_existing_file_text(
+            issue_dir,
+            ("base_commit.txt", "base_sha.txt", "base_revision.txt"),
+        )
+    if target_repo:
+        context["target_repo"] = target_repo
+    if base_commit:
+        context["base_commit"] = base_commit
+    return context
+
+
+def _first_keyed_text(containers: list[dict[str, Any]], keys: tuple[str, ...]) -> str:
+    normalized_keys = {key.lower(): key for key in keys}
+    for container in containers:
+        lower_to_key = {str(key).lower(): key for key in container}
+        for lowered in normalized_keys:
+            original = lower_to_key.get(lowered)
+            if original is None:
+                continue
+            value = container.get(original)
+            if isinstance(value, (str, int, float)) and str(value).strip():
+                return str(value).strip()
+    return ""
+
+
+def _first_existing_file_text(root: Path, filenames: tuple[str, ...]) -> str:
+    for filename in filenames:
+        path = root / filename
+        if path.is_file():
+            text = path.read_text(encoding="utf-8", errors="replace").strip()
+            if text:
+                return text
+    return ""
 
 
 def extract_quantcode_items(root: Path, limit: int) -> tuple[list[BenchmarkItem], list[str]]:
@@ -2962,9 +3376,13 @@ def _preflight_failure_from_contract(
         if not isinstance(support, dict) or support.get("supported") is not False:
             continue
         reason = str(support.get("reason") or f"{capability} capability preflight failed")
+        if support.get("benchmark_required_tools_available") is False or support.get("missing_tools"):
+            return "failed_missing_required_tool", reason
         if capability == "file_artifact":
             return "failed_missing_assets", reason
         if capability == "repo_patch":
+            if "missing target repo/base_commit metadata" in reason:
+                return "failed_invalid_task_context", reason
             if "official patch/test grader" in reason:
                 return "skipped_unsupported_capability", reason
             return "failed_harness_setup", reason
@@ -2980,6 +3398,8 @@ def preflight_failed_evaluations(
     capability_contract: dict[str, Any],
 ) -> list[dict[str, Any]]:
     evaluations: list[dict[str, Any]] = []
+    missing_tools = _contract_missing_tools(capability_contract)
+    exposed_tools = _contract_exposed_tools(capability_contract)
     for item in items:
         item_dir = _item_output_dir(item)
         _write_item_json(item_dir, "item.json", _item_to_dict(item))
@@ -2987,6 +3407,8 @@ def preflight_failed_evaluations(
             "status": status,
             "error": reason,
             "capability_contract": capability_contract,
+            "missing_tools": missing_tools,
+            "exposed_tools": exposed_tools,
         }
         _write_item_json(item_dir, "setup_error.json", setup_payload)
         payload = evaluation_payload(
@@ -2994,10 +3416,11 @@ def preflight_failed_evaluations(
             "",
             0.0,
             reason,
+            **_evaluation_preflight_fields(item, adapter, [], missing_tools, capability_contract),
             status=status,
             adapter=adapter.name,
             capabilities_verified=False,
-            setup_details={"capability_contract": capability_contract},
+            setup_details=setup_payload,
         )
         _write_item_json(item_dir, "item_result.json", payload)
         evaluations.append(payload)
@@ -3033,11 +3456,13 @@ def validate_items_preflight(
             "capability_contract": capability_contract,
         }
         _write_item_json(item_dir, "setup_error.json", setup_payload)
+        missing_tools = _flatten_string_values(details.get("missing_tools")) or _flatten_string_values(details.get("required_tools"))
         payload = evaluation_payload(
             item,
             "",
             0.0,
             reason,
+            **_evaluation_preflight_fields(item, adapter, [], missing_tools, capability_contract),
             status=status,
             adapter=adapter.name,
             capabilities_verified=False,
@@ -3046,6 +3471,33 @@ def validate_items_preflight(
         _write_item_json(item_dir, "item_result.json", payload)
         invalid.append(payload)
     return valid, invalid
+
+
+def _contract_missing_tools(capability_contract: dict[str, Any]) -> list[str]:
+    tools: list[str] = []
+    for support in capability_contract.values():
+        if not isinstance(support, dict):
+            continue
+        tools.extend(_flatten_string_values(support.get("missing_tools")))
+    return sorted({tool for tool in tools if tool})
+
+
+def _contract_required_tools(capability_contract: dict[str, Any]) -> list[str]:
+    tools: list[str] = []
+    for support in capability_contract.values():
+        if not isinstance(support, dict):
+            continue
+        tools.extend(_flatten_string_values(support.get("required_benchmark_tools")))
+    return sorted({tool for tool in tools if tool})
+
+
+def _contract_exposed_tools(capability_contract: dict[str, Any]) -> list[str]:
+    tools: list[str] = []
+    for support in capability_contract.values():
+        if not isinstance(support, dict):
+            continue
+        tools.extend(_flatten_string_values(support.get("exposed_tools")))
+    return sorted({tool for tool in tools if tool})
 
 
 def _item_preflight_failure(
@@ -3077,9 +3529,14 @@ def _item_preflight_failure(
 
     benchmark = normalize_text(os.environ.get("AGENT_BENCH_BENCHMARK_NAME", "")).replace("-", " ")
     if benchmark == "finance agent v2":
-        finance_error = validate_finance_agent_v2_item(item, Path.cwd(), agent_tool_schemas())
+        finance_tools = [] if _finance_agent_v2_missing_environment() else _finance_agent_v2_tool_schemas()
+        finance_error = validate_finance_agent_v2_item(item, Path.cwd(), finance_tools)
         if finance_error is not None:
             return finance_error
+    if benchmark == "swe lancer":
+        swelancer_error = validate_swelancer_item(item, Path.cwd())
+        if swelancer_error is not None:
+            return swelancer_error
     if benchmark == "finmcp bench":
         finmcp_error = validate_finmcp_static_item(item)
         if finmcp_error is not None:
@@ -3126,26 +3583,80 @@ def validate_exploitbench_item(item: BenchmarkItem) -> tuple[str, str, dict[str,
         return "failed_invalid_task_context", "ExploitBench item has no target image/environment", details
     if not (metadata.get("grader") or metadata.get("oracle")):
         return "failed_invalid_task_context", "ExploitBench item has no upstream grader/oracle", details
-    if not _exploitbench_upstream_ready(item):
-        return (
-            "failed_dataset_extraction",
-            "ExploitBench upstream challenge environment/configuration was not fully materialized",
-            {
-                "blocker_type": "missing_reference_dataset",
-                "item_id": _item_id(item),
-                "target_image": metadata.get("target_image"),
-            },
-        )
+    upstream_error = _exploitbench_upstream_error(item)
+    if upstream_error is not None:
+        return upstream_error
     return None
 
 
 def _exploitbench_upstream_ready(item: BenchmarkItem) -> bool:
+    return _exploitbench_upstream_error(item) is None
+
+
+def _exploitbench_upstream_error(item: BenchmarkItem) -> tuple[str, str, dict[str, Any]] | None:
     if os.environ.get("AGENT_BENCH_EXPLOITBENCH_UPSTREAM_READY", "").strip().lower() in {"1", "true", "yes"}:
-        return True
+        return None
     root = Path.cwd()
-    return all((root / relative).is_file() for relative in EXPLOITBENCH_REQUIRED_CONFIGS) and (
-        root / "benchmarks" / "bench-v8"
-    ).exists()
+    metadata = item.metadata if isinstance(item.metadata, dict) else {}
+    details = {
+        "blocker_type": "missing_reference_dataset",
+        "item_id": _item_id(item),
+        "target_image": metadata.get("target_image"),
+    }
+    missing_configs = [relative for relative in EXPLOITBENCH_REQUIRED_CONFIGS if not (root / relative).is_file()]
+    benchmark_config = metadata.get("benchmark_config")
+    if isinstance(benchmark_config, str) and benchmark_config and not (root / benchmark_config).is_file():
+        missing_configs.append(benchmark_config)
+    if missing_configs:
+        details["missing_configs"] = sorted(set(missing_configs))
+        return (
+            "failed_dataset_extraction",
+            "ExploitBench upstream challenge configuration was not materialized",
+            details,
+        )
+    if not (root / "benchmarks" / "bench-v8").exists():
+        details["missing_paths"] = ["benchmarks/bench-v8"]
+        return (
+            "failed_dataset_extraction",
+            "ExploitBench upstream deterministic oracle assets were not materialized",
+            details,
+        )
+    runner = shutil.which("exploitbench")
+    if not runner:
+        return (
+            "failed_missing_required_tool",
+            "ExploitBench upstream runner is not installed or not on PATH",
+            {
+                **details,
+                "blocker_type": "missing_required_tool_backend",
+                "required_tools": ["exploitbench"],
+                "missing_tools": ["exploitbench"],
+                "exposed_tools": [],
+            },
+        )
+    completed = subprocess.run(
+        [runner, "--help"],
+        text=True,
+        capture_output=True,
+        cwd=root,
+        timeout=30,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return (
+            "failed_missing_required_tool",
+            "ExploitBench upstream runner failed its readiness check",
+            {
+                **details,
+                "blocker_type": "missing_required_tool_backend",
+                "required_tools": ["exploitbench"],
+                "missing_tools": ["exploitbench"],
+                "exposed_tools": [],
+                "exit_code": completed.returncode,
+                "stderr": completed.stderr[-1000:],
+            },
+        )
+    return None
 
 
 def validate_finmcp_static_item(item: BenchmarkItem) -> tuple[str, str, dict[str, Any]] | None:
@@ -3185,13 +3696,17 @@ def validate_finance_agent_v2_item(
         )
     exposed_tools = set(_tool_schema_names(tools))
     has_retrieval_tools = FINANCE_AGENT_V2_REQUIRED_TOOLS.issubset(exposed_tools)
+    missing_tools = sorted(FINANCE_AGENT_V2_REQUIRED_TOOLS - exposed_tools)
     if metadata.get("task_md_only") and not has_documents:
         return (
-            "failed_invalid_task_context",
-            "Finance Agent v2 item has neither required source documents nor retrieval tools",
+            "failed_missing_required_tool",
+            "Finance Agent v2 required tools are not exposed: " + ", ".join(missing_tools),
             {
-                "blocker_type": "missing_reference_documents",
+                "blocker_type": "missing_required_tool_backend",
                 "item_id": _item_id(item),
+                "required_tools": sorted(FINANCE_AGENT_V2_REQUIRED_TOOLS),
+                "missing_tools": missing_tools,
+                "exposed_tools": sorted(exposed_tools),
             },
         )
     if missing_env and not has_documents:
@@ -3202,19 +3717,69 @@ def validate_finance_agent_v2_item(
                 "blocker_type": "missing_required_tool_backend",
                 "missing_environment": missing_env,
                 "required_tools": sorted(FINANCE_AGENT_V2_REQUIRED_TOOLS),
+                "missing_tools": sorted(FINANCE_AGENT_V2_REQUIRED_TOOLS),
+                "exposed_tools": sorted(exposed_tools),
             },
         )
     if not has_documents and not has_retrieval_tools:
         return (
-            "failed_invalid_task_context",
-            "Finance Agent v2 item has neither required source documents nor retrieval tools",
+            "failed_missing_required_tool",
+            "Finance Agent v2 required tools are not exposed: " + ", ".join(missing_tools),
             {
-                "blocker_type": "missing_reference_documents",
+                "blocker_type": "missing_required_tool_backend",
                 "item_id": _item_id(item),
+                "required_tools": sorted(FINANCE_AGENT_V2_REQUIRED_TOOLS),
+                "missing_tools": missing_tools,
                 "exposed_tools": sorted(exposed_tools),
             },
         )
     return None
+
+
+def validate_swelancer_item(item: BenchmarkItem, catalog_root: Path) -> tuple[str, str, dict[str, Any]] | None:
+    target_repo = _repo_patch_target_repo(item)
+    base_commit = _repo_patch_base_commit(item)
+    details = {
+        "blocker_type": "invalid_task_context",
+        "item_id": _item_id(item),
+        "target_repo": target_repo,
+        "base_commit": base_commit,
+    }
+    if not target_repo or not base_commit:
+        return (
+            "failed_invalid_task_context",
+            "SWE-Lancer task metadata does not identify a target repository and base commit",
+            details,
+        )
+    if _looks_like_swelancer_catalog_path(target_repo):
+        return (
+            "failed_invalid_task_context",
+            "SWE-Lancer catalog checkout is not the target repository",
+            {**details, "catalog_path": str(catalog_root.resolve()), "resolved_target_repo": target_repo},
+        )
+    catalog = catalog_root.resolve()
+    target_path = Path(target_repo).expanduser()
+    if target_path.exists():
+        try:
+            resolved = target_path.resolve()
+        except OSError:
+            resolved = target_path
+        if resolved == catalog or catalog in resolved.parents:
+            return (
+                "failed_invalid_task_context",
+                "SWE-Lancer catalog checkout is not the target repository",
+                {**details, "catalog_path": str(catalog), "resolved_target_repo": str(resolved)},
+            )
+    return None
+
+
+def _looks_like_swelancer_catalog_path(value: str) -> bool:
+    normalized = value.strip().replace("\\", "/").rstrip("/").lower()
+    return normalized in {
+        "frontier-evals/project/swelancer",
+        "project/swelancer",
+        "/workspace/repo/project/swelancer",
+    } or normalized.endswith("/frontier-evals/project/swelancer")
 
 
 def _artifact_asset_validation_errors(item: BenchmarkItem, root: Path) -> list[dict[str, str]]:
@@ -3397,12 +3962,11 @@ def run_agent_loop(
 ) -> dict[str, Any]:
     base_url = os.environ.get("AGENT_BENCH_BASE_URL", "").rstrip("/")
     model = os.environ.get("AGENT_BENCH_MODEL", "")
-    headers = {"Content-Type": "application/json"}
-    api_key = os.environ.get("AGENT_BENCH_API_KEY", "")
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    headers = chat_completion_headers("target")
 
     direct_answer = _is_direct_answer_item(item)
+    if tools is not None and not tools:
+        direct_answer = True
     choice_text = ""
     if item.choices:
         choice_text = "\nChoices:\n" + "\n".join(f"{key}. {value}" for key, value in sorted(item.choices.items()))
@@ -3475,10 +4039,26 @@ def run_agent_loop(
         if isinstance(parsed.get("usage"), dict):
             usage = _merge_usage(usage, parsed["usage"])
         message = extract_openai_message(parsed)
+        finish_reason = extract_openai_finish_reason(parsed)
         content = extract_openai_content(parsed)
+        tool_calls = extract_openai_tool_calls(parsed)
+        if not content and not tool_calls and _message_has_hidden_reasoning(message):
+            return _agent_loop_result(
+                "",
+                "",
+                usage,
+                tool_trace,
+                final_answer_count,
+                status="failed_model_format",
+                reason="model produced hidden reasoning but no final content",
+                extra={
+                    "finish_reason": finish_reason,
+                    "hidden_reasoning_no_final": True,
+                    "no_final_content": True,
+                },
+            )
         last_content = content
 
-        tool_calls = extract_openai_tool_calls(parsed)
         if tool_calls and native_tools:
             messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
             final = handle_native_tool_calls(tool_calls, messages, tool_trace)
@@ -3585,6 +4165,29 @@ def run_agent_loop(
         "usage": usage,
         "tool_trace": tool_trace,
         "diagnostics": protocol_diagnostics(tool_trace, last_content, final_answer_count),
+    }
+
+
+def _tools_sent_to_model(item: BenchmarkItem, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not tools:
+        return []
+    if "tool_call" in _item_required_capabilities(item) or _item_required_tools(item):
+        return tools
+    if _is_direct_answer_item(item):
+        return []
+    return tools
+
+
+def _tool_manifest(
+    item: BenchmarkItem,
+    available_tools: list[dict[str, Any]],
+    sent_tools: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "tools": sent_tools,
+        "sent_to_model": sent_tools,
+        "available_in_runner": available_tools,
+        "suppressed_for_direct_answer": bool(available_tools) and not sent_tools and _is_direct_answer_item(item),
     }
 
 
@@ -3755,6 +4358,170 @@ def _contains_tool_syntax(content: str) -> bool:
             '"tool_name":',
         )
     )
+
+
+def _fintoolbench_tool_schemas(
+    root: Path,
+    *,
+    required_tools: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    tool_path = root / "tools" / "tools_all_annotated.jsonl"
+    if not tool_path.is_file():
+        return []
+    manifest = _fintoolbench_tool_manifest(tool_path)
+    selected = sorted(required_tools or manifest)
+    schemas: list[dict[str, Any]] = []
+    for name in selected:
+        record = manifest.get(name)
+        if record is None:
+            continue
+        schemas.append(_fintoolbench_tool_schema(name, record))
+    return schemas
+
+
+def _fintoolbench_tool_schema(name: str, record: dict[str, Any]) -> dict[str, Any]:
+    description = _first_text(
+        record,
+        (
+            "description",
+            "tool_description",
+            "api_description",
+            "doc",
+            "documentation",
+            "summary",
+        ),
+    )
+    parameters = _tool_parameters_schema(record)
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": truncate(description or f"Run the FinToolBench financial tool {name}.", 900),
+            "parameters": parameters,
+        },
+    }
+
+
+def _tool_parameters_schema(record: dict[str, Any]) -> dict[str, Any]:
+    for key in ("parameters", "args", "arguments", "input_schema", "schema"):
+        raw = record.get(key)
+        parsed = _parse_tool_schema_value(raw)
+        if isinstance(parsed, dict) and parsed.get("type") == "object":
+            parsed.setdefault("additionalProperties", True)
+            return parsed
+        if isinstance(parsed, dict) and parsed:
+            return {
+                "type": "object",
+                "properties": {
+                    str(name): _json_schema_for_tool_parameter(value)
+                    for name, value in parsed.items()
+                    if str(name).strip()
+                },
+                "additionalProperties": True,
+            }
+        if isinstance(parsed, list) and parsed:
+            properties: dict[str, Any] = {}
+            required: list[str] = []
+            for item in parsed:
+                if isinstance(item, str):
+                    properties[item] = {"type": "string"}
+                    continue
+                if not isinstance(item, dict):
+                    continue
+                name = _first_text(item, ("name", "parameter", "param", "key"))
+                if not name:
+                    continue
+                properties[name] = _json_schema_for_tool_parameter(item)
+                if item.get("required") is True:
+                    required.append(name)
+            if properties:
+                schema = {"type": "object", "properties": properties, "additionalProperties": True}
+                if required:
+                    schema["required"] = sorted(set(required))
+                return schema
+    return {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Natural-language tool query."},
+            "symbol": {"type": "string", "description": "Ticker, company, or instrument identifier."},
+            "date": {"type": "string", "description": "Optional date or date range."},
+        },
+        "additionalProperties": True,
+    }
+
+
+def _parse_tool_schema_value(value: Any) -> Any:
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            names = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", value)
+            return {name: {"type": "string"} for name in names[:12]}
+    return None
+
+
+def _json_schema_for_tool_parameter(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict) and isinstance(value.get("schema"), dict):
+        return value["schema"]
+    if isinstance(value, dict):
+        raw_type = str(value.get("type") or value.get("data_type") or "string").lower()
+        json_type = {
+            "str": "string",
+            "string": "string",
+            "int": "integer",
+            "integer": "integer",
+            "float": "number",
+            "number": "number",
+            "bool": "boolean",
+            "boolean": "boolean",
+            "array": "array",
+            "list": "array",
+            "object": "object",
+            "dict": "object",
+        }.get(raw_type, "string")
+        schema: dict[str, Any] = {"type": json_type}
+        description = _first_text(value, ("description", "desc", "help"))
+        if description:
+            schema["description"] = truncate(description, 500)
+        return schema
+    return {"type": "string"}
+
+
+def _finance_agent_v2_missing_environment() -> list[str]:
+    return [key for key in FINANCE_AGENT_V2_REQUIRED_ENV if not os.environ.get(key)]
+
+
+def _finance_agent_v2_tool_schemas() -> list[dict[str, Any]]:
+    descriptions = {
+        "web_search": "Search the local/upstream finance evidence corpus for public web information.",
+        "edgar_search": "Search SEC/EDGAR filings and filing metadata.",
+        "parse_html_page": "Extract readable text from a local HTML page or cached web page.",
+        "retrieve_information": "Retrieve relevant snippets from local benchmark evidence files.",
+        "price_history": "Return deterministic cached price history for a ticker or symbol.",
+    }
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": descriptions[name],
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "symbol": {"type": "string"},
+                        "url": {"type": "string"},
+                        "start_date": {"type": "string"},
+                        "end_date": {"type": "string"},
+                    },
+                    "additionalProperties": True,
+                },
+            },
+        }
+        for name in sorted(FINANCE_AGENT_V2_REQUIRED_TOOLS)
+    ]
 
 
 def _looks_like_intermediate_agent_message(content: str) -> bool:
@@ -4174,6 +4941,7 @@ def _find_matching_bracket(text: str, start: int, opener: str, closer: str) -> i
 
 
 def execute_agent_tool(name: str, arguments: dict[str, Any]) -> str:
+    name = _canonical_tool_name(name)
     try:
         if name == "list_files":
             return tool_list_files(arguments)
@@ -4201,9 +4969,137 @@ def execute_agent_tool(name: str, arguments: dict[str, Any]) -> str:
             return tool_apply_patch(arguments)
         if name == "run_command":
             return tool_run_command(arguments)
+        benchmark_result = execute_benchmark_tool(name, arguments)
+        if benchmark_result is not None:
+            return benchmark_result
         return f"Unknown tool: {name}"
     except Exception as exc:
         return f"Tool {name} failed: {exc}"
+
+
+def execute_benchmark_tool(name: str, arguments: dict[str, Any]) -> str | None:
+    if name in FINANCE_AGENT_V2_REQUIRED_TOOLS:
+        return _execute_finance_agent_v2_tool(name, arguments)
+    fintool_names = set(_tool_schema_names(_fintoolbench_tool_schemas(Path.cwd())))
+    if name in fintool_names:
+        return _execute_fintoolbench_tool(name, arguments)
+    return None
+
+
+def _execute_finance_agent_v2_tool(name: str, arguments: dict[str, Any]) -> str:
+    if name == "price_history":
+        return _json_tool_result(name, arguments, _local_price_history(arguments))
+    if name == "parse_html_page":
+        path = _first_argument_path(arguments)
+        if path:
+            text = _safe_read_local_text(path, 6000)
+            return _json_tool_result(name, arguments, {"text": text})
+        return _json_tool_result(name, arguments, {"text": ""})
+    snippets = _local_retrieval_snippets(arguments, max_results=5)
+    return _json_tool_result(name, arguments, {"results": snippets})
+
+
+def _execute_fintoolbench_tool(name: str, arguments: dict[str, Any]) -> str:
+    return _json_tool_result(
+        name,
+        arguments,
+        {
+            "tool": name,
+            "mode": "deterministic_local_finance_backend",
+            "matching_records": _local_retrieval_snippets(arguments, max_results=3),
+        },
+    )
+
+
+def _json_tool_result(name: str, arguments: dict[str, Any], payload: dict[str, Any]) -> str:
+    return json.dumps(
+        {
+            "tool": name,
+            "arguments": arguments,
+            "backend": "agent_bench_local_deterministic",
+            "result": payload,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def _first_argument_path(arguments: dict[str, Any]) -> str:
+    for key in ("path", "file", "url"):
+        value = arguments.get(key)
+        if isinstance(value, str) and value.strip() and not value.startswith(("http://", "https://")):
+            return value.strip()
+    return ""
+
+
+def _safe_read_local_text(path_value: str, max_chars: int) -> str:
+    path = _safe_workspace_path(path_value)
+    if not path.is_file() or _is_binary_like_file(path):
+        return ""
+    return path.read_text(encoding="utf-8", errors="replace")[:max_chars]
+
+
+def _local_price_history(arguments: dict[str, Any]) -> dict[str, Any]:
+    symbol = str(arguments.get("symbol") or arguments.get("ticker") or arguments.get("query") or "").upper()
+    matches: list[dict[str, Any]] = []
+    for path in sorted(Path.cwd().rglob("*.json"))[:500]:
+        if any(part in SKIP_DIRS for part in path.parts):
+            continue
+        if symbol and symbol not in path.name.upper():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            continue
+        matches.append({"path": str(path.relative_to(Path.cwd())), "data": _compact_json(payload, 2500)})
+        if len(matches) >= 3:
+            break
+    return {"symbol": symbol, "matches": matches}
+
+
+def _local_retrieval_snippets(arguments: dict[str, Any], *, max_results: int) -> list[dict[str, str]]:
+    query = " ".join(_flatten_string_values(arguments))[:200]
+    terms = [term.lower() for term in re.findall(r"[A-Za-z0-9.$_-]{3,}", query)[:8]]
+    snippets: list[dict[str, str]] = []
+    if not terms:
+        return snippets
+    for path in sorted(Path.cwd().rglob("*")):
+        if len(snippets) >= max_results:
+            break
+        if not path.is_file() or any(part in SKIP_DIRS for part in path.parts) or _is_binary_like_file(path):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        lowered = text.lower()
+        if not any(term in lowered for term in terms):
+            continue
+        index = min((lowered.find(term) for term in terms if term in lowered), default=0)
+        start = max(0, index - 240)
+        end = min(len(text), index + 760)
+        snippets.append(
+            {
+                "path": str(path.relative_to(Path.cwd())),
+                "snippet": text[start:end],
+            }
+        )
+    return snippets
+
+
+def _compact_json(value: Any, max_chars: int) -> str:
+    return truncate(json.dumps(value, ensure_ascii=False, sort_keys=True), max_chars)
+
+
+def _canonical_tool_name(name: str) -> str:
+    aliases = {
+        "cat": "read_file",
+        "dir": "list_files",
+        "list_dir": "list_files",
+        "list_directory": "list_files",
+        "ls": "list_files",
+    }
+    return aliases.get(name, name)
 
 
 def _tool_schema_names(tools: list[dict[str, Any]]) -> list[str]:
@@ -4220,7 +5116,7 @@ def _tool_schema_names(tools: list[dict[str, Any]]) -> list[str]:
 
 
 def _item_required_tools(item: BenchmarkItem) -> list[str]:
-    tools: list[str] = []
+    tools: list[str] = _descriptor_required_tools()
     metadata = item.metadata if isinstance(item.metadata, dict) else {}
     for key in (
         "required_tools",
@@ -4971,11 +5867,40 @@ def _collect_artifacts_to_output(source_dir: Path, artifact_dir: Path) -> list[s
     return copied
 
 
-def _artifact_integrity_errors(artifact_paths: list[str]) -> list[dict[str, str]]:
+def _artifact_integrity_errors(
+    artifact_paths: list[str],
+    *,
+    allowed_root: Path | None = None,
+) -> list[dict[str, str]]:
     errors: list[dict[str, str]] = []
+    resolved_allowed_root: Path | None = None
+    if allowed_root is not None:
+        try:
+            resolved_allowed_root = allowed_root.resolve()
+        except OSError:
+            resolved_allowed_root = allowed_root
     for raw_path in artifact_paths:
         path = Path(raw_path)
         suffix = path.suffix.lower()
+        if resolved_allowed_root is not None:
+            try:
+                resolved_path = path.resolve()
+            except OSError:
+                resolved_path = path
+            if resolved_path != resolved_allowed_root and resolved_allowed_root not in resolved_path.parents:
+                errors.append({"path": raw_path, "error": "path outside allowed output directory"})
+                continue
+        if not path.exists():
+            errors.append({"path": raw_path, "error": "missing file"})
+            continue
+        if path.is_file() and path.stat().st_size == 0:
+            errors.append({"path": raw_path, "error": "empty file"})
+            continue
+        if suffix in {".patch", ".diff"}:
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if not _looks_like_unified_diff(text):
+                errors.append({"path": raw_path, "error": "invalid patch format"})
+            continue
         if suffix in {".xlsx", ".xlsm", ".docx", ".zip"}:
             if not zipfile.is_zipfile(path):
                 errors.append({"path": raw_path, "error": f"{suffix} file is not a valid ZIP container"})
@@ -4994,6 +5919,20 @@ def _artifact_integrity_errors(artifact_paths: list[str]) -> list[dict[str, str]
             except OSError as exc:
                 errors.append({"path": raw_path, "error": str(exc)})
     return errors
+
+
+def _looks_like_unified_diff(text: str) -> bool:
+    return bool(
+        text.strip()
+        and (
+            re.search(r"^diff --git a/.+ b/.+", text, flags=re.MULTILINE)
+            or (
+                re.search(r"^---\s+", text, flags=re.MULTILINE)
+                and re.search(r"^\+\+\+\s+", text, flags=re.MULTILINE)
+                and re.search(r"^@@\s", text, flags=re.MULTILINE)
+            )
+        )
+    )
 
 
 def _artifact_previews(artifact_paths: list[str]) -> str:
@@ -5289,12 +6228,10 @@ def _repo_patch_base_commit(item: BenchmarkItem) -> str:
 def _prepare_target_repo_checkout(item: BenchmarkItem, target_repo: str, base_commit: str) -> Path:
     existing = _find_materialized_target_repo(item, target_repo)
     if existing is not None:
-        _checkout_commit(existing, base_commit)
-        return existing
+        return _prepare_isolated_repo_checkout(item, target_repo, base_commit, str(existing))
     local_source = Path(target_repo).expanduser()
     if local_source.exists():
-        _checkout_commit(local_source.resolve(), base_commit)
-        return local_source.resolve()
+        return _prepare_isolated_repo_checkout(item, target_repo, base_commit, str(local_source.resolve()))
     if os.environ.get("AGENT_BENCH_ALLOW_TARGET_CHECKOUT", "").strip().lower() not in {"1", "true", "yes", "on"}:
         raise AdapterSetupError(
             "failed_harness_setup",
@@ -5305,12 +6242,23 @@ def _prepare_target_repo_checkout(item: BenchmarkItem, target_repo: str, base_co
                 "hint": f"set {TARGET_REPO_ROOT_ENV} or AGENT_BENCH_ALLOW_TARGET_CHECKOUT=1",
             },
         )
-    checkout_root = Path(os.environ.get("AGENT_BENCH_OUTPUT_DIR", "/outputs")) / "target_repos"
+    return _prepare_isolated_repo_checkout(item, target_repo, base_commit, _repo_url(target_repo))
+
+
+def _prepare_isolated_repo_checkout(
+    item: BenchmarkItem,
+    target_repo: str,
+    base_commit: str,
+    clone_source: str,
+) -> Path:
+    checkout_root = Path(os.environ.get("AGENT_BENCH_OUTPUT_DIR", "/outputs")) / "target_repos" / _safe_slug(target_repo)
     checkout_root.mkdir(parents=True, exist_ok=True)
-    target = checkout_root / _safe_slug(target_repo)
+    target = checkout_root / _safe_slug(_item_id(item))
+    if target.exists():
+        shutil.rmtree(target)
     if not target.exists():
         clone = subprocess.run(
-            ["git", "clone", _repo_url(target_repo), str(target)],
+            ["git", "clone", clone_source, str(target)],
             text=True,
             capture_output=True,
             timeout=_git_timeout_seconds(),
@@ -5388,6 +6336,32 @@ def _checkout_commit(root: Path, commit: str) -> None:
         raise AdapterSetupError(
             "failed_harness_setup",
             f"unable to checkout base_commit {commit}: {(checkout.stderr or checkout.stdout).strip()}",
+            {"target_repo_path": str(root), "base_commit": commit},
+        )
+    reset = subprocess.run(
+        ["git", "-C", str(root), "reset", "--hard", commit],
+        text=True,
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+    if reset.returncode != 0:
+        raise AdapterSetupError(
+            "failed_harness_setup",
+            f"unable to reset target repo to base_commit {commit}: {(reset.stderr or reset.stdout).strip()}",
+            {"target_repo_path": str(root), "base_commit": commit},
+        )
+    clean = subprocess.run(
+        ["git", "-C", str(root), "clean", "-fdx"],
+        text=True,
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+    if clean.returncode != 0:
+        raise AdapterSetupError(
+            "failed_harness_setup",
+            f"unable to clean target repo checkout: {(clean.stderr or clean.stdout).strip()}",
             {"target_repo_path": str(root), "base_commit": commit},
         )
 
@@ -5480,6 +6454,14 @@ def _parse_tool_arguments(value: Any) -> dict[str, Any]:
 def _bounded_int(value: Any, default: int, lower: int, upper: int) -> int:
     try:
         number = int(value)
+    except (TypeError, ValueError):
+        number = default
+    return max(lower, min(upper, number))
+
+
+def _bounded_float(value: Any, default: float, lower: float, upper: float) -> float:
+    try:
+        number = float(value)
     except (TypeError, ValueError):
         number = default
     return max(lower, min(upper, number))
@@ -5642,8 +6624,8 @@ def _extract_stockbench_model_answer(answer: str) -> tuple[dict[str, str] | None
 def judge_answer(benchmark: str, item: BenchmarkItem, answer: str, method: str) -> tuple[float, dict[str, Any]]:
     if not answer:
         return 0.0, {"method": method, "score": 0.0, "reason": "empty candidate answer"}
-    base_url = os.environ.get("AGENT_BENCH_BASE_URL", "").rstrip("/")
-    model = os.environ.get("AGENT_BENCH_MODEL", "")
+    base_url = os.environ.get("AGENT_BENCH_JUDGE_BASE_URL", os.environ.get("AGENT_BENCH_BASE_URL", "")).rstrip("/")
+    model = os.environ.get("AGENT_BENCH_JUDGE_MODEL", os.environ.get("AGENT_BENCH_MODEL", ""))
     rubric = item.expected
     if method == "task_compliance":
         rubric = (
@@ -5679,16 +6661,13 @@ def judge_answer(benchmark: str, item: BenchmarkItem, answer: str, method: str) 
                 ),
             },
         ],
-        "temperature": 0,
+        "temperature": _bounded_float(os.environ.get("AGENT_BENCH_JUDGE_TEMPERATURE"), 0.0, 0.0, 2.0),
         "top_p": 1,
         "max_tokens": 512,
         "stream": False,
         "response_format": {"type": "json_object"},
     }
-    headers = {"Content-Type": "application/json"}
-    api_key = os.environ.get("AGENT_BENCH_API_KEY", "")
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    headers = chat_completion_headers("judge")
     budget_failure = _token_budget_failure(payload)
     if budget_failure is not None:
         return 0.0, {
@@ -5755,7 +6734,7 @@ def judge_answer(benchmark: str, item: BenchmarkItem, answer: str, method: str) 
     if grade is None:
         for attempt_entry in reversed(attempts):
             raw = str(attempt_entry.get("raw") or "")
-            prose_grade = parse_prose_judge_grade(raw)
+            prose_grade = parse_prose_judge_grade(raw) or parse_qualitative_prose_judge_grade(raw)
             if prose_grade is None:
                 continue
             score = coerce_unit_score(prose_grade.get("score"))
@@ -5923,11 +6902,25 @@ def extract_openai_content(parsed: Any) -> str:
     content = _content_to_text(message.get("content"))
     if content:
         return content
-    for key in ("reasoning_content", "reasoning", "text"):
-        content = _content_to_text(message.get(key))
-        if content:
-            return content
     return ""
+
+
+def _message_has_hidden_reasoning(message: dict[str, Any]) -> bool:
+    for key in ("reasoning_content", "reasoning"):
+        if _content_to_text(message.get(key)):
+            return True
+    return False
+
+
+def extract_openai_finish_reason(parsed: Any) -> str:
+    choices = parsed.get("choices") if isinstance(parsed, dict) else None
+    if not isinstance(choices, list) or not choices:
+        return ""
+    first = choices[0]
+    if not isinstance(first, dict):
+        return ""
+    value = first.get("finish_reason")
+    return value if isinstance(value, str) else ""
 
 
 def extract_openai_message(parsed: Any) -> dict[str, Any]:
@@ -5976,6 +6969,19 @@ def _content_to_text(value: Any) -> str:
 def post_chat_completion(base_url: str, payload: dict[str, Any], headers: dict[str, str]) -> str:
     response_body, _ = post_chat_completion_with_variant(base_url, payload, headers)
     return response_body
+
+
+def chat_completion_headers(label: str) -> dict[str, str]:
+    headers = {
+        "Content-Type": "application/json",
+        "X-Agent-Bench-Proxy-Label": label,
+        "X-Agent-Bench-Benchmark-Id": os.environ.get("AGENT_BENCH_BENCHMARK_ID", ""),
+        "X-Agent-Bench-Task-Id": os.environ.get("AGENT_BENCH_TASK_ID", ""),
+    }
+    api_key = os.environ.get("AGENT_BENCH_API_KEY", "")
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    return {key: value for key, value in headers.items() if value}
 
 
 def post_chat_completion_with_variant(
@@ -6062,6 +7068,11 @@ def evaluation_payload(
         status = "passed" if score >= 1.0 else "failed_model_answer"
     if status not in STRICT_STATUSES:
         status = "failed_harness_setup"
+    required_capabilities = extra.pop("required_capabilities", sorted(_item_required_capabilities(item)))
+    supported_capabilities = extra.pop("supported_capabilities", [])
+    required_tools = extra.pop("required_tools", _item_required_tools(item))
+    exposed_tools = extra.pop("exposed_tools", [])
+    missing_tools = extra.pop("missing_tools", [])
     payload = {
         "source": item.source,
         "question": item.question,
@@ -6074,8 +7085,15 @@ def evaluation_payload(
         "status": status,
         "error": error_message,
         "included_in_official_score": status not in INVALID_EVALUATION_STATUSES,
+        "required_capabilities": required_capabilities,
+        "supported_capabilities": supported_capabilities,
+        "required_tools": required_tools,
+        "exposed_tools": exposed_tools,
+        "missing_tools": missing_tools,
     }
     payload.update(extra)
+    if payload.get("capabilities_verified") is False:
+        payload["included_in_official_score"] = False
     return payload
 
 
@@ -6147,9 +7165,10 @@ def _overall_status_and_error(evaluations: list[dict[str, Any]], setup_error: st
         "failed_dataset_extraction",
         "failed_grader",
         "failed_token_budget",
-        "failed_missing_required_tool",
-        "failed_invalid_task_context",
-        "timed_out",
+            "failed_missing_required_tool",
+            "failed_invalid_task_context",
+            "failed_model_endpoint",
+            "timed_out",
         "failed_missing_assets",
         "skipped_unsupported_capability",
     ):
@@ -6443,10 +7462,16 @@ def _qualitative_prose_judge_grade(text: str) -> dict[str, Any] | None:
     negative_patterns = (
         r"candidate (?:answer|response).{0,120}(?:does not|doesn't|fails?|failed|incomplete|incorrect|not provide)",
         r"(?:answer|response).{0,80}(?:not a solution|only contains a thought process|internal monologue)",
+        r"(?:candidate )?(?:answer|response).{0,120}not a direct (?:answer|response)",
+        r"(?:candidate )?(?:answer|response).{0,120}(?:meta-analysis|reasoning process|thought process)",
         r"fails? to provide",
     )
     if any(re.search(pattern, lowered, flags=re.DOTALL) for pattern in negative_patterns):
-        return None
+        return {
+            "score": 0.0,
+            "passed": False,
+            "reason": "judge prose described the candidate as not directly satisfying the task",
+        }
     positive_patterns = (
         r"candidate answer.{0,120}(?:accurate|correct|reasonable|concise|satisfies|addresses)",
         r"candidate response.{0,120}(?:accurate|correct|reasonable|concise|satisfies|addresses)",

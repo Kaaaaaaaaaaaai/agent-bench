@@ -14,6 +14,8 @@ from agent_bench.statuses import (
     FAILED_MISSING_REQUIRED_TOOL,
     FAILED_MODEL_ANSWER,
     FAILED_MODEL_FORMAT,
+    FAILED_MODEL_MISSING_ARTIFACT,
+    FAILED_MODEL_TOOL_USE,
     FAILED_TOKEN_BUDGET,
     INVALID_EVALUATION_STATUSES,
     PASSED,
@@ -22,6 +24,14 @@ from agent_bench.statuses import (
     TIMED_OUT,
     normalize_status,
 )
+
+
+MODEL_FAILURE_STATUSES = {
+    FAILED_MODEL_ANSWER,
+    FAILED_MODEL_FORMAT,
+    FAILED_MODEL_MISSING_ARTIFACT,
+    FAILED_MODEL_TOOL_USE,
+}
 
 
 def parse_model_json(raw_response: str) -> tuple[dict[str, Any] | None, str | None]:
@@ -371,6 +381,7 @@ def _add_benchmark_descriptor_details(task: Task, details: dict[str, Any]) -> No
     details.setdefault("credit", benchmark.get("credit", ""))
     details.setdefault("citation", benchmark.get("citation", benchmark.get("homepage", "")))
     details["required_capabilities"] = benchmark.get("capabilities", [])
+    details["required_tools"] = benchmark.get("required_tools", [])
 
 
 def _external_benchmark_status(
@@ -402,11 +413,25 @@ def _external_benchmark_status(
                 ):
                     if _status_count(status_counts, invalid_status):
                         return invalid_status
+        primary_failure = _primary_model_failure_status(status_counts)
+        if score < 1.0 and primary_failure:
+            return primary_failure
     if status == "error":
         return FAILED_HARNESS_SETUP
     if error:
         return FAILED_HARNESS_SETUP
     return PASSED if score >= 1.0 else FAILED_MODEL_ANSWER
+
+
+def _primary_model_failure_status(status_counts: dict[str, Any]) -> str:
+    counts: dict[str, int] = {}
+    for key, value in status_counts.items():
+        status = normalize_status(key)
+        if status in MODEL_FAILURE_STATUSES and isinstance(value, int) and value > 0:
+            counts[status] = counts.get(status, 0) + value
+    if not counts:
+        return ""
+    return sorted(counts.items(), key=lambda item: (-item[1], item[0]))[0][0]
 
 
 def _external_status_error(status: str, result_payload: dict[str, Any]) -> str:
