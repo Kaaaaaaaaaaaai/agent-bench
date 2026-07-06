@@ -179,22 +179,6 @@ FINANCE_AGENT_V2_CANARY_TERMS = (
     ("ai_regulatory_compliance", ("regulatory", "compliance", "ai")),
     ("rapid_ai_evolution", ("rapidly evolving", "ai")),
 )
-EXPLOITBENCH_REQUIRED_CONFIGS = (
-    "benchmarks/v8.yaml",
-    "benchmarks/v8-small.yaml",
-)
-EXPLOITBENCH_REQUIRED_PATHS = EXPLOITBENCH_REQUIRED_CONFIGS + (
-    "benchmarks/bench-v8",
-)
-EXPLOITBENCH_EXCLUDE_PATTERNS = (
-    "/docs/",
-    "/website/",
-    "readme.md",
-    "spec.md",
-    "citation.cff",
-    "contributing.md",
-    "security.md",
-)
 SWELANCER_EXPENSIFY_REPOSITORY = "https://github.com/Expensify/App.git"
 SWELANCER_OFFICIAL_PUBLIC_REPOSITORY = "https://github.com/openai/SWELancer-Benchmark.git"
 SWELANCER_OFFICIAL_PUBLIC_REF = "3d719bbd5a8cb41295357abc6304fcd29fe68c93"
@@ -1576,7 +1560,6 @@ def _required_capabilities(benchmark: str) -> set[str]:
         "paperbench": {"file_artifact"},
         "automationbench": {"tool_call", "external_data_required"},
         "osworld": {"browser_or_gui"},
-        "exploitbench": {"tool_call"},
         "finmcp bench": {"chat_answer"},
         "finance agent v2": {"tool_call", "external_data_required"},
     }
@@ -1742,7 +1725,6 @@ def _specialized_extraction_is_terminal() -> bool:
         "codeneedle",
         "paperbench",
         "stockbench",
-        "exploitbench",
         "finmcp bench",
         "finance agent v2",
         "swe lancer",
@@ -2016,8 +1998,6 @@ def extract_specialized_items(root: Path, limit: int) -> tuple[list[BenchmarkIte
         return extract_codeneedle_items(root, limit)
     if benchmark == "StockBench":
         return extract_stockbench_items(root, limit)
-    if benchmark == "ExploitBench":
-        return extract_exploitbench_items(root, limit)
     if benchmark == "FinMCP-Bench":
         return extract_finmcp_static_items(root, limit)
     if benchmark == "Finance Agent v2":
@@ -2352,65 +2332,6 @@ def extract_stockbench_items(root: Path, limit: int) -> tuple[list[BenchmarkItem
     if not items:
         errors.append("StockBench concrete cached financial records were not found")
     return items, errors[:20]
-
-
-def extract_exploitbench_items(root: Path, limit: int) -> tuple[list[BenchmarkItem], list[str]]:
-    errors: list[str] = []
-    missing_paths = [relative for relative in EXPLOITBENCH_REQUIRED_PATHS if not (root / relative).exists()]
-    if missing_paths:
-        return [], [
-            "ExploitBench upstream challenge environment/configuration was not fully materialized",
-            f"missing required path(s): {', '.join(missing_paths)}",
-        ]
-    items: list[BenchmarkItem] = []
-    for relative in EXPLOITBENCH_REQUIRED_CONFIGS:
-        path = root / relative
-        text = path.read_text(encoding="utf-8", errors="replace")
-        target_images = _container_images_from_text(text)
-        if not target_images:
-            errors.append(f"{relative}: no target container/image reference found")
-            continue
-        items.append(
-            BenchmarkItem(
-                question=truncate(
-                    "ExploitBench upstream V8 capability-ladder challenge configuration.\n"
-                    "Use the upstream ExploitBench runner and deterministic oracle for this target; "
-                    "do not answer from documentation or benchmark methodology text.\n\n"
-                    f"Config: {relative}\n"
-                    f"Target images: {', '.join(target_images[:5])}\n"
-                    f"Config excerpt:\n{truncate(text, 3200)}"
-                ),
-                expected="Use the upstream ExploitBench deterministic capability/oracle outputs for grading.",
-                source=relative,
-                metadata={
-                    "grading": "task_compliance",
-                    "expected_key": "upstream_deterministic_oracle",
-                    "benchmark_config": relative,
-                    "target_image": target_images[0],
-                    "target_images": target_images,
-                    "grader": "upstream_deterministic_oracle",
-                    "oracle": "upstream_capability_oracle",
-                    "required_tools": ["exploitbench"],
-                    "capability_flags": ["v8_capability_ladder"],
-                },
-            )
-        )
-        if len(items) >= limit:
-            break
-    if not items and not errors:
-        errors.append("ExploitBench concrete upstream challenge configs were not found")
-    return items[:limit], errors[:20]
-
-
-def _container_images_from_text(text: str) -> list[str]:
-    images: set[str] = set()
-    for match in re.finditer(r"(?:ghcr\.io|docker\.io|quay\.io)/[A-Za-z0-9._/@:-]+", text):
-        images.add(match.group(0).rstrip("',\")]}"))
-    for match in re.finditer(r"\b(?:image|target_image|docker_image)\s*:\s*['\"]?([^'\"\s]+)", text):
-        value = match.group(1).strip().rstrip(",")
-        if "/" in value and ":" in value:
-            images.add(value)
-    return sorted(images)
 
 
 def extract_finmcp_static_items(root: Path, limit: int) -> tuple[list[BenchmarkItem], list[str]]:
@@ -3615,11 +3536,6 @@ def _item_preflight_failure(
         finmcp_error = validate_finmcp_static_item(item)
         if finmcp_error is not None:
             return finmcp_error
-    if benchmark == "exploitbench":
-        exploit_error = validate_exploitbench_item(item)
-        if exploit_error is not None:
-            return exploit_error
-
     missing_refs = _missing_referenced_paths(item, Path.cwd())
     if missing_refs:
         details["missing_references"] = missing_refs
@@ -3643,94 +3559,6 @@ def _item_preflight_failure(
         return "failed_grader", "exact-answer grader canary failed on the gold answer", details
 
     return "", "", {}
-
-
-def validate_exploitbench_item(item: BenchmarkItem) -> tuple[str, str, dict[str, Any]] | None:
-    details = {"blocker_type": "missing_reference_dataset", "item_id": _item_id(item), "source": item.source}
-    source_lower = item.source.lower()
-    if item.source.endswith((".yaml", ".yml", ".json", ".toml")) is False:
-        return "failed_invalid_task_context", "ExploitBench scored item must come from a real upstream config", details
-    if any(pattern in source_lower for pattern in EXPLOITBENCH_EXCLUDE_PATTERNS):
-        return "failed_invalid_task_context", "ExploitBench docs/spec files are not valid scored items", details
-    metadata = item.metadata if isinstance(item.metadata, dict) else {}
-    if not (metadata.get("target_image") or metadata.get("environment")):
-        return "failed_invalid_task_context", "ExploitBench item has no target image/environment", details
-    if not (metadata.get("grader") or metadata.get("oracle")):
-        return "failed_invalid_task_context", "ExploitBench item has no upstream grader/oracle", details
-    upstream_error = _exploitbench_upstream_error(item)
-    if upstream_error is not None:
-        return upstream_error
-    return None
-
-
-def _exploitbench_upstream_ready(item: BenchmarkItem) -> bool:
-    return _exploitbench_upstream_error(item) is None
-
-
-def _exploitbench_upstream_error(item: BenchmarkItem) -> tuple[str, str, dict[str, Any]] | None:
-    if os.environ.get("AGENT_BENCH_EXPLOITBENCH_UPSTREAM_READY", "").strip().lower() in {"1", "true", "yes"}:
-        return None
-    root = Path.cwd()
-    metadata = item.metadata if isinstance(item.metadata, dict) else {}
-    details = {
-        "blocker_type": "missing_reference_dataset",
-        "item_id": _item_id(item),
-        "target_image": metadata.get("target_image"),
-    }
-    missing_configs = [relative for relative in EXPLOITBENCH_REQUIRED_CONFIGS if not (root / relative).is_file()]
-    benchmark_config = metadata.get("benchmark_config")
-    if isinstance(benchmark_config, str) and benchmark_config and not (root / benchmark_config).is_file():
-        missing_configs.append(benchmark_config)
-    if missing_configs:
-        details["missing_configs"] = sorted(set(missing_configs))
-        return (
-            "failed_dataset_extraction",
-            "ExploitBench upstream challenge configuration was not materialized",
-            details,
-        )
-    if not (root / "benchmarks" / "bench-v8").exists():
-        details["missing_paths"] = ["benchmarks/bench-v8"]
-        return (
-            "failed_dataset_extraction",
-            "ExploitBench upstream deterministic oracle assets were not materialized",
-            details,
-        )
-    runner = shutil.which("exploitbench")
-    if not runner:
-        return (
-            "failed_missing_required_tool",
-            "ExploitBench upstream runner/oracle backend is not installed or not on PATH",
-            {
-                **details,
-                "blocker_type": "missing_required_tool_backend",
-                "required_tools": ["exploitbench"],
-                "missing_tools": ["exploitbench"],
-                "exposed_tools": [],
-            },
-        )
-    completed = subprocess.run(
-        [runner, "--help"],
-        text=True,
-        capture_output=True,
-        cwd=root,
-        timeout=30,
-        check=False,
-    )
-    if completed.returncode != 0:
-        return (
-            "failed_missing_required_tool",
-            "ExploitBench upstream runner/oracle backend failed its readiness check",
-            {
-                **details,
-                "blocker_type": "missing_required_tool_backend",
-                "required_tools": ["exploitbench"],
-                "missing_tools": ["exploitbench"],
-                "exposed_tools": [],
-                "exit_code": completed.returncode,
-                "stderr": completed.stderr[-1000:],
-            },
-        )
-    return None
 
 
 def validate_finmcp_static_item(item: BenchmarkItem) -> tuple[str, str, dict[str, Any]] | None:

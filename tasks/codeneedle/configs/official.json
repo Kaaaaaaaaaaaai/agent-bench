@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.benchmark-config.v1",
-  "benchmark_id": "PB_010",
+  "benchmark_id": "PB_009",
   "benchmark_slug": "codeneedle",
   "display_name": "codeneedle",
   "source_descriptor": "tasks/codeneedle/manifest.json",

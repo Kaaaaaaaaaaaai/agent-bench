@@ -144,8 +144,10 @@ def test_external_runner_uses_descriptor_docker_image(monkeypatch, tmp_path):
     monkeypatch.setattr("agent_bench.external.shutil.which", lambda name: "/usr/bin/docker")
     monkeypatch.setattr("agent_bench.external.subprocess.run", fake_run)
     monkeypatch.setenv("AGENT_BENCH_SAMPLE_LIMIT", "1")
+    monkeypatch.setenv("AGENT_BENCH_CUSTOM_FLAG", "1")
 
     task = _manifest_task()
+    task.benchmark["manifest"]["container"]["environment_allowed"] = ["AGENT_BENCH_CUSTOM_*"]
     task_dir = _write_example_task_folder(tmp_path)
 
     result = ExternalBenchmarkRunner()._run_sync(
@@ -184,6 +186,11 @@ def test_external_runner_uses_descriptor_docker_image(monkeypatch, tmp_path):
     assert "ALL" in commands[1]
     assert "--security-opt" in commands[1]
     assert "no-new-privileges" in commands[1]
+    tmpfs_mounts = [
+        commands[1][index + 1] for index, item in enumerate(commands[1]) if item == "--tmpfs"
+    ]
+    assert "/tmp:rw,nosuid,nodev,noexec,size=512m,uid=10001,gid=10001" in tmpfs_mounts
+    assert "/workspace:rw,nosuid,nodev,exec,size=4g,uid=10001,gid=10001" in tmpfs_mounts
     assert "--user" in commands[1]
     assert "10001:10001" in commands[1]
     assert "--network" in commands[1]
@@ -197,6 +204,7 @@ def test_external_runner_uses_descriptor_docker_image(monkeypatch, tmp_path):
     assert "AGENT_BENCH_ASSET_ROOT=/benchmark/assets" in commands[1]
     assert "AGENT_BENCH_ASSET_CACHE_KEY=examplebench" in commands[1]
     assert "AGENT_BENCH_SAMPLE_LIMIT=1" in commands[1]
+    assert "AGENT_BENCH_CUSTOM_FLAG=1" in commands[1]
     assert f"type=bind,src={task_dir.resolve()},dst=/benchmark/task,readonly" in commands[1]
     assert f"type=bind,src={(tmp_path / 'asset-cache' / 'examplebench').resolve()},dst=/benchmark/assets,readonly" in commands[1]
     assert "/var/run/docker.sock:/var/run/docker.sock" not in commands[1]
@@ -253,6 +261,9 @@ def test_external_runner_mounts_docker_socket_when_descriptor_requires_it(monkey
     assert result.passed is True
     docker_run = commands[1]
     assert docker_run[docker_run.index("--network") + 1] == "host"
+    assert docker_run[docker_run.index("--user") + 1] == "0:0"
+    assert docker_run[docker_run.index("--cap-drop") + 1] == "ALL"
+    assert docker_run[docker_run.index("--cap-add") + 1] == "DAC_OVERRIDE"
     assert "/var/run/docker.sock:/var/run/docker.sock" in docker_run
     assert result.details["network_mode"] == "host"
     assert result.details["docker_socket_mount"]["enabled"] is True

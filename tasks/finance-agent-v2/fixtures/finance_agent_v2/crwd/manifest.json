@@ -2,7 +2,7 @@
   "version": 1,
   "ticker": "CRWD",
   "company": "CrowdStrike Holdings, Inc.",
-  "fixture_scope": "PB_016 smoke fixture for AI tailwind and AI risk disclosures",
+  "fixture_scope": "PB_015 smoke fixture for AI tailwind and AI risk disclosures",
   "source_documents": [
     "SEC Form 10-K for fiscal year ended January 31, 2025",
     "SEC Form 10-Q for period ended October 31, 2025"

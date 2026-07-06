@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.assets-lock.v1",
-  "benchmark_id": "PB_011",
+  "benchmark_id": "PB_010",
   "benchmark_slug": "stockbench",
   "asset_root": "agent-bench-assets/stockbench",
   "source": {

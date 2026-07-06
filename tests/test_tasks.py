@@ -17,15 +17,13 @@ ACTIVE_IDS = [
     "PB_011",
     "PB_012",
     "PB_013",
-    "PB_014",
+    "PB_015",
     "PB_016",
-    "PB_017",
 ]
 ACTIVE_NAMES = [
     "SWE-bench",
     "SWE-Lancer",
     "SWE-bench Verified",
-    "ExploitBench",
     "codeneedle",
     "StockBench",
     "InvestorBench",
@@ -177,11 +175,10 @@ def test_bundled_benchmark_folders_are_external_tasks_with_credits():
     loaded = load_tasks(REPO_TASKS_DIR)
     loaded_ids = [task.id for task in loaded]
 
-    assert len(legacy_tasks) == 11
+    assert len(legacy_tasks) == 10
     assert [task["id"] for task in legacy_tasks] == ACTIVE_IDS
-    assert "PB_015" not in {task["id"] for task in legacy_tasks}
-    assert len(registry) == 11
-    assert len(loaded) == 11
+    assert len(registry) == 10
+    assert len(loaded) == 10
     assert loaded_ids == ACTIVE_IDS
     assert [task.benchmark["name"] for task in loaded] == ACTIVE_NAMES
     assert all(Path(task.source).name == "manifest.json" for task in loaded)
@@ -194,16 +191,14 @@ def test_bundled_benchmark_folders_are_external_tasks_with_credits():
         "Coding",
         "Finance",
         "Long Context",
-        "Security",
     }
 
 
 def test_full_active_profile_selects_all_current_public_benchmarks():
     loaded = load_tasks(REPO_TASKS_DIR, profile="full_active")
 
-    assert len(loaded) == 11
+    assert len(loaded) == 10
     assert [task.id for task in loaded] == ACTIVE_IDS
-    assert "PB_015" not in [task.id for task in loaded]
 
 
 def test_load_tasks_discovers_benchmark_folders_without_central_registry(tmp_path):
@@ -235,7 +230,7 @@ def test_core_runner_execution_code_does_not_branch_on_bundled_benchmark_names()
         repo_root / "agent_bench" / "runner.py",
         repo_root / "agent_bench" / "tasks.py",
     ]
-    forbidden = {item.lower() for item in ACTIVE_IDS + ACTIVE_NAMES + ["PB_015", "FinToolBench"]}
+    forbidden = {item.lower() for item in ACTIVE_IDS + ACTIVE_NAMES + ["FinToolBench"]}
     hits = []
     for path in core_files:
         text = path.read_text(encoding="utf-8").lower()
@@ -246,7 +241,7 @@ def test_core_runner_execution_code_does_not_branch_on_bundled_benchmark_names()
 
 def test_finmcp_descriptor_is_static_not_live_tool_call():
     tasks = json.loads((REPO_TASKS_DIR / "public_benchmarks.json").read_text(encoding="utf-8"))
-    descriptor = next(task for task in tasks if task["id"] == "PB_014")
+    descriptor = next(task for task in tasks if task["id"] == "PB_013")
 
     assert "tool_call" not in descriptor["benchmark"]["capabilities"]
     assert descriptor["benchmark"]["adapter"] == "static_transcript_reasoning"

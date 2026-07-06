@@ -89,7 +89,7 @@ def test_probe_descriptor_required_tools_participate_in_preflight(tmp_path, monk
     monkeypatch.setenv("AGENT_BENCH_OUTPUT_DIR", str(tmp_path / "outputs"))
     monkeypatch.setenv(
         "AGENT_BENCH_BENCHMARK_JSON",
-        json.dumps({"name": "ExploitBench", "required_tools": ["exploitbench"]}),
+        json.dumps({"name": "ToolBench", "required_tools": ["earnings_calendar"]}),
     )
 
     def fail_model_call(*args, **kwargs):
@@ -97,40 +97,40 @@ def test_probe_descriptor_required_tools_participate_in_preflight(tmp_path, monk
 
     monkeypatch.setattr(probe.ToolCallAdapter, "run_agent_loop", fail_model_call)
     item = probe.BenchmarkItem(
-        "Run the upstream challenge.",
-        "Use upstream oracle.",
-        "benchmarks/v8.yaml",
+        "Call the benchmark-selected finance API.",
+        "Use the selected tool.",
+        "synthetic:1",
         metadata={"live_tools_required": True},
     )
 
-    result = probe.ToolCallAdapter().evaluate_item("ExploitBench", item)
+    result = probe.ToolCallAdapter().evaluate_item("ToolBench", item)
 
     assert result["status"] == "failed_missing_required_tool"
-    assert result["required_tools"] == ["exploitbench"]
-    assert result["missing_tools"] == ["exploitbench"]
+    assert result["required_tools"] == ["earnings_calendar"]
+    assert result["missing_tools"] == ["earnings_calendar"]
     assert result["included_in_official_score"] is False
 
 
-def test_probe_exploitbench_missing_backend_is_listed_and_excluded(tmp_path, monkeypatch):
+def test_probe_descriptor_required_tools_without_descriptor_env_are_listed_and_excluded(tmp_path, monkeypatch):
     probe = _load_probe_module()
     monkeypatch.setenv("AGENT_BENCH_OUTPUT_DIR", str(tmp_path / "outputs"))
     monkeypatch.setenv("AGENT_BENCH_REQUIRED_CAPABILITIES", "tool_call,external_data_required")
 
     def fail_model_call(*args, **kwargs):
-        raise AssertionError("model evaluation should be skipped by missing exploit backend preflight")
+        raise AssertionError("model evaluation should be skipped by missing tool preflight")
 
     monkeypatch.setattr(probe.ToolCallAdapter, "run_agent_loop", fail_model_call)
     item = probe.BenchmarkItem(
-        "Run ExploitBench challenge.",
-        "Use upstream oracle.",
-        "benchmarks/v8.yaml",
-        metadata={"required_tools": ["exploitbench"], "live_tools_required": True},
+        "Call the benchmark-selected finance API.",
+        "Use the selected tool.",
+        "synthetic:1",
+        metadata={"required_tools": ["earnings_calendar"], "live_tools_required": True},
     )
 
-    result = probe.ToolCallAdapter().evaluate_item("ExploitBench", item)
+    result = probe.ToolCallAdapter().evaluate_item("ToolBench", item)
 
     assert result["status"] == "failed_missing_required_tool"
-    assert result["missing_tools"] == ["exploitbench"]
+    assert result["missing_tools"] == ["earnings_calendar"]
     assert result["included_in_official_score"] is False
     assert result["capabilities_verified"] is False
 
@@ -2588,51 +2588,6 @@ def test_execute_agent_tool_supports_ls_alias(tmp_path, monkeypatch):
     result = probe.execute_agent_tool("ls", {"path": "."})
 
     assert "answer.txt" in result
-
-
-def test_exploitbench_does_not_extract_spec_markdown(tmp_path, monkeypatch):
-    probe = _load_probe_module()
-    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "ExploitBench")
-    (tmp_path / "benchmarks").mkdir()
-    (tmp_path / "benchmarks" / "bench-v8").mkdir()
-    (tmp_path / "benchmarks" / "v8.yaml").write_text("target_image: ghcr.io/exploitbench/v8:latest\n", encoding="utf-8")
-    (tmp_path / "benchmarks" / "v8-small.yaml").write_text("image: ghcr.io/exploitbench/v8-small:latest\n", encoding="utf-8")
-    (tmp_path / "benchmarks-bench-v8-SPEC.md").write_text("# spec\nThis is methodology.\n", encoding="utf-8")
-
-    items, errors = probe.extract_benchmark_items(tmp_path, limit=3)
-
-    assert errors == []
-    assert items
-    assert all("SPEC.md" not in item.source for item in items)
-    assert all(item.metadata.get("target_image") or item.metadata.get("environment") for item in items)
-
-
-def test_exploitbench_preflight_requires_upstream_runner(tmp_path, monkeypatch):
-    probe = _load_probe_module()
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "ExploitBench")
-    monkeypatch.delenv("AGENT_BENCH_EXPLOITBENCH_UPSTREAM_READY", raising=False)
-    monkeypatch.setattr(probe.shutil, "which", lambda name: None)
-    (tmp_path / "benchmarks" / "bench-v8").mkdir(parents=True)
-    (tmp_path / "benchmarks" / "v8.yaml").write_text("target_image: ghcr.io/exploitbench/v8:latest\n", encoding="utf-8")
-    (tmp_path / "benchmarks" / "v8-small.yaml").write_text("target_image: ghcr.io/exploitbench/v8-small:latest\n", encoding="utf-8")
-    item = probe.BenchmarkItem(
-        "Use upstream runner.",
-        "oracle",
-        "benchmarks/v8.yaml",
-        metadata={
-            "benchmark_config": "benchmarks/v8.yaml",
-            "target_image": "ghcr.io/exploitbench/v8:latest",
-            "oracle": "upstream_capability_oracle",
-        },
-    )
-
-    result = probe.validate_exploitbench_item(item)
-
-    assert result is not None
-    assert result[0] == "failed_missing_required_tool"
-    assert result[2]["blocker_type"] == "missing_required_tool_backend"
-    assert result[2]["missing_tools"] == ["exploitbench"]
 
 
 def test_finance_agent_v2_rejects_task_md_only_item(tmp_path, monkeypatch):

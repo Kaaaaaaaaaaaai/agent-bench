@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.benchmark-config.v1",
-  "benchmark_id": "PB_013",
+  "benchmark_id": "PB_012",
   "benchmark_slug": "quantcode-bench",
   "display_name": "QuantCode-Bench",
   "source_descriptor": "tasks/quantcode-bench/manifest.json",

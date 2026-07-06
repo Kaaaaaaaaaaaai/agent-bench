@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.assets-lock.v1",
-  "benchmark_id": "PB_010",
+  "benchmark_id": "PB_009",
   "benchmark_slug": "codeneedle",
   "asset_root": "agent-bench-assets/codeneedle",
   "source": {

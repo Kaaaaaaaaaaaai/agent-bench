@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.benchmark-config.v1",
-  "benchmark_id": "PB_014",
+  "benchmark_id": "PB_013",
   "benchmark_slug": "finmcp-bench",
   "display_name": "FinMCP-Bench",
   "source_descriptor": "tasks/finmcp-bench/manifest.json",
