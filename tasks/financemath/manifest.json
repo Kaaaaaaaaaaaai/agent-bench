@@ -1,6 +1,6 @@
 {
   "version": "agent-bench.manifest.v1",
-  "id": "PB_017",
+  "id": "PB_016",
   "display_name": "FinanceMath",
   "task_group": "Finance",
   "description": "Run FinanceMath locally through the Docker-backed public benchmark adapter.",

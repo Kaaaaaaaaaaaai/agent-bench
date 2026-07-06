@@ -1,6 +1,6 @@
 {
   "version": "agent-bench.manifest.v1",
-  "id": "PB_011",
+  "id": "PB_010",
   "display_name": "StockBench",
   "task_group": "Finance",
   "description": "Run StockBench locally through the Docker-backed public benchmark adapter.",

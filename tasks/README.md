@@ -11,14 +11,13 @@ Each descriptor records upstream credit, license metadata, and a citation URL. P
 | `PB_001` | Coding | SWE-bench | <https://github.com/SWE-bench/SWE-bench> |
 | `PB_004` | Coding | SWE-Lancer | <https://github.com/openai/frontier-evals/tree/main/project/swelancer> |
 | `PB_005` | Coding | SWE-bench Verified | <https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified> |
-| `PB_009` | Security | ExploitBench | <https://github.com/exploitbench/exploitbench> |
-| `PB_010` | Long Context | codeneedle | <https://github.com/alexziskind1/codeneedle> |
-| `PB_011` | Finance | StockBench | <https://github.com/ChenYXxxx/stockbench> |
-| `PB_012` | Finance | InvestorBench | <https://github.com/felis33/INVESTOR-BENCH> |
-| `PB_013` | Finance | QuantCode-Bench | <https://github.com/LimexAILab/QuantCode-Bench> |
-| `PB_014` | Finance | FinMCP-Bench | <https://huggingface.co/datasets/DianJin/FinMCP-Bench> |
-| `PB_016` | Finance | Finance Agent v2 | <https://github.com/vals-ai/finance-agent-v2> |
-| `PB_017` | Finance | FinanceMath | <https://github.com/yale-nlp/FinanceMath> |
+| `PB_009` | Long Context | codeneedle | <https://github.com/alexziskind1/codeneedle> |
+| `PB_010` | Finance | StockBench | <https://github.com/ChenYXxxx/stockbench> |
+| `PB_011` | Finance | InvestorBench | <https://github.com/felis33/INVESTOR-BENCH> |
+| `PB_012` | Finance | QuantCode-Bench | <https://github.com/LimexAILab/QuantCode-Bench> |
+| `PB_013` | Finance | FinMCP-Bench | <https://huggingface.co/datasets/DianJin/FinMCP-Bench> |
+| `PB_015` | Finance | Finance Agent v2 | <https://github.com/vals-ai/finance-agent-v2> |
+| `PB_016` | Finance | FinanceMath | <https://github.com/yale-nlp/FinanceMath> |
 
 ## Notes
 

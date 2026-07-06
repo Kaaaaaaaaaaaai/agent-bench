@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.benchmark-config.v1",
-  "benchmark_id": "PB_017",
+  "benchmark_id": "PB_016",
   "benchmark_slug": "financemath",
   "display_name": "FinanceMath",
   "source_descriptor": "tasks/financemath/manifest.json",

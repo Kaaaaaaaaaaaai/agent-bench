@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.assets-lock.v1",
-  "benchmark_id": "PB_014",
+  "benchmark_id": "PB_013",
   "benchmark_slug": "finmcp-bench",
   "asset_root": "agent-bench-assets/finmcp-bench",
   "source": {

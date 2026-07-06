@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.benchmark-config.v1",
-  "benchmark_id": "PB_012",
+  "benchmark_id": "PB_011",
   "benchmark_slug": "investorbench",
   "display_name": "InvestorBench",
   "source_descriptor": "tasks/investorbench/manifest.json",

@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.assets-lock.v1",
-  "benchmark_id": "PB_013",
+  "benchmark_id": "PB_012",
   "benchmark_slug": "quantcode-bench",
   "asset_root": "agent-bench-assets/quantcode-bench",
   "source": {

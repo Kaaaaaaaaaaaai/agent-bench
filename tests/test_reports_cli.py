@@ -262,15 +262,15 @@ def test_cli_mock_smoke_runs_all_bundled_benchmarks(tmp_path, monkeypatch):
     assert exit_code == 0
     summary = json.loads((tmp_path / out_dir / "summary.json").read_text(encoding="utf-8"))
     html = (tmp_path / out_dir / "summary.html").read_text(encoding="utf-8")
-    assert summary["task_count"] == 11
-    assert summary["selected_suite_count"] == 11
-    assert summary["known_suite_count"] == 11
-    assert summary["excluded_suite_count"] == 2
-    assert len(summary["excluded_suites"]) == 2
-    assert len(summary["benchmark_results"]) == 11
-    assert summary["suite_coverage_rate"] == pytest.approx(9 / 11)
+    assert summary["task_count"] == 10
+    assert summary["selected_suite_count"] == 10
+    assert summary["known_suite_count"] == 10
+    assert summary["excluded_suite_count"] == 1
+    assert len(summary["excluded_suites"]) == 1
+    assert len(summary["benchmark_results"]) == 10
+    assert summary["suite_coverage_rate"] == pytest.approx(9 / 10)
     assert summary["coverage_summary"]["successfully_scored_benchmarks"] == 9
-    assert summary["conservative_all_suite_score"] == pytest.approx(9 / 11)
+    assert summary["conservative_all_suite_score"] == pytest.approx(9 / 10)
     assert "public_benchmarks" not in html
     assert "SWE-bench" in html
     assert "Failures And Status" in html
@@ -586,7 +586,7 @@ def test_aggregate_results_uses_nested_judge_parse_and_model_valid_counts():
     summary = aggregate_results(
         [
             GradeResult(
-                task_id="PB_017",
+                task_id="PB_016",
                 category="Finance",
                 kind="external_benchmark",
                 score=0.0,
@@ -661,7 +661,7 @@ def test_aggregate_results_excludes_missing_environment_requirements():
     summary = aggregate_results(
         [
             GradeResult(
-                task_id="PB_016",
+                task_id="PB_015",
                 category="Finance",
                 kind="external_benchmark",
                 score=1.0,
@@ -743,8 +743,8 @@ def test_aggregate_results_counts_payload_unsupported_capabilities():
     summary = aggregate_results(
         [
             GradeResult(
-                task_id="PB_009",
-                category="Security",
+                task_id="PB_TOOL",
+                category="Finance",
                 kind="external_benchmark",
                 score=0.0,
                 max_score=1.0,
@@ -753,19 +753,19 @@ def test_aggregate_results_counts_payload_unsupported_capabilities():
                 latency_seconds=0.1,
                 status="failed_missing_required_tool",
                 details={
-                    "benchmark": "ExploitBench",
-                    "group": "Security",
+                    "benchmark": "Example Tool Bench",
+                    "group": "Finance",
                     "result": {
                         "status": "failed_missing_required_tool",
                         "capabilities_verified": False,
                         "unsupported_capabilities": ["tool_call"],
-                        "missing_tools": ["exploitbench"],
+                        "missing_tools": ["quote_lookup"],
                         "status_counts": {"failed_missing_required_tool": 1},
                     },
                 },
             ),
             GradeResult(
-                task_id="PB_016",
+                task_id="PB_015",
                 category="Finance",
                 kind="external_benchmark",
                 score=0.0,

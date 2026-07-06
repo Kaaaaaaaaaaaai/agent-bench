@@ -345,28 +345,28 @@ def test_grade_external_benchmark_promotes_all_invalid_nested_status():
 
 def test_grade_external_benchmark_preserves_exposed_tool_harness_failure():
     task = Task(
-        id="PB_009",
-        category="Security",
+        id="PB_015",
+        category="Finance",
         type="external_benchmark",
         question="Run benchmark",
-        source="tasks/exploitbench/manifest.json",
+        source="tasks/finance-agent-v2/manifest.json",
     )
     response = _response(
         json.dumps(
             {
                 "status": "failed_harness_setup",
                 "score": 0.0,
-                "error": "ExploitBench doctor failed",
+                "error": "Finance Agent v2 harness failed",
                 "timed_out": False,
                 "details": {
-                    "group": "Security",
+                    "group": "Finance",
                     "result": {
                         "status": "failed_harness_setup",
                         "score": 0.0,
-                        "error": "ExploitBench doctor failed",
+                        "error": "Finance Agent v2 harness failed",
                         "required_capabilities": ["tool_call", "external_data_required"],
-                        "required_tools": ["exploitbench"],
-                        "exposed_tools": ["exploitbench"],
+                        "required_tools": ["web_search"],
+                        "exposed_tools": ["web_search"],
                         "missing_tools": [],
                         "capabilities_verified": False,
                     },
@@ -378,17 +378,17 @@ def test_grade_external_benchmark_preserves_exposed_tool_harness_failure():
     result = grade_external_benchmark(task, response)
 
     assert result.status == "failed_harness_setup"
-    assert result.error == "ExploitBench doctor failed"
+    assert result.error == "Finance Agent v2 harness failed"
     assert result.passed is False
 
 
 def test_grade_external_benchmark_preserves_timeout_before_missing_tool_heuristic():
     task = Task(
-        id="PB_009",
-        category="Security",
+        id="PB_015",
+        category="Finance",
         type="external_benchmark",
         question="Run benchmark",
-        source="tasks/exploitbench/manifest.json",
+        source="tasks/finance-agent-v2/manifest.json",
     )
     response = _response(
         json.dumps(
@@ -398,13 +398,13 @@ def test_grade_external_benchmark_preserves_timeout_before_missing_tool_heuristi
                 "error": "External benchmark timed out after 1200.0s",
                 "timed_out": True,
                 "details": {
-                    "group": "Security",
+                    "group": "Finance",
                     "result": {
                         "status": "failed_timeout",
                         "score": 0.0,
                         "error": "External benchmark timed out after 1200.0s",
                         "required_capabilities": ["tool_call", "external_data_required"],
-                        "required_tools": ["exploitbench"],
+                        "required_tools": ["web_search"],
                         "exposed_tools": [],
                         "missing_tools": [],
                         "capabilities_verified": False,
