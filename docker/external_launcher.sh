@@ -20,7 +20,9 @@ asset_cache_key="${AGENT_BENCH_ASSET_CACHE_KEY:-}"
 asset_cache_root="${AGENT_BENCH_ASSET_ROOT:-/benchmark/assets}"
 copy_cached_assets() {
   local source_dir=""
-  if [[ -n "${asset_cache_key}" && -d "${asset_cache_root}/${asset_cache_key}" ]]; then
+  if [[ -d "${asset_cache_root}" && -f "${asset_cache_root}/.agent-bench-assets-ready.json" ]]; then
+    source_dir="${asset_cache_root}"
+  elif [[ -n "${asset_cache_key}" && -d "${asset_cache_root}/${asset_cache_key}" && -f "${asset_cache_root}/${asset_cache_key}/.agent-bench-assets-ready.json" ]]; then
     source_dir="${asset_cache_root}/${asset_cache_key}"
   elif [[ -d "${asset_cache_root}" ]]; then
     source_dir="${asset_cache_root}"

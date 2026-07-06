@@ -469,10 +469,13 @@ def _docker_run_command(
         "--tmpfs",
         "/tmp:rw,nosuid,nodev,noexec,size=512m,uid=10001,gid=10001",
         "--tmpfs",
-        "/workspace:rw,nosuid,nodev,size=4g,uid=10001,gid=10001",
+        "/workspace:rw,nosuid,nodev,exec,size=4g,uid=10001,gid=10001",
     ]
-    if manifest.container.run_as_user:
-        command.extend(["--user", manifest.container.run_as_user])
+    if manifest.container.requires_host_docker_socket:
+        command.extend(["--cap-add", "DAC_OVERRIDE"])
+    run_as_user = _effective_container_user(manifest)
+    if run_as_user:
+        command.extend(["--user", run_as_user])
     if manifest.container.memory:
         command.extend(["--memory", manifest.container.memory])
     if manifest.container.cpus is not None:
@@ -552,6 +555,14 @@ def _docker_socket_mount_enabled(config: ExternalBenchmarkConfig, manifest: Benc
     return bool(manifest.container.requires_host_docker_socket)
 
 
+def _effective_container_user(manifest: BenchmarkManifest) -> str:
+    if manifest.container.requires_host_docker_socket:
+        # Access to the Docker socket is already root-equivalent; running
+        # these opt-in containers as root avoids host socket UID/GID drift.
+        return "0:0"
+    return manifest.container.run_as_user
+
+
 def _docker_env(
     task: Task,
     benchmark: dict[str, Any],
@@ -616,10 +627,22 @@ def _docker_env(
     sample_limit = os.environ.get("AGENT_BENCH_SAMPLE_LIMIT", "").strip()
     if sample_limit:
         env["AGENT_BENCH_SAMPLE_LIMIT"] = sample_limit
+    for key, value in sorted(os.environ.items()):
+        if _environment_override_allowed(key, manifest.container.environment_allowed):
+            env[key] = value
     for item in docker.get("environment", []):
         key, _, value = item.partition("=")
         env[key] = value
     return env
+
+
+def _environment_override_allowed(key: str, allowed: list[str]) -> bool:
+    for pattern in allowed:
+        if pattern.endswith("*") and key.startswith(pattern[:-1]):
+            return True
+        if key == pattern:
+            return True
+    return False
 
 
 def _external_setup_details(

@@ -17,6 +17,7 @@ from agent_bench.statuses import (
     FAILED_MODEL_MISSING_ARTIFACT,
     FAILED_MODEL_TOOL_USE,
     FAILED_TOKEN_BUDGET,
+    FAILED_TIMEOUT,
     INVALID_EVALUATION_STATUSES,
     PASSED,
     SKIPPED_UNSUPPORTED_CAPABILITY,
@@ -393,10 +394,12 @@ def _external_benchmark_status(
     score: float,
     error: str | None,
 ) -> str:
+    status = normalize_status(result_status or payload_status)
+    if status in {FAILED_TIMEOUT, TIMED_OUT}:
+        return status
     capability_status = _external_capability_failure_status(result_payload)
     if capability_status:
         return capability_status
-    status = normalize_status(result_status or payload_status)
     if status in STRICT_STATUSES:
         return status
     status_counts = result_payload.get("status_counts")

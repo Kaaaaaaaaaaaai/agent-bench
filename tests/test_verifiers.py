@@ -343,6 +343,84 @@ def test_grade_external_benchmark_promotes_all_invalid_nested_status():
     assert result.passed is False
 
 
+def test_grade_external_benchmark_preserves_exposed_tool_harness_failure():
+    task = Task(
+        id="PB_009",
+        category="Security",
+        type="external_benchmark",
+        question="Run benchmark",
+        source="tasks/exploitbench/manifest.json",
+    )
+    response = _response(
+        json.dumps(
+            {
+                "status": "failed_harness_setup",
+                "score": 0.0,
+                "error": "ExploitBench doctor failed",
+                "timed_out": False,
+                "details": {
+                    "group": "Security",
+                    "result": {
+                        "status": "failed_harness_setup",
+                        "score": 0.0,
+                        "error": "ExploitBench doctor failed",
+                        "required_capabilities": ["tool_call", "external_data_required"],
+                        "required_tools": ["exploitbench"],
+                        "exposed_tools": ["exploitbench"],
+                        "missing_tools": [],
+                        "capabilities_verified": False,
+                    },
+                },
+            }
+        )
+    )
+
+    result = grade_external_benchmark(task, response)
+
+    assert result.status == "failed_harness_setup"
+    assert result.error == "ExploitBench doctor failed"
+    assert result.passed is False
+
+
+def test_grade_external_benchmark_preserves_timeout_before_missing_tool_heuristic():
+    task = Task(
+        id="PB_009",
+        category="Security",
+        type="external_benchmark",
+        question="Run benchmark",
+        source="tasks/exploitbench/manifest.json",
+    )
+    response = _response(
+        json.dumps(
+            {
+                "status": "failed_timeout",
+                "score": 0.0,
+                "error": "External benchmark timed out after 1200.0s",
+                "timed_out": True,
+                "details": {
+                    "group": "Security",
+                    "result": {
+                        "status": "failed_timeout",
+                        "score": 0.0,
+                        "error": "External benchmark timed out after 1200.0s",
+                        "required_capabilities": ["tool_call", "external_data_required"],
+                        "required_tools": ["exploitbench"],
+                        "exposed_tools": [],
+                        "missing_tools": [],
+                        "capabilities_verified": False,
+                    },
+                },
+            }
+        )
+    )
+
+    result = grade_external_benchmark(task, response)
+
+    assert result.status == "failed_timeout"
+    assert result.timed_out is True
+    assert result.passed is False
+
+
 def test_grade_external_benchmark_marks_nested_timeout_as_timed_out():
     task = Task(
         id="PB_001",
