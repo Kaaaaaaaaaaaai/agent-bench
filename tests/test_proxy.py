@@ -87,6 +87,32 @@ def test_openai_recording_proxy_uses_curl_fallback(tmp_path, monkeypatch):
     assert records[0]["raw_response"]["choices"][0]["message"]["content"] == "curl-ok"
 
 
+def test_openai_recording_proxy_ignores_downstream_disconnect_after_recording(tmp_path):
+    raw_path = tmp_path / "raw_responses.jsonl"
+    with JsonlRecorder(raw_path) as recorder:
+        proxy = OpenAIRecordingProxy(
+            OpenAIProxyConfig(
+                upstream_base_url="http://upstream.test/v1",
+                model="example-model",
+            ),
+            recorder,
+        )
+        proxy._client = _FakeClient()
+        handler = _FakeHandler(
+            path="/v1/chat/completions",
+            headers={"Content-Length": "84", "X-Agent-Bench-Benchmark-Id": "bench_1"},
+            body={"model": "example-model", "messages": [{"role": "user", "content": "hello"}]},
+            wfile=_BrokenPipeWriter(),
+        )
+
+        proxy._handle_post(handler)
+
+    assert handler.status == 200
+    records = [json.loads(line) for line in raw_path.read_text(encoding="utf-8").splitlines()]
+    assert records[0]["benchmark_id"] == "bench_1"
+    assert records[0]["raw_response"]["choices"][0]["message"]["content"] == "ok"
+
+
 def test_openai_recording_proxy_uses_container_ip_for_containerized_runs(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_BENCH_CONTAINERIZED", "1")
     monkeypatch.setattr("agent_bench.proxy._container_ip_address", lambda: "172.18.0.5")
@@ -143,14 +169,19 @@ class _FailingClient:
         return None
 
 
+class _BrokenPipeWriter:
+    def write(self, value):
+        raise BrokenPipeError("client disconnected")
+
+
 class _FakeHandler:
-    def __init__(self, *, path: str, headers: dict[str, str], body: dict) -> None:
+    def __init__(self, *, path: str, headers: dict[str, str], body: dict, wfile=None) -> None:
         raw = json.dumps(body).encode("utf-8")
         self.path = path
         self.headers = dict(headers)
         self.headers["Content-Length"] = str(len(raw))
         self.rfile = io.BytesIO(raw)
-        self.wfile = io.BytesIO()
+        self.wfile = wfile or io.BytesIO()
         self.status = 0
         self.response_headers: list[tuple[str, str]] = []
 

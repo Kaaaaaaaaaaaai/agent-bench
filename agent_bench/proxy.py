@@ -32,6 +32,7 @@ SECRET_KEYS = {
     "openai_api_key",
 }
 _CURL_STATUS_MARKER = "\n__AGENT_BENCH_CURL_STATUS__"
+CLIENT_DISCONNECT_ERRORS = (BrokenPipeError, ConnectionAbortedError, ConnectionResetError)
 
 
 @dataclass(slots=True)
@@ -212,11 +213,7 @@ class OpenAIRecordingProxy:
             status_code=status_code,
             parser=parser_result.to_dict() if parser_result is not None else {},
         )
-        handler.send_response(status_code)
-        handler.send_header("Content-Type", content_type)
-        handler.send_header("Content-Length", str(len(content)))
-        handler.end_headers()
-        handler.wfile.write(content)
+        self._send_bytes(handler, status_code, content_type, content)
 
     def _post_with_curl(
         self,
@@ -308,11 +305,23 @@ class OpenAIRecordingProxy:
 
     def _send_json(self, handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
         body = json.dumps(payload).encode("utf-8")
-        handler.send_response(status)
-        handler.send_header("Content-Type", "application/json")
-        handler.send_header("Content-Length", str(len(body)))
-        handler.end_headers()
-        handler.wfile.write(body)
+        self._send_bytes(handler, status, "application/json", body)
+
+    def _send_bytes(
+        self,
+        handler: BaseHTTPRequestHandler,
+        status: int,
+        content_type: str,
+        body: bytes,
+    ) -> None:
+        try:
+            handler.send_response(status)
+            handler.send_header("Content-Type", content_type)
+            handler.send_header("Content-Length", str(len(body)))
+            handler.end_headers()
+            handler.wfile.write(body)
+        except CLIENT_DISCONNECT_ERRORS:
+            return
 
 
 def redact_secrets(value: Any) -> Any:
