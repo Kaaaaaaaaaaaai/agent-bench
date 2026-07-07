@@ -15,3 +15,11 @@ def test_run_parser_normalizes_vllm_parser_alias():
     args = parser.parse_args(["run", "--tool-call-parser", "deepseek_v31"])
 
     assert args.tool_parser == "json-in-content"
+
+
+def test_run_parser_normalizes_vllm_engine_parser_alias():
+    parser = build_parser()
+
+    args = parser.parse_args(["run", "--tool-call-parser", "minimax_m2"])
+
+    assert args.tool_parser == "minimax-m2"

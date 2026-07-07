@@ -116,11 +116,206 @@ def test_qwen35_tool_parser_extracts_multiple_tagged_json_calls():
 
 def test_qwen35_parser_aliases_normalize_to_canonical_name():
     assert normalize_parser_name("qwen3_5") == "qwen3.5"
-    assert normalize_parser_name("qwen3.6") == "qwen3.5"
+    assert normalize_parser_name("qwen3.6") == "qwen3"
     assert normalize_parser_name("qwen35") == "qwen3.5"
+    assert normalize_parser_name("qwen3_xml") == "qwen3"
+    assert normalize_parser_name("seed_oss") == "seed-oss"
+    assert normalize_parser_name("minimax_m2") == "minimax-m2"
+    assert normalize_parser_name("glm47_moe") == "glm47-moe"
     assert normalize_parser_name("llama4_pythonic") == "pythonic"
     assert normalize_parser_name("granite20b_fc") == "json-in-content"
     assert normalize_parser_name("deepseek_v31") == "json-in-content"
+
+
+def test_qwen3_tool_parser_extracts_vllm_xml_calls():
+    payload = {
+        "choices": [
+            {
+                "message": {
+                    "content": (
+                        "<think>checking</think>\n"
+                        "<tool_call>\n"
+                        "<function=read_file>\n"
+                        "<parameter=path>TASK.md</parameter>\n"
+                        "</function>\n"
+                        "</tool_call>"
+                    )
+                }
+            }
+        ]
+    }
+
+    parsed = parse_tool_calls("qwen3", payload)
+
+    assert parsed.status == "parsed"
+    assert parsed.tool_calls[0].name == "read_file"
+    assert parsed.tool_calls[0].arguments == {"path": "TASK.md"}
+
+
+def test_seed_oss_tool_parser_uses_qwen3_xml_body_with_seed_wrappers():
+    payload = {
+        "choices": [
+            {
+                "message": {
+                    "content": (
+                        "<seed:think>checking</seed:think>\n"
+                        "<seed:tool_call>"
+                        "<function=search_files><parameter=query>needle</parameter></function>"
+                        "</seed:tool_call>"
+                    )
+                }
+            }
+        ]
+    }
+
+    parsed = parse_tool_calls("seed_oss", payload)
+
+    assert parsed.status == "parsed"
+    assert parsed.tool_calls[0].name == "search_files"
+    assert parsed.tool_calls[0].arguments == {"query": "needle"}
+
+
+def test_auto_tool_parser_detects_qwen3_xml_before_tagged_json():
+    payload = {
+        "choices": [
+            {
+                "message": {
+                    "content": (
+                        "<tool_call>"
+                        "<function=search_files><parameter=query>needle</parameter></function>"
+                        "</tool_call>"
+                    )
+                }
+            }
+        ]
+    }
+
+    parsed = parse_tool_calls("auto", payload)
+
+    assert parsed.status == "parsed"
+    assert parsed.tool_calls[0].name == "search_files"
+    assert parsed.tool_calls[0].arguments == {"query": "needle"}
+
+
+def test_minimax_m2_tool_parser_extracts_invoke_blocks():
+    payload = {
+        "choices": [
+            {
+                "message": {
+                    "content": (
+                        '<minimax:tool_call><invoke name="get_weather">'
+                        '<parameter name="city">Seattle</parameter>'
+                        "<parameter name='unit'>celsius</parameter>"
+                        "</invoke></minimax:tool_call>"
+                    )
+                }
+            }
+        ]
+    }
+
+    parsed = parse_tool_calls("minimax_m2", payload)
+
+    assert parsed.status == "parsed"
+    assert parsed.tool_calls[0].name == "get_weather"
+    assert parsed.tool_calls[0].arguments == {"city": "Seattle", "unit": "celsius"}
+
+
+def test_glm47_moe_tool_parser_extracts_arg_key_value_pairs():
+    payload = {
+        "choices": [
+            {
+                "message": {
+                    "content": (
+                        "<tool_call>search_files"
+                        "<arg_key>query</arg_key><arg_value>needle</arg_value>"
+                        "<arg_key>path</arg_key><arg_value>.</arg_value>"
+                        "</tool_call>"
+                    )
+                }
+            }
+        ]
+    }
+
+    parsed = parse_tool_calls("glm47_moe", payload)
+
+    assert parsed.status == "parsed"
+    assert parsed.tool_calls[0].name == "search_files"
+    assert parsed.tool_calls[0].arguments == {"query": "needle", "path": "."}
+
+
+def test_gemma4_tool_parser_extracts_custom_call_arguments():
+    payload = {
+        "choices": [
+            {
+                "message": {
+                    "content": (
+                        '<|channel>thought\nok<channel|>\n'
+                        '<|tool_call>call:get_weather{'
+                        'location:<|"|>San Francisco<|"|>,'
+                        'options:{unit:<|"|>celsius<|"|>},'
+                        'days:[1,2]'
+                        '}<tool_call|>'
+                    )
+                }
+            }
+        ]
+    }
+
+    parsed = parse_tool_calls("gemma4", payload)
+
+    assert parsed.status == "parsed"
+    assert parsed.tool_calls[0].name == "get_weather"
+    assert parsed.tool_calls[0].arguments == {
+        "location": "San Francisco",
+        "options": {"unit": "celsius"},
+        "days": ["1", "2"],
+    }
+
+
+def test_kimi_k2_tool_parser_extracts_section_calls():
+    payload = {
+        "choices": [
+            {
+                "message": {
+                    "content": (
+                        "<|tool_calls_section_begin|>"
+                        "<|tool_call_begin|>functions.get_weather:0\n"
+                        '<|tool_call_argument_begin|>{"city":"Tokyo"}<|tool_call_end|>'
+                        "<|tool_calls_section_end|>"
+                    )
+                }
+            }
+        ]
+    }
+
+    parsed = parse_tool_calls("kimi_k2", payload)
+
+    assert parsed.status == "parsed"
+    assert parsed.tool_calls[0].name == "get_weather"
+    assert parsed.tool_calls[0].call_id == "functions.get_weather:0"
+    assert parsed.tool_calls[0].arguments == {"city": "Tokyo"}
+
+
+def test_harmony_tool_parser_extracts_raw_message_call():
+    payload = {
+        "choices": [
+            {
+                "message": {
+                    "content": (
+                        "<|start|>assistant to=functions.search_files "
+                        "<|channel|>commentary <|constrain|>json"
+                        '<|message|>{"query":"needle"}<|call|>'
+                    )
+                }
+            }
+        ]
+    }
+
+    parsed = parse_tool_calls("gpt_oss", payload)
+
+    assert parsed.status == "parsed"
+    assert parsed.tool_calls[0].name == "search_files"
+    assert parsed.tool_calls[0].arguments == {"query": "needle"}
 
 
 def test_longcat_tool_parser_extracts_tagged_json_calls():

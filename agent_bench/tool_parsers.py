@@ -11,7 +11,15 @@ TOOL_PARSER_AUTO = "auto"
 TOOL_PARSER_OPENAI_NATIVE = "openai-native"
 TOOL_PARSER_VLLM_COMPATIBLE = "vllm-compatible"
 TOOL_PARSER_HERMES = "hermes"
+TOOL_PARSER_QWEN3 = "qwen3"
 TOOL_PARSER_QWEN35 = "qwen3.5"
+TOOL_PARSER_SEED_OSS = "seed-oss"
+TOOL_PARSER_NEMOTRON_V3 = "nemotron-v3"
+TOOL_PARSER_MINIMAX_M2 = "minimax-m2"
+TOOL_PARSER_GLM47_MOE = "glm47-moe"
+TOOL_PARSER_GEMMA4 = "gemma4"
+TOOL_PARSER_KIMI_K2 = "kimi-k2"
+TOOL_PARSER_HARMONY = "harmony"
 TOOL_PARSER_LONGCAT = "longcat"
 TOOL_PARSER_XLAM = "xlam"
 TOOL_PARSER_FUNCTIONGEMMA = "functiongemma"
@@ -25,7 +33,15 @@ TOOL_PARSER_CANONICAL_NAMES = (
     TOOL_PARSER_OPENAI_NATIVE,
     TOOL_PARSER_VLLM_COMPATIBLE,
     TOOL_PARSER_HERMES,
+    TOOL_PARSER_QWEN3,
     TOOL_PARSER_QWEN35,
+    TOOL_PARSER_SEED_OSS,
+    TOOL_PARSER_NEMOTRON_V3,
+    TOOL_PARSER_MINIMAX_M2,
+    TOOL_PARSER_GLM47_MOE,
+    TOOL_PARSER_GEMMA4,
+    TOOL_PARSER_KIMI_K2,
+    TOOL_PARSER_HARMONY,
     TOOL_PARSER_LONGCAT,
     TOOL_PARSER_XLAM,
     TOOL_PARSER_FUNCTIONGEMMA,
@@ -45,20 +61,28 @@ TOOL_PARSER_ALIASES = {
     "qwen": TOOL_PARSER_QWEN35,
     "qwen-2.5": TOOL_PARSER_QWEN35,
     "qwen-3.5": TOOL_PARSER_QWEN35,
-    "qwen-3.6": TOOL_PARSER_QWEN35,
+    "qwen-3.6": TOOL_PARSER_QWEN3,
     "qwen2.5": TOOL_PARSER_QWEN35,
     "qwen25": TOOL_PARSER_QWEN35,
-    "qwen3": TOOL_PARSER_QWEN35,
+    "qwen3": TOOL_PARSER_QWEN3,
     "qwen3-5": TOOL_PARSER_QWEN35,
-    "qwen3-6": TOOL_PARSER_QWEN35,
-    "qwen3.6": TOOL_PARSER_QWEN35,
+    "qwen3-6": TOOL_PARSER_QWEN3,
+    "qwen3.6": TOOL_PARSER_QWEN3,
     "qwen35": TOOL_PARSER_QWEN35,
-    "qwen36": TOOL_PARSER_QWEN35,
+    "qwen36": TOOL_PARSER_QWEN3,
     "qwq": TOOL_PARSER_QWEN35,
-    "qwen3-xml": TOOL_PARSER_QWEN35,
+    "qwen3-xml": TOOL_PARSER_QWEN3,
+    "qwen-3-xml": TOOL_PARSER_QWEN3,
+    "seed": TOOL_PARSER_SEED_OSS,
+    "seed-oss": TOOL_PARSER_SEED_OSS,
+    "minimax": TOOL_PARSER_MINIMAX_M2,
+    "minimax-m2": TOOL_PARSER_MINIMAX_M2,
     "llama3-json": TOOL_PARSER_JSON_IN_CONTENT,
     "llama4-pythonic": TOOL_PARSER_PYTHONIC,
     "toolace": TOOL_PARSER_PYTHONIC,
+    "nemotron": TOOL_PARSER_NEMOTRON_V3,
+    "nemotron3": TOOL_PARSER_NEMOTRON_V3,
+    "nemotron-v3": TOOL_PARSER_NEMOTRON_V3,
     "granite": TOOL_PARSER_JSON_IN_CONTENT,
     "granite4": TOOL_PARSER_JSON_IN_CONTENT,
     "granite-20b-fc": TOOL_PARSER_JSON_IN_CONTENT,
@@ -70,13 +94,19 @@ TOOL_PARSER_ALIASES = {
     "deepseek-v3": TOOL_PARSER_JSON_IN_CONTENT,
     "deepseek-v31": TOOL_PARSER_JSON_IN_CONTENT,
     "deepseek-v3.1": TOOL_PARSER_JSON_IN_CONTENT,
-    "kimi-k2": TOOL_PARSER_JSON_IN_CONTENT,
+    "kimi-k2": TOOL_PARSER_KIMI_K2,
     "hunyuan-a13b": TOOL_PARSER_JSON_IN_CONTENT,
     "cohere-command3": TOOL_PARSER_JSON_IN_CONTENT,
     "glm45": TOOL_PARSER_JSON_IN_CONTENT,
-    "glm47": TOOL_PARSER_JSON_IN_CONTENT,
+    "glm47": TOOL_PARSER_GLM47_MOE,
+    "glm-47": TOOL_PARSER_GLM47_MOE,
+    "glm4.7": TOOL_PARSER_GLM47_MOE,
+    "glm-4.7": TOOL_PARSER_GLM47_MOE,
+    "glm47-moe": TOOL_PARSER_GLM47_MOE,
     "gigachat3": TOOL_PARSER_JSON_IN_CONTENT,
     "apertus": TOOL_PARSER_JSON_IN_CONTENT,
+    "gpt-oss": TOOL_PARSER_HARMONY,
+    "gptoss": TOOL_PARSER_HARMONY,
 }
 
 TOOL_PARSER_NAMES = tuple(dict.fromkeys((*TOOL_PARSER_CANONICAL_NAMES, *TOOL_PARSER_ALIASES)))
@@ -126,6 +156,14 @@ def parse_tool_calls(parser: str, payload: dict[str, Any]) -> ToolParseResult:
         for candidate in (
             TOOL_PARSER_OPENAI_NATIVE,
             TOOL_PARSER_VLLM_COMPATIBLE,
+            TOOL_PARSER_QWEN3,
+            TOOL_PARSER_SEED_OSS,
+            TOOL_PARSER_NEMOTRON_V3,
+            TOOL_PARSER_MINIMAX_M2,
+            TOOL_PARSER_GLM47_MOE,
+            TOOL_PARSER_GEMMA4,
+            TOOL_PARSER_KIMI_K2,
+            TOOL_PARSER_HARMONY,
             TOOL_PARSER_HERMES,
             TOOL_PARSER_QWEN35,
             TOOL_PARSER_LONGCAT,
@@ -224,6 +262,438 @@ def _parse_hermes(payload: dict[str, Any]) -> ToolParseResult:
             r"<\|tool_call\|?>\s*(?P<body>.*?)\s*(?:<\|/tool_call\|?>|<\|tool_call_end\|?>)",
         ],
     )
+
+
+def _parse_qwen3(payload: dict[str, Any]) -> ToolParseResult:
+    return _parse_qwen3_xml_payload(
+        payload,
+        parser=TOOL_PARSER_QWEN3,
+        tool_start="tool_call",
+        tool_end="tool_call",
+    )
+
+
+def _parse_seed_oss(payload: dict[str, Any]) -> ToolParseResult:
+    return _parse_qwen3_xml_payload(
+        payload,
+        parser=TOOL_PARSER_SEED_OSS,
+        tool_start="seed:tool_call",
+        tool_end="seed:tool_call",
+    )
+
+
+def _parse_nemotron_v3(payload: dict[str, Any]) -> ToolParseResult:
+    return _parse_qwen3_xml_payload(
+        payload,
+        parser=TOOL_PARSER_NEMOTRON_V3,
+        tool_start="tool_call",
+        tool_end="tool_call",
+    )
+
+
+def _parse_qwen3_xml_payload(
+    payload: dict[str, Any],
+    *,
+    parser: str,
+    tool_start: str,
+    tool_end: str,
+) -> ToolParseResult:
+    native = _parse_openai_native(payload)
+    if native.tool_calls or native.error:
+        native.parser = parser
+        return native
+
+    raw_calls: list[Any] = []
+    for message in _candidate_messages(payload):
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        raw_calls.extend(
+            _qwen3_xml_tool_calls_from_content(content, tool_start, tool_end)
+        )
+
+    if not raw_calls:
+        return ToolParseResult(parser=parser)
+    parsed, error = _normalize_tool_calls(raw_calls)
+    return ToolParseResult(
+        parser=parser,
+        tool_calls=parsed,
+        status="parsed" if parsed else "parse_error",
+        error=error,
+    )
+
+
+def _qwen3_xml_tool_calls_from_content(
+    content: str,
+    tool_start: str,
+    tool_end: str,
+) -> list[Any]:
+    sections = [
+        match.group("body")
+        for match in re.finditer(
+            _xml_tag_pattern(tool_start, tool_end),
+            content,
+            re.DOTALL | re.IGNORECASE,
+        )
+    ]
+    if not sections:
+        sections = [content]
+
+    raw_calls: list[Any] = []
+    function_pattern = re.compile(
+        r"<\s*function\s*=\s*(?P<name>[^>]*)\s*>(?P<body>.*?)<\s*/\s*function\s*>",
+        re.DOTALL | re.IGNORECASE,
+    )
+    param_pattern = re.compile(
+        r"<\s*parameter\s*=\s*(?P<name>[^>]*)\s*>"
+        r"(?P<value>.*?)(?:<\s*/\s*parameter\s*>|(?=<\s*parameter\s*=)|$)",
+        re.DOTALL | re.IGNORECASE,
+    )
+    for section in sections:
+        for function_match in function_pattern.finditer(section):
+            name = _clean_xml_name(function_match.group("name"))
+            if not _is_probable_tool_name(name):
+                continue
+            arguments: dict[str, Any] = {}
+            for param_match in param_pattern.finditer(function_match.group("body")):
+                param_name = _clean_xml_name(param_match.group("name"))
+                if param_name:
+                    arguments[param_name] = param_match.group("value").strip()
+            raw_calls.append({"name": name, "arguments": arguments})
+    return raw_calls
+
+
+def _parse_minimax_m2(payload: dict[str, Any]) -> ToolParseResult:
+    native = _parse_openai_native(payload)
+    if native.tool_calls or native.error:
+        native.parser = TOOL_PARSER_MINIMAX_M2
+        return native
+
+    raw_calls: list[Any] = []
+    for message in _candidate_messages(payload):
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        raw_calls.extend(_minimax_m2_tool_calls_from_content(content))
+
+    if not raw_calls:
+        return ToolParseResult(parser=TOOL_PARSER_MINIMAX_M2)
+    parsed, error = _normalize_tool_calls(raw_calls)
+    return ToolParseResult(
+        parser=TOOL_PARSER_MINIMAX_M2,
+        tool_calls=parsed,
+        status="parsed" if parsed else "parse_error",
+        error=error,
+    )
+
+
+def _minimax_m2_tool_calls_from_content(content: str) -> list[Any]:
+    invoke_pattern = re.compile(
+        r"<\s*invoke\s+name\s*=\s*"
+        r"(?:\"(?P<dq_name>[^\"]*)\"|'(?P<sq_name>[^']*)'|(?P<bare_name>[^>\s]+))"
+        r"\s*>(?P<body>.*?)<\s*/\s*invoke\s*>",
+        re.DOTALL | re.IGNORECASE,
+    )
+    param_pattern = re.compile(
+        r"<\s*parameter\s+name\s*=\s*"
+        r"(?:\"(?P<dq_name>[^\"]*)\"|'(?P<sq_name>[^']*)'|(?P<bare_name>[^>\s]+))"
+        r"\s*>"
+        r"(?P<value>.*?)(?:<\s*/\s*parameter\s*>|(?=<\s*parameter\s+name\s*=)|$)",
+        re.DOTALL | re.IGNORECASE,
+    )
+    raw_calls: list[Any] = []
+    for invoke_match in invoke_pattern.finditer(content):
+        name = _first_regex_group(
+            invoke_match,
+            "dq_name",
+            "sq_name",
+            "bare_name",
+        ).strip()
+        if not _is_probable_tool_name(name):
+            continue
+        arguments: dict[str, Any] = {}
+        for param_match in param_pattern.finditer(invoke_match.group("body")):
+            param_name = _first_regex_group(
+                param_match,
+                "dq_name",
+                "sq_name",
+                "bare_name",
+            ).strip()
+            if param_name:
+                arguments[param_name] = param_match.group("value").strip()
+        raw_calls.append({"name": name, "arguments": arguments})
+    return raw_calls
+
+
+def _parse_glm47_moe(payload: dict[str, Any]) -> ToolParseResult:
+    native = _parse_openai_native(payload)
+    if native.tool_calls or native.error:
+        native.parser = TOOL_PARSER_GLM47_MOE
+        return native
+
+    raw_calls: list[Any] = []
+    for message in _candidate_messages(payload):
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        raw_calls.extend(_glm47_moe_tool_calls_from_content(content))
+
+    if not raw_calls:
+        return ToolParseResult(parser=TOOL_PARSER_GLM47_MOE)
+    parsed, error = _normalize_tool_calls(raw_calls)
+    return ToolParseResult(
+        parser=TOOL_PARSER_GLM47_MOE,
+        tool_calls=parsed,
+        status="parsed" if parsed else "parse_error",
+        error=error,
+    )
+
+
+def _glm47_moe_tool_calls_from_content(content: str) -> list[Any]:
+    arg_pattern = re.compile(
+        r"<\s*arg_key\s*>(?P<key>.*?)<\s*/\s*arg_key\s*>\s*"
+        r"<\s*arg_value\s*>(?P<value>.*?)<\s*/\s*arg_value\s*>",
+        re.DOTALL | re.IGNORECASE,
+    )
+    raw_calls: list[Any] = []
+    for match in re.finditer(
+        _xml_tag_pattern("tool_call", "tool_call"),
+        content,
+        re.DOTALL | re.IGNORECASE,
+    ):
+        body = match.group("body")
+        first_arg = re.search(r"<\s*arg_key\s*>", body, re.IGNORECASE)
+        name = body[: first_arg.start()].strip() if first_arg else body.strip()
+        if not _is_probable_tool_name(name):
+            continue
+        arguments = {
+            arg_match.group("key").strip(): arg_match.group("value")
+            for arg_match in arg_pattern.finditer(body)
+            if arg_match.group("key").strip()
+        }
+        raw_calls.append({"name": name, "arguments": arguments})
+    return raw_calls
+
+
+_GEMMA4_STRING_DELIM = '<|"|>'
+
+
+def _parse_gemma4(payload: dict[str, Any]) -> ToolParseResult:
+    native = _parse_openai_native(payload)
+    if native.tool_calls or native.error:
+        native.parser = TOOL_PARSER_GEMMA4
+        return native
+
+    raw_calls: list[Any] = []
+    for message in _candidate_messages(payload):
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        raw_calls.extend(_gemma4_tool_calls_from_content(content))
+
+    if not raw_calls:
+        return ToolParseResult(parser=TOOL_PARSER_GEMMA4)
+    parsed, error = _normalize_tool_calls(raw_calls)
+    return ToolParseResult(
+        parser=TOOL_PARSER_GEMMA4,
+        tool_calls=parsed,
+        status="parsed" if parsed else "parse_error",
+        error=error,
+    )
+
+
+def _gemma4_tool_calls_from_content(content: str) -> list[Any]:
+    pattern = re.compile(
+        r"<\|tool_call>\s*call:(?P<name>[A-Za-z_][A-Za-z0-9_.-]*)\{"
+        r"(?P<body>.*?)\}\s*<tool_call\|>",
+        re.DOTALL,
+    )
+    raw_calls: list[Any] = []
+    for match in pattern.finditer(content):
+        name = match.group("name").strip()
+        if not _is_probable_tool_name(name):
+            continue
+        raw_calls.append(
+            {"name": name, "arguments": _parse_gemma4_arguments(match.group("body"))}
+        )
+    return raw_calls
+
+
+def _parse_gemma4_arguments(text: str) -> dict[str, Any]:
+    arguments: dict[str, Any] = {}
+    for part in _split_gemma4_top_level(text, ","):
+        item = part.strip()
+        if not item:
+            continue
+        colon = _find_gemma4_top_level(item, ":")
+        if colon <= 0:
+            continue
+        key = _parse_gemma4_key(item[:colon])
+        if not key:
+            continue
+        arguments[key] = _parse_gemma4_value(item[colon + 1 :])
+    return arguments
+
+
+def _parse_gemma4_key(text: str) -> str:
+    key = text.strip()
+    if key.startswith(_GEMMA4_STRING_DELIM) and key.endswith(_GEMMA4_STRING_DELIM):
+        key = key[len(_GEMMA4_STRING_DELIM) : -len(_GEMMA4_STRING_DELIM)]
+    return key.strip()
+
+
+def _parse_gemma4_value(text: str) -> Any:
+    value = text.strip()
+    if value.startswith(_GEMMA4_STRING_DELIM) and value.endswith(_GEMMA4_STRING_DELIM):
+        return value[len(_GEMMA4_STRING_DELIM) : -len(_GEMMA4_STRING_DELIM)]
+    if value.startswith("{") and value.endswith("}"):
+        return _parse_gemma4_arguments(value[1:-1])
+    if value.startswith("[") and value.endswith("]"):
+        return [
+            _parse_gemma4_value(item)
+            for item in _split_gemma4_top_level(value[1:-1], ",")
+            if item.strip()
+        ]
+    return value
+
+
+def _split_gemma4_top_level(text: str, delimiter: str) -> list[str]:
+    parts: list[str] = []
+    start = 0
+    depth = 0
+    index = 0
+    while index < len(text):
+        if text.startswith(_GEMMA4_STRING_DELIM, index):
+            index = _skip_gemma4_string(text, index)
+            continue
+        char = text[index]
+        if char in "[{":
+            depth += 1
+        elif char in "]}":
+            depth = max(0, depth - 1)
+        elif char == delimiter and depth == 0:
+            parts.append(text[start:index])
+            start = index + 1
+        index += 1
+    parts.append(text[start:])
+    return parts
+
+
+def _find_gemma4_top_level(text: str, target: str) -> int:
+    depth = 0
+    index = 0
+    while index < len(text):
+        if text.startswith(_GEMMA4_STRING_DELIM, index):
+            index = _skip_gemma4_string(text, index)
+            continue
+        char = text[index]
+        if char in "[{":
+            depth += 1
+        elif char in "]}":
+            depth = max(0, depth - 1)
+        elif char == target and depth == 0:
+            return index
+        index += 1
+    return -1
+
+
+def _skip_gemma4_string(text: str, start: int) -> int:
+    end = text.find(_GEMMA4_STRING_DELIM, start + len(_GEMMA4_STRING_DELIM))
+    return len(text) if end == -1 else end + len(_GEMMA4_STRING_DELIM)
+
+
+def _parse_kimi_k2(payload: dict[str, Any]) -> ToolParseResult:
+    native = _parse_openai_native(payload)
+    if native.tool_calls or native.error:
+        native.parser = TOOL_PARSER_KIMI_K2
+        return native
+
+    raw_calls: list[Any] = []
+    for message in _candidate_messages(payload):
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        raw_calls.extend(_kimi_k2_tool_calls_from_content(content))
+
+    if not raw_calls:
+        return ToolParseResult(parser=TOOL_PARSER_KIMI_K2)
+    parsed, error = _normalize_tool_calls(raw_calls)
+    return ToolParseResult(
+        parser=TOOL_PARSER_KIMI_K2,
+        tool_calls=parsed,
+        status="parsed" if parsed else "parse_error",
+        error=error,
+    )
+
+
+def _kimi_k2_tool_calls_from_content(content: str) -> list[Any]:
+    pattern = re.compile(
+        r"<\|tool_call_begin\|>(?P<header>.*?)"
+        r"<\|tool_call_argument_begin\|>(?P<arguments>.*?)<\|tool_call_end\|>",
+        re.DOTALL,
+    )
+    raw_calls: list[Any] = []
+    for match in pattern.finditer(content):
+        header = match.group("header").strip()
+        header_match = re.match(r"(?P<id>.+:\d+)\s*$", header)
+        if not header_match:
+            continue
+        call_id = header_match.group("id").strip()
+        name = call_id.split(":", 1)[0].removeprefix("functions.")
+        if not _is_probable_tool_name(name):
+            continue
+        raw_calls.append(
+            {
+                "id": call_id,
+                "name": name,
+                "arguments": match.group("arguments").strip() or "{}",
+            }
+        )
+    return raw_calls
+
+
+def _parse_harmony(payload: dict[str, Any]) -> ToolParseResult:
+    native = _parse_vllm_compatible(payload)
+    if native.tool_calls or native.error:
+        native.parser = TOOL_PARSER_HARMONY
+        return native
+
+    raw_calls: list[Any] = []
+    for message in _candidate_messages(payload):
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        raw_calls.extend(_harmony_tool_calls_from_content(content))
+
+    if not raw_calls:
+        return ToolParseResult(parser=TOOL_PARSER_HARMONY)
+    parsed, error = _normalize_tool_calls(raw_calls)
+    return ToolParseResult(
+        parser=TOOL_PARSER_HARMONY,
+        tool_calls=parsed,
+        status="parsed" if parsed else "parse_error",
+        error=error,
+    )
+
+
+def _harmony_tool_calls_from_content(content: str) -> list[Any]:
+    if "<|message|>" not in content:
+        return []
+    pattern = re.compile(
+        r"(?:to=|recipient=)\s*(?:functions\.)?(?P<name>[A-Za-z_][A-Za-z0-9_.-]*)"
+        r"(?:(?!<\|message\|>).)*<\|message\|>(?P<arguments>.*?)"
+        r"(?=<\|call\|>|<\|end\|>|<\|start\|>|$)",
+        re.DOTALL,
+    )
+    raw_calls: list[Any] = []
+    for match in pattern.finditer(content):
+        name = match.group("name").strip()
+        if name == "assistant" or not _is_probable_tool_name(name):
+            continue
+        raw_calls.append(
+            {"name": name, "arguments": match.group("arguments").strip() or "{}"}
+        )
+    return raw_calls
 
 
 def _parse_qwen35(payload: dict[str, Any]) -> ToolParseResult:
@@ -522,6 +992,30 @@ def _literal_from_ast(node: ast.AST) -> Any:
         raise ValueError("value must be a literal") from exc
 
 
+def _xml_tag_pattern(start_tag: str, end_tag: str) -> str:
+    return (
+        rf"<\s*{re.escape(start_tag)}\s*>"
+        rf"(?P<body>.*?)"
+        rf"<\s*/\s*{re.escape(end_tag)}\s*>"
+    )
+
+
+def _clean_xml_name(value: str) -> str:
+    return value.strip().strip("\"'")
+
+
+def _first_regex_group(match: re.Match[str], *names: str) -> str:
+    for name in names:
+        value = match.group(name)
+        if value is not None:
+            return value
+    return ""
+
+
+def _is_probable_tool_name(value: str) -> bool:
+    return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]*", value.strip()))
+
+
 def _looks_like_final_answer_json(parsed_json: dict[str, Any]) -> bool:
     return "answer" in parsed_json and not any(
         key in parsed_json for key in ("tool", "tool_name", "tool_call", "tool_calls", "function_call")
@@ -680,7 +1174,15 @@ _PARSERS: dict[str, ParserFn] = {
     TOOL_PARSER_OPENAI_NATIVE: _parse_openai_native,
     TOOL_PARSER_VLLM_COMPATIBLE: _parse_vllm_compatible,
     TOOL_PARSER_HERMES: _parse_hermes,
+    TOOL_PARSER_QWEN3: _parse_qwen3,
     TOOL_PARSER_QWEN35: _parse_qwen35,
+    TOOL_PARSER_SEED_OSS: _parse_seed_oss,
+    TOOL_PARSER_NEMOTRON_V3: _parse_nemotron_v3,
+    TOOL_PARSER_MINIMAX_M2: _parse_minimax_m2,
+    TOOL_PARSER_GLM47_MOE: _parse_glm47_moe,
+    TOOL_PARSER_GEMMA4: _parse_gemma4,
+    TOOL_PARSER_KIMI_K2: _parse_kimi_k2,
+    TOOL_PARSER_HARMONY: _parse_harmony,
     TOOL_PARSER_LONGCAT: _parse_longcat,
     TOOL_PARSER_XLAM: _parse_xlam,
     TOOL_PARSER_FUNCTIONGEMMA: _parse_functiongemma,
