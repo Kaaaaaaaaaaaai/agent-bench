@@ -1,0 +1,45 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_id": "PB_020",
+  "benchmark_slug": "programbench",
+  "asset_root": "agent-bench-assets/programbench",
+  "source": {
+    "repository_url": "https://github.com/facebookresearch/ProgramBench.git",
+    "commit": "cadb42d070a7ff7d495e88f9ab61ffba9c73a131",
+    "dataset_id": "",
+    "dataset_revision": "",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/facebookresearch/ProgramBench.git",
+      "revision": "cadb42d070a7ff7d495e88f9ab61ffba9c73a131",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": [
+          "README.md",
+          "src",
+          "docs"
+        ]
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_paths",
+        "required_paths": [
+          "README.md",
+          "src",
+          "docs"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_id": "PB_025",
+  "benchmark_slug": "bigcodebench",
+  "asset_root": "agent-bench-assets/bigcodebench",
+  "source": {
+    "repository_url": "https://github.com/bigcode-project/bigcodebench.git",
+    "commit": "09dd993f46c3fbf3a799465bb96d524edcb0b199",
+    "dataset_id": "",
+    "dataset_revision": "",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/bigcode-project/bigcodebench.git",
+      "revision": "09dd993f46c3fbf3a799465bb96d524edcb0b199",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": [
+          "README.md",
+          "bigcodebench",
+          "run.sh"
+        ]
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_paths",
+        "required_paths": [
+          "README.md",
+          "bigcodebench",
+          "run.sh"
+        ]
+      }
+    ]
+  }
+}

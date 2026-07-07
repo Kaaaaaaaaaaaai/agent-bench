@@ -10,7 +10,6 @@ Each descriptor records upstream credit, license metadata, and a citation URL. P
 | --- | --- | --- | --- |
 | `PB_001` | Coding | SWE-bench | <https://github.com/SWE-bench/SWE-bench> |
 | `PB_004` | Coding | SWE-Lancer | <https://github.com/openai/frontier-evals/tree/main/project/swelancer> |
-| `PB_005` | Coding | SWE-bench Verified | <https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified> |
 | `PB_009` | Long Context | codeneedle | <https://github.com/alexziskind1/codeneedle> |
 | `PB_010` | Finance | StockBench | <https://github.com/ChenYXxxx/stockbench> |
 | `PB_011` | Finance | InvestorBench | <https://github.com/felis33/INVESTOR-BENCH> |
@@ -18,6 +17,17 @@ Each descriptor records upstream credit, license metadata, and a citation URL. P
 | `PB_013` | Finance | FinMCP-Bench | <https://huggingface.co/datasets/DianJin/FinMCP-Bench> |
 | `PB_015` | Finance | Finance Agent v2 | <https://github.com/vals-ai/finance-agent-v2> |
 | `PB_016` | Finance | FinanceMath | <https://github.com/yale-nlp/FinanceMath> |
+| `PB_017` | Terminal | Terminal-Bench 2.0 | <https://www.harborframework.com/docs/tutorials/running-terminal-bench> |
+| `PB_018` | Coding | NL2RepoBench | <https://github.com/multimodal-art-projection/NL2RepoBench> |
+| `PB_019` | Coding | DeepSWE | <https://github.com/datacurve-ai/deep-swe> |
+| `PB_020` | Coding | ProgramBench | <https://github.com/facebookresearch/ProgramBench> |
+| `PB_021` | Tool Use | MCP Atlas | <https://github.com/scaleapi/mcp-atlas> |
+| `PB_022` | Tool Use | Toolathlon | <https://github.com/hkust-nlp/Toolathlon> |
+| `PB_023` | Knowledge | Humanity's Last Exam | <https://github.com/centerforaisafety/hle> |
+| `PB_024` | Long Context | LongBench | <https://github.com/THUDM/LongBench> |
+| `PB_025` | Coding | BigCodeBench | <https://github.com/bigcode-project/bigcodebench> |
+| `PB_026` | Math | MathArena | <https://github.com/eth-sri/matharena> |
+| `PB_027` | Agentic | CLAW-Eval | <https://github.com/claw-eval/claw-eval> |
 
 ## Notes
 

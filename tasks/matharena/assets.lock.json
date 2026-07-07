@@ -1,0 +1,45 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_id": "PB_026",
+  "benchmark_slug": "matharena",
+  "asset_root": "agent-bench-assets/matharena",
+  "source": {
+    "repository_url": "https://github.com/eth-sri/matharena.git",
+    "commit": "a11194deff8c67a232974a383795e8a2776b4c6f",
+    "dataset_id": "",
+    "dataset_revision": "",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/eth-sri/matharena.git",
+      "revision": "a11194deff8c67a232974a383795e8a2776b4c6f",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": [
+          "README.md",
+          "src",
+          "configs"
+        ]
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_paths",
+        "required_paths": [
+          "README.md",
+          "src",
+          "configs"
+        ]
+      }
+    ]
+  }
+}

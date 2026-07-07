@@ -1,0 +1,83 @@
+{
+  "version": "agent-bench.manifest.v1",
+  "id": "PB_019",
+  "display_name": "DeepSWE",
+  "task_group": "Coding",
+  "description": "Run DeepSWE locally through the Docker-backed public benchmark adapter.",
+  "homepage_url": "https://deepswe.datacurve.ai/",
+  "official_leaderboard_url": "",
+  "source": {
+    "repository_url": "https://github.com/datacurve-ai/deep-swe.git",
+    "commit": "3cda4081fed96103a6395de39c85e9b20275e307",
+    "dataset_id": "",
+    "dataset_revision": "",
+    "subdir": ""
+  },
+  "license": "Unspecified",
+  "credit": "DataCurve DeepSWE authors",
+  "citation": "https://github.com/datacurve-ai/deep-swe",
+  "official_conditions": {
+    "official_split": "public Harbor task set",
+    "official_scoring_method": "agent-bench public adapter normalized score",
+    "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+    "official_grader_command": "agent-bench-probe --benchmark \"DeepSWE\" --kind public-benchmark",
+    "official_evaluation_config": "tasks/deep-swe/configs/official.json",
+    "container_requirements": "agent-bench-external:python3.12 launcher image"
+  },
+  "assets": [
+    {
+      "source": "https://github.com/datacurve-ai/deep-swe.git",
+      "revision": "3cda4081fed96103a6395de39c85e9b20275e307",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": [
+          "README.md",
+          "tasks"
+        ]
+      }
+    }
+  ],
+  "container": {
+    "image": "agent-bench-external:python3.12",
+    "build_context": ".",
+    "dockerfile": "harness/Dockerfile",
+    "command": "bash /benchmark/task/harness/run.sh",
+    "environment_allowed": [],
+    "mounts": [],
+    "network": "model_proxy",
+    "cpus": null,
+    "memory": "",
+    "pids_limit": 1024,
+    "timeout_seconds": 21600.0,
+    "requires_nested_docker": false,
+    "requires_host_docker_socket": true,
+    "run_as_user": "10001:10001"
+  },
+  "adapter": {
+    "module": "",
+    "entry_point": "harness/run.sh",
+    "expected_output_files": [
+      "agent_bench_result.json"
+    ],
+    "result_parser": "agent_bench_result_json"
+  },
+  "scoring": {
+    "raw_score_field": "score",
+    "max_score": 1.0,
+    "normalization": "fraction_to_0_100",
+    "direction": "higher_is_better"
+  },
+  "reporting": {
+    "category_label": "Coding",
+    "display_order": 19,
+    "credit": "DataCurve DeepSWE authors",
+    "citation": "https://github.com/datacurve-ai/deep-swe",
+    "license": "Unspecified"
+  },
+  "capabilities": [
+    "repo_patch"
+  ]
+}

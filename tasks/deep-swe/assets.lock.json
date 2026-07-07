@@ -1,0 +1,43 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_id": "PB_019",
+  "benchmark_slug": "deep-swe",
+  "asset_root": "agent-bench-assets/deep-swe",
+  "source": {
+    "repository_url": "https://github.com/datacurve-ai/deep-swe.git",
+    "commit": "3cda4081fed96103a6395de39c85e9b20275e307",
+    "dataset_id": "",
+    "dataset_revision": "",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/datacurve-ai/deep-swe.git",
+      "revision": "3cda4081fed96103a6395de39c85e9b20275e307",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": [
+          "README.md",
+          "tasks"
+        ]
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_paths",
+        "required_paths": [
+          "README.md",
+          "tasks"
+        ]
+      }
+    ]
+  }
+}

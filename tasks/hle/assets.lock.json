@@ -1,0 +1,45 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_id": "PB_023",
+  "benchmark_slug": "hle",
+  "asset_root": "agent-bench-assets/hle",
+  "source": {
+    "repository_url": "https://github.com/centerforaisafety/hle.git",
+    "commit": "26dca2e253b405105b4c3d8c2f5af06f86f90c66",
+    "dataset_id": "",
+    "dataset_revision": "",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/centerforaisafety/hle.git",
+      "revision": "26dca2e253b405105b4c3d8c2f5af06f86f90c66",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": [
+          "README.md",
+          "hle_eval",
+          "citation.txt"
+        ]
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_paths",
+        "required_paths": [
+          "README.md",
+          "hle_eval",
+          "citation.txt"
+        ]
+      }
+    ]
+  }
+}

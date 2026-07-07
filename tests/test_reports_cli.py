@@ -262,19 +262,19 @@ def test_cli_mock_smoke_runs_all_bundled_benchmarks(tmp_path, monkeypatch):
     assert exit_code == 0
     summary = json.loads((tmp_path / out_dir / "summary.json").read_text(encoding="utf-8"))
     html = (tmp_path / out_dir / "summary.html").read_text(encoding="utf-8")
-    assert summary["task_count"] == 10
-    assert summary["selected_suite_count"] == 10
-    assert summary["known_suite_count"] == 10
-    assert summary["excluded_suite_count"] == 1
-    assert len(summary["excluded_suites"]) == 1
-    assert len(summary["benchmark_results"]) == 10
-    assert summary["suite_coverage_rate"] == pytest.approx(9 / 10)
-    assert summary["coverage_summary"]["successfully_scored_benchmarks"] == 9
-    assert summary["conservative_all_suite_score"] == pytest.approx(9 / 10)
+    assert summary["task_count"] == 20
+    assert summary["selected_suite_count"] == 20
+    assert summary["known_suite_count"] == 20
+    assert summary["excluded_suite_count"] == 4
+    assert len(summary["excluded_suites"]) == 4
+    assert len(summary["benchmark_results"]) == 20
+    assert summary["suite_coverage_rate"] == pytest.approx(16 / 20)
+    assert summary["coverage_summary"]["successfully_scored_benchmarks"] == 16
+    assert summary["conservative_all_suite_score"] == pytest.approx(16 / 20)
     assert "public_benchmarks" not in html
     assert "SWE-bench" in html
     assert "Failures And Status" in html
-    assert "Humanity&#x27;s Last Exam" not in html
+    assert "Humanity&#x27;s Last Exam" in html
     assert "EDINET-Bench" not in html
     assert "MLE-bench" not in html
     assert "Credits Citations Licenses" in html

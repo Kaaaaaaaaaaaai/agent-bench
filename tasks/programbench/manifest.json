@@ -1,0 +1,84 @@
+{
+  "version": "agent-bench.manifest.v1",
+  "id": "PB_020",
+  "display_name": "ProgramBench",
+  "task_group": "Coding",
+  "description": "Run ProgramBench locally through the Docker-backed public benchmark adapter.",
+  "homepage_url": "https://programbench.com",
+  "official_leaderboard_url": "",
+  "source": {
+    "repository_url": "https://github.com/facebookresearch/ProgramBench.git",
+    "commit": "cadb42d070a7ff7d495e88f9ab61ffba9c73a131",
+    "dataset_id": "",
+    "dataset_revision": "",
+    "subdir": ""
+  },
+  "license": "MIT",
+  "credit": "Meta/Facebook Research ProgramBench authors",
+  "citation": "https://arxiv.org/abs/2605.03546",
+  "official_conditions": {
+    "official_split": "public test task set",
+    "official_scoring_method": "agent-bench public adapter normalized score",
+    "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+    "official_grader_command": "agent-bench-probe --benchmark \"ProgramBench\" --kind public-benchmark",
+    "official_evaluation_config": "tasks/programbench/configs/official.json",
+    "container_requirements": "agent-bench-external:python3.12 launcher image"
+  },
+  "assets": [
+    {
+      "source": "https://github.com/facebookresearch/ProgramBench.git",
+      "revision": "cadb42d070a7ff7d495e88f9ab61ffba9c73a131",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": [
+          "README.md",
+          "src",
+          "docs"
+        ]
+      }
+    }
+  ],
+  "container": {
+    "image": "agent-bench-external:python3.12",
+    "build_context": ".",
+    "dockerfile": "harness/Dockerfile",
+    "command": "bash /benchmark/task/harness/run.sh",
+    "environment_allowed": [],
+    "mounts": [],
+    "network": "model_proxy",
+    "cpus": null,
+    "memory": "",
+    "pids_limit": 1024,
+    "timeout_seconds": 21600.0,
+    "requires_nested_docker": false,
+    "requires_host_docker_socket": false,
+    "run_as_user": "10001:10001"
+  },
+  "adapter": {
+    "module": "",
+    "entry_point": "harness/run.sh",
+    "expected_output_files": [
+      "agent_bench_result.json"
+    ],
+    "result_parser": "agent_bench_result_json"
+  },
+  "scoring": {
+    "raw_score_field": "score",
+    "max_score": 1.0,
+    "normalization": "fraction_to_0_100",
+    "direction": "higher_is_better"
+  },
+  "reporting": {
+    "category_label": "Coding",
+    "display_order": 20,
+    "credit": "Meta/Facebook Research ProgramBench authors",
+    "citation": "https://arxiv.org/abs/2605.03546",
+    "license": "MIT"
+  },
+  "capabilities": [
+    "file_artifact"
+  ]
+}

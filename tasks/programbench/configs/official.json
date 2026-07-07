@@ -1,0 +1,17 @@
+{
+  "schema_version": "agent-bench.benchmark-config.v1",
+  "benchmark_id": "PB_020",
+  "benchmark_slug": "programbench",
+  "display_name": "ProgramBench",
+  "source_descriptor": "tasks/programbench/manifest.json",
+  "legacy_adapter": "file_artifact",
+  "official_conditions": {
+    "official_split": "public test task set",
+    "official_scoring_method": "agent-bench public adapter normalized score",
+    "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+    "official_grader_command": "agent-bench-probe --benchmark \"ProgramBench\" --kind public-benchmark",
+    "official_evaluation_config": "tasks/programbench/configs/official.json",
+    "container_requirements": "agent-bench-external:python3.12 launcher image"
+  },
+  "container_command": "bash /benchmark/task/harness/run.sh"
+}

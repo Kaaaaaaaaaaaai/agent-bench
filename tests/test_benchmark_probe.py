@@ -36,6 +36,109 @@ def test_probe_extracts_answer_keyed_json_records(tmp_path):
     assert items[0].choices == {"A": "Only explain it", "B": "Patch the bug"}
 
 
+def test_probe_extracts_harbor_task_metadata_without_name_collision(tmp_path):
+    probe = _load_probe_module()
+    task_dir = tmp_path / "tasks" / "example-task"
+    task_dir.mkdir(parents=True)
+    (task_dir / "instruction.md").write_text("Fix the repository bug and produce a patch for the verifier.", encoding="utf-8")
+    (task_dir / "task.toml").write_text(
+        "\n".join(
+            [
+                "[task]",
+                'name = "example-task"',
+                "[metadata]",
+                'task_id = "example-task"',
+                'repository_url = "https://github.com/example/project"',
+                'base_commit_hash = "0123456789abcdef0123456789abcdef01234567"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    items, errors = probe.extract_harbor_task_items(tmp_path, limit=3, repo_patch=True)
+
+    assert errors == []
+    assert len(items) == 1
+    assert items[0].metadata["target_repo"] == "https://github.com/example/project"
+    assert items[0].metadata["base_commit"] == "0123456789abcdef0123456789abcdef01234567"
+
+
+def test_probe_extracts_nl2repobench_start_files(tmp_path):
+    probe = _load_probe_module()
+    task_dir = tmp_path / "test_files" / "demo_project"
+    task_dir.mkdir(parents=True)
+    (task_dir / "start.md").write_text("Build a Python package that exposes a documented demo function and tests.", encoding="utf-8")
+    (task_dir / "test_commands.json").write_text(json.dumps(["pytest tests"]), encoding="utf-8")
+    (task_dir / "test_files.json").write_text(json.dumps(["tests/test_demo.py"]), encoding="utf-8")
+
+    items, errors = probe.extract_nl2repobench_items(tmp_path, limit=3)
+
+    assert errors == []
+    assert len(items) == 1
+    assert "demo_project" in items[0].question
+    assert items[0].metadata["expected_key"] == "nl2repobench_test_commands"
+
+
+def test_probe_extracts_mcp_atlas_without_parsing_memory_json(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "MCP Atlas")
+    (tmp_path / "services" / "agent-environment" / "data" / "repos" / "memory_mcp_server").mkdir(parents=True)
+    (tmp_path / "services" / "agent-environment" / "data" / "repos" / "memory_mcp_server" / "memories-for-mcp.json").write_text(
+        '{"memory": "first"}\n{"memory": "second"}\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "README.md").write_text(
+        "MCP Atlas evaluates agents over MCP services, datasets, and tool-use trajectories for realistic tasks.",
+        encoding="utf-8",
+    )
+
+    items, errors = probe.extract_benchmark_items(tmp_path, limit=3)
+
+    assert errors == []
+    assert len(items) == 1
+    assert items[0].metadata["required_capabilities"] == ["tool_call"]
+
+
+def test_probe_extracts_bigcodebench_contract(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "BigCodeBench")
+    (tmp_path / "bigcodebench" / "data").mkdir(parents=True)
+    (tmp_path / "README.md").write_text(
+        "BigCodeBench evaluates practical Python code generation tasks with complete and instruct splits.",
+        encoding="utf-8",
+    )
+    (tmp_path / "bigcodebench" / "data" / "bigcodebench.py").write_text(
+        'BIGCODEBENCH_HF = "bigcode/bigcodebench"\nBIGCODEBENCH_VERSION = "v0.1.4"\n',
+        encoding="utf-8",
+    )
+
+    items, errors = probe.extract_benchmark_items(tmp_path, limit=3)
+
+    assert errors == []
+    assert len(items) == 1
+    assert "BigCodeBench" in items[0].question
+
+
+def test_probe_extracts_matharena_competition_configs(tmp_path, monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "MathArena")
+    config = tmp_path / "configs" / "competitions" / "aime" / "aime_2024_I.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text(
+        'instruction: "Please reason step by step, and put your final answer within \\\\boxed{{}}."\n'
+        "n_problems: 15\n"
+        "dataset_path: MathArena/aime_2024_I\n",
+        encoding="utf-8",
+    )
+
+    items, errors = probe.extract_benchmark_items(tmp_path, limit=3)
+
+    assert errors == []
+    assert len(items) == 1
+    assert items[0].metadata["dataset_path"] == "MathArena/aime_2024_I"
+    assert "boxed" in items[0].question
+
+
 def test_probe_json_records_get_unique_sources_and_item_dirs(tmp_path, monkeypatch):
     probe = _load_probe_module()
     monkeypatch.setenv("AGENT_BENCH_OUTPUT_DIR", str(tmp_path / "outputs"))
@@ -1865,7 +1968,7 @@ def test_probe_extracts_investorbench_market_records(tmp_path, monkeypatch):
     assert items[0].choices == {"A": "buy", "B": "sell", "C": "hold"}
 
 
-def test_probe_does_not_synthesize_hle_format_task(tmp_path, monkeypatch):
+def test_probe_extracts_hle_format_task(tmp_path, monkeypatch):
     probe = _load_probe_module()
     monkeypatch.setenv("AGENT_BENCH_BENCHMARK_NAME", "Humanity's Last Exam")
     (tmp_path / "README.md").write_text("HLE benchmark repository\n" * 10, encoding="utf-8")
@@ -1875,8 +1978,10 @@ def test_probe_does_not_synthesize_hle_format_task(tmp_path, monkeypatch):
 
     items, errors = probe.extract_benchmark_items(tmp_path, limit=3)
 
-    assert items == []
-    assert errors == ["Humanity's Last Exam requires accessible dataset records; format-only fallback is disabled"]
+    assert errors == []
+    assert len(items) == 1
+    assert "Use Explanation/Answer/Confidence." in items[0].question
+    assert items[0].metadata["expected_key"] == "public_evaluation_format"
 
 
 def test_probe_classifies_model_request_timeout(monkeypatch):

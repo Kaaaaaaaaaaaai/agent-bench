@@ -1,0 +1,17 @@
+{
+  "schema_version": "agent-bench.benchmark-config.v1",
+  "benchmark_id": "PB_022",
+  "benchmark_slug": "toolathlon",
+  "display_name": "Toolathlon",
+  "source_descriptor": "tasks/toolathlon/manifest.json",
+  "legacy_adapter": "tool_call",
+  "official_conditions": {
+    "official_split": "Toolathlon-Verified public task set",
+    "official_scoring_method": "agent-bench public adapter normalized score",
+    "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+    "official_grader_command": "agent-bench-probe --benchmark \"Toolathlon\" --kind public-benchmark",
+    "official_evaluation_config": "tasks/toolathlon/configs/official.json",
+    "container_requirements": "agent-bench-external:python3.12 launcher image"
+  },
+  "container_command": "bash /benchmark/task/harness/run.sh"
+}

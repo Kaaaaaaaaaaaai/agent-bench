@@ -1,0 +1,47 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_id": "PB_027",
+  "benchmark_slug": "claw-eval",
+  "asset_root": "agent-bench-assets/claw-eval",
+  "source": {
+    "repository_url": "https://github.com/claw-eval/claw-eval.git",
+    "commit": "d3f02d4938ab0832377d90535013def2b1a2fdc0",
+    "dataset_id": "",
+    "dataset_revision": "",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/claw-eval/claw-eval.git",
+      "revision": "d3f02d4938ab0832377d90535013def2b1a2fdc0",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": [
+          "README.md",
+          "tasks",
+          "src",
+          "Dockerfile.agent"
+        ]
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_paths",
+        "required_paths": [
+          "README.md",
+          "tasks",
+          "src",
+          "Dockerfile.agent"
+        ]
+      }
+    ]
+  }
+}

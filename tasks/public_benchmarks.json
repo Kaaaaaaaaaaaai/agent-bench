@@ -105,54 +105,6 @@
     }
   },
   {
-    "id": "PB_005",
-    "type": "external_benchmark",
-    "question": "Run SWE-bench Verified locally through the Docker-backed public benchmark adapter.",
-    "benchmark": {
-      "name": "SWE-bench Verified",
-      "group": "Coding",
-      "capabilities": [
-        "repo_patch"
-      ],
-      "homepage": "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified",
-      "repository": "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified",
-      "dataset_id": "princeton-nlp/SWE-bench_Verified",
-      "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
-      "ref": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
-      "subdir": "",
-      "license": "MIT",
-      "credit": "Princeton NLP and OpenAI SWE-bench Verified authors",
-      "citation": "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified",
-      "adapter": "repo_patch",
-      "official_conditions": {
-        "official_split": "test",
-        "official_scoring_method": "agent-bench public adapter normalized score",
-        "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
-        "official_grader_command": "agent-bench-probe --benchmark \"SWE-bench Verified\" --kind public-benchmark",
-        "official_evaluation_config": "tasks/public_benchmarks.json#PB_005",
-        "container_requirements": "agent-bench-external:python3.12 launcher image"
-      },
-      "assets": [
-        {
-          "source": "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified",
-          "revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
-          "expected_local_path": ".",
-          "validation_rules": {
-            "kind": "huggingface_dataset",
-            "dataset_id": "princeton-nlp/SWE-bench_Verified"
-          }
-        }
-      ],
-      "docker": {
-        "image": "agent-bench-external:python3.12",
-        "setup": [],
-        "command": "agent-bench-probe --benchmark \"SWE-bench Verified\" --kind public-benchmark",
-        "environment": [],
-        "volumes": []
-      }
-    }
-  },
-  {
     "id": "PB_009",
     "type": "external_benchmark",
     "question": "Run codeneedle locally through the Docker-backed public benchmark adapter.",
@@ -505,6 +457,557 @@
         "image": "agent-bench-external:python3.12",
         "setup": [],
         "command": "agent-bench-probe --benchmark \"FinanceMath\" --kind public-benchmark",
+        "environment": [],
+        "volumes": []
+      }
+    }
+  },
+  {
+    "id": "PB_017",
+    "type": "external_benchmark",
+    "question": "Run Terminal-Bench 2.0 locally through the Docker-backed public benchmark adapter.",
+    "benchmark": {
+      "name": "Terminal-Bench 2.0",
+      "group": "Terminal",
+      "capabilities": [
+        "file_artifact"
+      ],
+      "homepage": "https://www.tbench.ai/benchmarks/terminal-bench-2",
+      "repository": "https://github.com/harbor-framework/terminal-bench-2.git",
+      "ref": "2fd12b88aafdd04a52c298e3940bcb189f9766d6",
+      "subdir": "",
+      "license": "Apache-2.0",
+      "credit": "Harbor Framework and Terminal-Bench authors",
+      "citation": "https://www.harborframework.com/docs/tutorials/running-terminal-bench",
+      "adapter": "file_artifact",
+      "official_conditions": {
+        "official_split": "Terminal-Bench 2.0 public task set",
+        "official_scoring_method": "agent-bench public adapter normalized score",
+        "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+        "official_grader_command": "agent-bench-probe --benchmark \"Terminal-Bench 2.0\" --kind public-benchmark",
+        "official_evaluation_config": "tasks/public_benchmarks.json#PB_017",
+        "container_requirements": "agent-bench-external:python3.12 launcher image"
+      },
+      "assets": [
+        {
+          "source": "https://github.com/harbor-framework/terminal-bench-2.git",
+          "revision": "2fd12b88aafdd04a52c298e3940bcb189f9766d6",
+          "expected_local_path": ".",
+          "validation_rules": {
+            "kind": "repository_paths",
+            "required_paths": [
+              "README.md",
+              "adaptive-rejection-sampler",
+              "configure-git-webserver"
+            ]
+          }
+        }
+      ],
+      "docker": {
+        "image": "agent-bench-external:python3.12",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"Terminal-Bench 2.0\" --kind public-benchmark",
+        "environment": [],
+        "volumes": []
+      }
+    }
+  },
+  {
+    "id": "PB_018",
+    "type": "external_benchmark",
+    "question": "Run NL2RepoBench locally through the Docker-backed public benchmark adapter.",
+    "benchmark": {
+      "name": "NL2RepoBench",
+      "group": "Coding",
+      "capabilities": [
+        "chat_answer"
+      ],
+      "homepage": "https://github.com/multimodal-art-projection/NL2RepoBench",
+      "repository": "https://github.com/multimodal-art-projection/NL2RepoBench.git",
+      "ref": "781a1da1ee41fb8edb0bed22f586d69111610edf",
+      "subdir": "",
+      "license": "Unspecified",
+      "credit": "multimodal-art-projection NL2RepoBench authors",
+      "citation": "https://github.com/multimodal-art-projection/NL2RepoBench",
+      "adapter": "chat_answer",
+      "official_conditions": {
+        "official_split": "public repository task set",
+        "official_scoring_method": "agent-bench public adapter normalized score",
+        "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+        "official_grader_command": "agent-bench-probe --benchmark \"NL2RepoBench\" --kind public-benchmark",
+        "official_evaluation_config": "tasks/public_benchmarks.json#PB_018",
+        "container_requirements": "agent-bench-external:python3.12 launcher image"
+      },
+      "assets": [
+        {
+          "source": "https://github.com/multimodal-art-projection/NL2RepoBench.git",
+          "revision": "781a1da1ee41fb8edb0bed22f586d69111610edf",
+          "expected_local_path": ".",
+          "validation_rules": {
+            "kind": "repository_paths",
+            "required_paths": [
+              "readme.md",
+              "test_files",
+              "workspaces"
+            ]
+          }
+        }
+      ],
+      "docker": {
+        "image": "agent-bench-external:python3.12",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"NL2RepoBench\" --kind public-benchmark",
+        "environment": [],
+        "volumes": []
+      }
+    }
+  },
+  {
+    "id": "PB_019",
+    "type": "external_benchmark",
+    "question": "Run DeepSWE locally through the Docker-backed public benchmark adapter.",
+    "benchmark": {
+      "name": "DeepSWE",
+      "group": "Coding",
+      "capabilities": [
+        "repo_patch"
+      ],
+      "homepage": "https://deepswe.datacurve.ai/",
+      "repository": "https://github.com/datacurve-ai/deep-swe.git",
+      "ref": "3cda4081fed96103a6395de39c85e9b20275e307",
+      "subdir": "",
+      "license": "Unspecified",
+      "credit": "DataCurve DeepSWE authors",
+      "citation": "https://github.com/datacurve-ai/deep-swe",
+      "adapter": "repo_patch",
+      "official_conditions": {
+        "official_split": "public Harbor task set",
+        "official_scoring_method": "agent-bench public adapter normalized score",
+        "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+        "official_grader_command": "agent-bench-probe --benchmark \"DeepSWE\" --kind public-benchmark",
+        "official_evaluation_config": "tasks/public_benchmarks.json#PB_019",
+        "container_requirements": "agent-bench-external:python3.12 launcher image"
+      },
+      "assets": [
+        {
+          "source": "https://github.com/datacurve-ai/deep-swe.git",
+          "revision": "3cda4081fed96103a6395de39c85e9b20275e307",
+          "expected_local_path": ".",
+          "validation_rules": {
+            "kind": "repository_paths",
+            "required_paths": [
+              "README.md",
+              "tasks"
+            ]
+          }
+        }
+      ],
+      "docker": {
+        "image": "agent-bench-external:python3.12",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"DeepSWE\" --kind public-benchmark",
+        "environment": [],
+        "volumes": []
+      }
+    }
+  },
+  {
+    "id": "PB_020",
+    "type": "external_benchmark",
+    "question": "Run ProgramBench locally through the Docker-backed public benchmark adapter.",
+    "benchmark": {
+      "name": "ProgramBench",
+      "group": "Coding",
+      "capabilities": [
+        "file_artifact"
+      ],
+      "homepage": "https://programbench.com",
+      "repository": "https://github.com/facebookresearch/ProgramBench.git",
+      "ref": "cadb42d070a7ff7d495e88f9ab61ffba9c73a131",
+      "subdir": "",
+      "license": "MIT",
+      "credit": "Meta/Facebook Research ProgramBench authors",
+      "citation": "https://arxiv.org/abs/2605.03546",
+      "adapter": "file_artifact",
+      "official_conditions": {
+        "official_split": "public test task set",
+        "official_scoring_method": "agent-bench public adapter normalized score",
+        "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+        "official_grader_command": "agent-bench-probe --benchmark \"ProgramBench\" --kind public-benchmark",
+        "official_evaluation_config": "tasks/public_benchmarks.json#PB_020",
+        "container_requirements": "agent-bench-external:python3.12 launcher image"
+      },
+      "assets": [
+        {
+          "source": "https://github.com/facebookresearch/ProgramBench.git",
+          "revision": "cadb42d070a7ff7d495e88f9ab61ffba9c73a131",
+          "expected_local_path": ".",
+          "validation_rules": {
+            "kind": "repository_paths",
+            "required_paths": [
+              "README.md",
+              "src",
+              "docs"
+            ]
+          }
+        }
+      ],
+      "docker": {
+        "image": "agent-bench-external:python3.12",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"ProgramBench\" --kind public-benchmark",
+        "environment": [],
+        "volumes": []
+      }
+    }
+  },
+  {
+    "id": "PB_021",
+    "type": "external_benchmark",
+    "question": "Run MCP Atlas locally through the Docker-backed public benchmark adapter.",
+    "benchmark": {
+      "name": "MCP Atlas",
+      "group": "Tool Use",
+      "capabilities": [
+        "tool_call"
+      ],
+      "homepage": "https://github.com/scaleapi/mcp-atlas",
+      "repository": "https://github.com/scaleapi/mcp-atlas.git",
+      "ref": "c64799a8e4056582c1220e82751c445862a33308",
+      "subdir": "",
+      "license": "MIT",
+      "credit": "Scale AI MCP Atlas authors",
+      "citation": "https://github.com/scaleapi/mcp-atlas",
+      "adapter": "tool_call",
+      "official_conditions": {
+        "official_split": "public MCP service task set",
+        "official_scoring_method": "agent-bench public adapter normalized score",
+        "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+        "official_grader_command": "agent-bench-probe --benchmark \"MCP Atlas\" --kind public-benchmark",
+        "official_evaluation_config": "tasks/public_benchmarks.json#PB_021",
+        "container_requirements": "agent-bench-external:python3.12 launcher image"
+      },
+      "assets": [
+        {
+          "source": "https://github.com/scaleapi/mcp-atlas.git",
+          "revision": "c64799a8e4056582c1220e82751c445862a33308",
+          "expected_local_path": ".",
+          "validation_rules": {
+            "kind": "repository_paths",
+            "required_paths": [
+              "README.md",
+              "run_eval.py",
+              "services",
+              "data_exports"
+            ]
+          }
+        }
+      ],
+      "docker": {
+        "image": "agent-bench-external:python3.12",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"MCP Atlas\" --kind public-benchmark",
+        "environment": [],
+        "volumes": []
+      }
+    }
+  },
+  {
+    "id": "PB_022",
+    "type": "external_benchmark",
+    "question": "Run Toolathlon locally through the Docker-backed public benchmark adapter.",
+    "benchmark": {
+      "name": "Toolathlon",
+      "group": "Tool Use",
+      "capabilities": [
+        "tool_call"
+      ],
+      "homepage": "https://toolathlon.xyz/",
+      "repository": "https://github.com/hkust-nlp/Toolathlon.git",
+      "ref": "b7bbac3f9a1f381b095c878debe1a47dd164ad85",
+      "subdir": "",
+      "license": "Unspecified",
+      "credit": "HKUST NLP Toolathlon authors",
+      "citation": "https://arxiv.org/abs/2510.25726",
+      "adapter": "tool_call",
+      "official_conditions": {
+        "official_split": "Toolathlon-Verified public task set",
+        "official_scoring_method": "agent-bench public adapter normalized score",
+        "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+        "official_grader_command": "agent-bench-probe --benchmark \"Toolathlon\" --kind public-benchmark",
+        "official_evaluation_config": "tasks/public_benchmarks.json#PB_022",
+        "container_requirements": "agent-bench-external:python3.12 launcher image"
+      },
+      "assets": [
+        {
+          "source": "https://github.com/hkust-nlp/Toolathlon.git",
+          "revision": "b7bbac3f9a1f381b095c878debe1a47dd164ad85",
+          "expected_local_path": ".",
+          "validation_rules": {
+            "kind": "repository_paths",
+            "required_paths": [
+              "README.md",
+              "tasks",
+              "eval_client.py"
+            ]
+          }
+        }
+      ],
+      "docker": {
+        "image": "agent-bench-external:python3.12",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"Toolathlon\" --kind public-benchmark",
+        "environment": [],
+        "volumes": []
+      }
+    }
+  },
+  {
+    "id": "PB_023",
+    "type": "external_benchmark",
+    "question": "Run Humanity's Last Exam locally through the Docker-backed public benchmark adapter.",
+    "benchmark": {
+      "name": "Humanity's Last Exam",
+      "group": "Knowledge",
+      "capabilities": [
+        "chat_answer"
+      ],
+      "homepage": "https://lastexam.ai",
+      "repository": "https://github.com/centerforaisafety/hle.git",
+      "ref": "26dca2e253b405105b4c3d8c2f5af06f86f90c66",
+      "subdir": "",
+      "license": "MIT",
+      "credit": "Center for AI Safety Humanity's Last Exam authors",
+      "citation": "https://github.com/centerforaisafety/hle/blob/main/citation.txt",
+      "adapter": "chat_answer",
+      "official_conditions": {
+        "official_split": "public HLE evaluation format",
+        "official_scoring_method": "agent-bench public adapter normalized score",
+        "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+        "official_grader_command": "agent-bench-probe --benchmark \"Humanity's Last Exam\" --kind public-benchmark",
+        "official_evaluation_config": "tasks/public_benchmarks.json#PB_023",
+        "container_requirements": "agent-bench-external:python3.12 launcher image"
+      },
+      "assets": [
+        {
+          "source": "https://github.com/centerforaisafety/hle.git",
+          "revision": "26dca2e253b405105b4c3d8c2f5af06f86f90c66",
+          "expected_local_path": ".",
+          "validation_rules": {
+            "kind": "repository_paths",
+            "required_paths": [
+              "README.md",
+              "hle_eval",
+              "citation.txt"
+            ]
+          }
+        }
+      ],
+      "docker": {
+        "image": "agent-bench-external:python3.12",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"Humanity's Last Exam\" --kind public-benchmark",
+        "environment": [],
+        "volumes": []
+      }
+    }
+  },
+  {
+    "id": "PB_024",
+    "type": "external_benchmark",
+    "question": "Run LongBench locally through the Docker-backed public benchmark adapter.",
+    "benchmark": {
+      "name": "LongBench",
+      "group": "Long Context",
+      "capabilities": [
+        "chat_answer"
+      ],
+      "homepage": "https://longbench2.github.io",
+      "repository": "https://github.com/THUDM/LongBench.git",
+      "ref": "2e00731f8d0bff23dc4325161044d0ed8af94c1e",
+      "subdir": "",
+      "license": "MIT",
+      "credit": "THUDM LongBench authors",
+      "citation": "https://github.com/THUDM/LongBench",
+      "adapter": "chat_answer",
+      "official_conditions": {
+        "official_split": "public benchmark task set",
+        "official_scoring_method": "agent-bench public adapter normalized score",
+        "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+        "official_grader_command": "agent-bench-probe --benchmark \"LongBench\" --kind public-benchmark",
+        "official_evaluation_config": "tasks/public_benchmarks.json#PB_024",
+        "container_requirements": "agent-bench-external:python3.12 launcher image"
+      },
+      "assets": [
+        {
+          "source": "https://github.com/THUDM/LongBench.git",
+          "revision": "2e00731f8d0bff23dc4325161044d0ed8af94c1e",
+          "expected_local_path": ".",
+          "validation_rules": {
+            "kind": "repository_paths",
+            "required_paths": [
+              "README.md",
+              "LongBench",
+              "pred.py"
+            ]
+          }
+        }
+      ],
+      "docker": {
+        "image": "agent-bench-external:python3.12",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"LongBench\" --kind public-benchmark",
+        "environment": [],
+        "volumes": []
+      }
+    }
+  },
+  {
+    "id": "PB_025",
+    "type": "external_benchmark",
+    "question": "Run BigCodeBench locally through the Docker-backed public benchmark adapter.",
+    "benchmark": {
+      "name": "BigCodeBench",
+      "group": "Coding",
+      "capabilities": [
+        "chat_answer"
+      ],
+      "homepage": "https://bigcode-bench.github.io/",
+      "repository": "https://github.com/bigcode-project/bigcodebench.git",
+      "ref": "09dd993f46c3fbf3a799465bb96d524edcb0b199",
+      "subdir": "",
+      "license": "Apache-2.0",
+      "credit": "BigCodeBench authors",
+      "citation": "https://github.com/bigcode-project/bigcodebench/blob/main/CITATION.cff",
+      "adapter": "chat_answer",
+      "official_conditions": {
+        "official_split": "public code generation benchmark task set",
+        "official_scoring_method": "agent-bench public adapter normalized score",
+        "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+        "official_grader_command": "agent-bench-probe --benchmark \"BigCodeBench\" --kind public-benchmark",
+        "official_evaluation_config": "tasks/public_benchmarks.json#PB_025",
+        "container_requirements": "agent-bench-external:python3.12 launcher image"
+      },
+      "assets": [
+        {
+          "source": "https://github.com/bigcode-project/bigcodebench.git",
+          "revision": "09dd993f46c3fbf3a799465bb96d524edcb0b199",
+          "expected_local_path": ".",
+          "validation_rules": {
+            "kind": "repository_paths",
+            "required_paths": [
+              "README.md",
+              "bigcodebench",
+              "run.sh"
+            ]
+          }
+        }
+      ],
+      "docker": {
+        "image": "agent-bench-external:python3.12",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"BigCodeBench\" --kind public-benchmark",
+        "environment": [],
+        "volumes": []
+      }
+    }
+  },
+  {
+    "id": "PB_026",
+    "type": "external_benchmark",
+    "question": "Run MathArena locally through the Docker-backed public benchmark adapter.",
+    "benchmark": {
+      "name": "MathArena",
+      "group": "Math",
+      "capabilities": [
+        "chat_answer"
+      ],
+      "homepage": "https://matharena.ai",
+      "repository": "https://github.com/eth-sri/matharena.git",
+      "ref": "a11194deff8c67a232974a383795e8a2776b4c6f",
+      "subdir": "",
+      "license": "MIT",
+      "credit": "ETH SRI MathArena authors",
+      "citation": "https://matharena.ai",
+      "adapter": "chat_answer",
+      "official_conditions": {
+        "official_split": "public math evaluation task set",
+        "official_scoring_method": "agent-bench public adapter normalized score",
+        "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+        "official_grader_command": "agent-bench-probe --benchmark \"MathArena\" --kind public-benchmark",
+        "official_evaluation_config": "tasks/public_benchmarks.json#PB_026",
+        "container_requirements": "agent-bench-external:python3.12 launcher image"
+      },
+      "assets": [
+        {
+          "source": "https://github.com/eth-sri/matharena.git",
+          "revision": "a11194deff8c67a232974a383795e8a2776b4c6f",
+          "expected_local_path": ".",
+          "validation_rules": {
+            "kind": "repository_paths",
+            "required_paths": [
+              "README.md",
+              "src",
+              "configs"
+            ]
+          }
+        }
+      ],
+      "docker": {
+        "image": "agent-bench-external:python3.12",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"MathArena\" --kind public-benchmark",
+        "environment": [],
+        "volumes": []
+      }
+    }
+  },
+  {
+    "id": "PB_027",
+    "type": "external_benchmark",
+    "question": "Run CLAW-Eval locally through the Docker-backed public benchmark adapter.",
+    "benchmark": {
+      "name": "CLAW-Eval",
+      "group": "Agentic",
+      "capabilities": [
+        "tool_call"
+      ],
+      "homepage": "https://claw-eval.github.io",
+      "repository": "https://github.com/claw-eval/claw-eval.git",
+      "ref": "d3f02d4938ab0832377d90535013def2b1a2fdc0",
+      "subdir": "",
+      "license": "Unspecified",
+      "credit": "CLAW-Eval authors",
+      "citation": "https://github.com/claw-eval/claw-eval",
+      "adapter": "tool_call",
+      "official_conditions": {
+        "official_split": "public agent task set",
+        "official_scoring_method": "agent-bench public adapter normalized score",
+        "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
+        "official_grader_command": "agent-bench-probe --benchmark \"CLAW-Eval\" --kind public-benchmark",
+        "official_evaluation_config": "tasks/public_benchmarks.json#PB_027",
+        "container_requirements": "agent-bench-external:python3.12 launcher image"
+      },
+      "assets": [
+        {
+          "source": "https://github.com/claw-eval/claw-eval.git",
+          "revision": "d3f02d4938ab0832377d90535013def2b1a2fdc0",
+          "expected_local_path": ".",
+          "validation_rules": {
+            "kind": "repository_paths",
+            "required_paths": [
+              "README.md",
+              "tasks",
+              "src",
+              "Dockerfile.agent"
+            ]
+          }
+        }
+      ],
+      "docker": {
+        "image": "agent-bench-external:python3.12",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"CLAW-Eval\" --kind public-benchmark",
         "environment": [],
         "volumes": []
       }

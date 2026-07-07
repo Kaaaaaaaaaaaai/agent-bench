@@ -1,0 +1,45 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_id": "PB_024",
+  "benchmark_slug": "longbench",
+  "asset_root": "agent-bench-assets/longbench",
+  "source": {
+    "repository_url": "https://github.com/THUDM/LongBench.git",
+    "commit": "2e00731f8d0bff23dc4325161044d0ed8af94c1e",
+    "dataset_id": "",
+    "dataset_revision": "",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/THUDM/LongBench.git",
+      "revision": "2e00731f8d0bff23dc4325161044d0ed8af94c1e",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": [
+          "README.md",
+          "LongBench",
+          "pred.py"
+        ]
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_paths",
+        "required_paths": [
+          "README.md",
+          "LongBench",
+          "pred.py"
+        ]
+      }
+    ]
+  }
+}

@@ -45,6 +45,25 @@ docker run --rm -it \
   --judge-provider "same-as-target"
 ```
 
+Run directly from a local checkout against an OpenAI-compatible server on your LAN:
+
+```bash
+curl http://192.168.1.57:8000/v1/models
+
+UV_CACHE_DIR=/private/tmp/uv-cache-agent-bench \
+uv run agent-bench run \
+  --provider openai-compatible \
+  --base-url http://192.168.1.57:8000/v1 \
+  --model <model-id-from-/v1/models> \
+  --request-concurrency 2 \
+  --eval-concurrency 2 \
+  --timeout 180 \
+  --sandbox subprocess \
+  --out runs/local-full
+```
+
+Use `http://`, not `http;/`. The `--model` value should match the model ID returned by `/v1/models`; for example, a verified local run used `gemma-4-E2B` from `http://192.168.1.57:8000/v1/models`. When running the Docker image against a model server on the same host, use `http://host.docker.internal:<port>/v1`; when running from the host checkout, use the server's reachable host or LAN address directly.
+
 Run against Ollama's OpenAI-compatible endpoint:
 
 ```bash
@@ -118,7 +137,7 @@ tasks/<benchmark_id>/
   assets.lock.json
 ```
 
-The active suite currently records 10 public benchmark IDs. Upstream credits, license notes, and citation URLs are recorded in each task folder manifest and summarized in `tasks/README.md`; license metadata is not used as a loader gate.
+The active suite currently records 20 public benchmark IDs. Upstream credits, license notes, and citation URLs are recorded in each task folder manifest and summarized in `tasks/README.md`; license metadata is not used as a loader gate.
 
 Relevant selection controls:
 

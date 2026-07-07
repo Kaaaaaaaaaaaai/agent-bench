@@ -1,0 +1,45 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_id": "PB_022",
+  "benchmark_slug": "toolathlon",
+  "asset_root": "agent-bench-assets/toolathlon",
+  "source": {
+    "repository_url": "https://github.com/hkust-nlp/Toolathlon.git",
+    "commit": "b7bbac3f9a1f381b095c878debe1a47dd164ad85",
+    "dataset_id": "",
+    "dataset_revision": "",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/hkust-nlp/Toolathlon.git",
+      "revision": "b7bbac3f9a1f381b095c878debe1a47dd164ad85",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": [
+          "README.md",
+          "tasks",
+          "eval_client.py"
+        ]
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_paths",
+        "required_paths": [
+          "README.md",
+          "tasks",
+          "eval_client.py"
+        ]
+      }
+    ]
+  }
+}

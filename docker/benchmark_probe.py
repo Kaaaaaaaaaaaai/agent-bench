@@ -12,6 +12,7 @@ import signal
 import socket
 import subprocess
 import shutil
+import tomllib
 import zipfile
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -1722,9 +1723,18 @@ def _specialized_extraction_is_terminal() -> bool:
     benchmark = normalize_text(os.environ.get("AGENT_BENCH_BENCHMARK_NAME", "")).replace("-", " ")
     return benchmark in {
         "biomystery bench",
+        "bigcodebench",
         "codeneedle",
+        "deep swe",
+        "humanity's last exam",
+        "matharena",
+        "mcp atlas",
+        "nl2repobench",
         "paperbench",
+        "programbench",
         "stockbench",
+        "terminal bench 2.0",
+        "terminal bench",
         "finmcp bench",
         "finance agent v2",
         "swe lancer",
@@ -2006,13 +2016,378 @@ def extract_specialized_items(root: Path, limit: int) -> tuple[list[BenchmarkIte
         return extract_investorbench_items(root, limit)
     if benchmark == "PaperBench":
         return extract_paperbench_items(root, limit)
+    if benchmark == "NL2RepoBench":
+        return extract_nl2repobench_items(root, limit)
+    if benchmark == "Terminal-Bench 2.0":
+        return extract_harbor_task_items(root, limit, file_artifact=True)
+    if benchmark == "DeepSWE":
+        return extract_harbor_task_items(root, limit, repo_patch=True)
+    if benchmark == "ProgramBench":
+        return extract_file_artifact_readiness_items(
+            root,
+            limit,
+            benchmark="ProgramBench",
+            asset_candidates=("src", "docs", "README.md"),
+            expected_key="programbench_reconstruction_deliverable",
+        )
+    if benchmark == "MCP Atlas":
+        return extract_mcp_atlas_items(root, limit)
+    if benchmark == "BigCodeBench":
+        return extract_bigcodebench_items(root, limit)
+    if benchmark == "MathArena":
+        return extract_matharena_items(root, limit)
     if benchmark == "SWE-Lancer":
         return extract_swelancer_items(root, limit)
     if benchmark == "QuantCode-Bench":
         return extract_quantcode_items(root, limit)
     if benchmark == "Humanity's Last Exam":
-        return [], ["Humanity's Last Exam requires accessible dataset records; format-only fallback is disabled"]
+        return extract_hle_items(root, limit)
     return [], []
+
+
+def extract_harbor_task_items(
+    root: Path,
+    limit: int,
+    *,
+    repo_patch: bool = False,
+    file_artifact: bool = False,
+) -> tuple[list[BenchmarkItem], list[str]]:
+    items: list[BenchmarkItem] = []
+    errors: list[str] = []
+    for instruction_path in sorted(root.rglob("instruction.md")):
+        if len(items) >= limit:
+            break
+        if any(part in SKIP_DIRS for part in instruction_path.parts):
+            continue
+        task_dir = instruction_path.parent
+        try:
+            instruction = instruction_path.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError as exc:
+            errors.append(f"{_relative_to_root(instruction_path, root)}: {exc}")
+            continue
+        if len(instruction) < 40:
+            continue
+        rel_task_dir = _relative_to_root(task_dir, root)
+        config = _load_toml_file(task_dir / "task.toml")
+        task = _dict_value(config.get("task"))
+        metadata_block = _dict_value(config.get("metadata"))
+        environment = _dict_value(config.get("environment"))
+        verifier = _dict_value(config.get("verifier"))
+        item_id = _first_nonempty_text(
+            metadata_block.get("task_id"),
+            metadata_block.get("ext_id"),
+            task.get("name"),
+            task_dir.name,
+        )
+        title = _first_nonempty_text(metadata_block.get("display_title"), task.get("name"), item_id)
+        repository = _first_nonempty_text(
+            metadata_block.get("repository_url"),
+            metadata_block.get("repo_url"),
+            metadata_block.get("repository"),
+            task.get("repository_url"),
+            task.get("repo_url"),
+        )
+        base_commit = _first_nonempty_text(
+            metadata_block.get("base_commit_hash"),
+            metadata_block.get("base_commit"),
+            metadata_block.get("commit"),
+            task.get("base_commit_hash"),
+            task.get("base_commit"),
+        )
+        row_metadata: dict[str, Any] = {
+            "grading": "task_compliance",
+            "expected_key": "harbor_task_verifier",
+            "item_id": item_id,
+            "task_dir": rel_task_dir,
+            "input_assets": [rel_task_dir],
+        }
+        if config:
+            row_metadata["harbor_task_toml"] = _relative_to_root(task_dir / "task.toml", root)
+        for key, value in (
+            ("display_title", title),
+            ("display_description", metadata_block.get("display_description")),
+            ("language", metadata_block.get("language")),
+            ("category", metadata_block.get("category")),
+            ("docker_image", environment.get("docker_image")),
+            ("verifier_kind", verifier.get("type") or verifier.get("kind")),
+        ):
+            text_value = _first_nonempty_text(value)
+            if text_value:
+                row_metadata[key] = text_value
+        if repo_patch:
+            if not repository or not base_commit:
+                errors.append(
+                    f"{rel_task_dir}: Harbor repo-patch task is missing repository_url or base_commit_hash metadata"
+                )
+                continue
+            row_metadata["required_capabilities"] = ["repo_patch"]
+            row_metadata["target_repo"] = repository
+            row_metadata["base_commit"] = base_commit
+            expected = "A repository patch should satisfy the Harbor verifier for this task."
+        elif file_artifact:
+            row_metadata["required_capabilities"] = ["file_artifact"]
+            expected = "Generated files should satisfy the Harbor verifier for this terminal task."
+        else:
+            expected = "Candidate output should satisfy the Harbor verifier for this task."
+        question = (
+            f"Harbor-format benchmark task: {title}\n\n"
+            f"Task directory: {rel_task_dir}\n\n"
+            f"{instruction}"
+        )
+        items.append(
+            BenchmarkItem(
+                question=truncate(question),
+                expected=expected,
+                source=f"{_relative_to_root(instruction_path, root)}:{item_id}",
+                metadata=row_metadata,
+            )
+        )
+    if not items:
+        errors.append("Harbor-format task directories with instruction.md were not found")
+    return items, errors[:20]
+
+
+def extract_nl2repobench_items(root: Path, limit: int) -> tuple[list[BenchmarkItem], list[str]]:
+    task_root = root / "test_files"
+    if not task_root.is_dir():
+        return [], ["NL2RepoBench test_files directory was not found"]
+    items: list[BenchmarkItem] = []
+    for start_path in sorted(task_root.glob("*/start.md")):
+        if len(items) >= limit:
+            break
+        task_dir = start_path.parent
+        instruction = _read_text_if_exists(start_path).strip()
+        if len(instruction) < 40:
+            continue
+        rel_dir = _relative_to_root(task_dir, root)
+        command_summary = _short_json_file_summary(task_dir / "test_commands.json", "test_commands")
+        file_summary = _short_json_file_summary(task_dir / "test_files.json", "test_files")
+        question = (
+            f"NL2RepoBench repository-construction task for `{task_dir.name}`.\n\n"
+            f"{instruction}\n\n"
+            f"{command_summary}\n\n"
+            f"{file_summary}\n\n"
+            "Describe the implementation plan and final repository contents needed to satisfy the tests."
+        )
+        items.append(
+            BenchmarkItem(
+                question=truncate(question),
+                expected="Candidate answer should satisfy the NL2RepoBench project instruction and referenced tests.",
+                source=f"{_relative_to_root(start_path, root)}:{task_dir.name}",
+                metadata={
+                    "grading": "task_compliance",
+                    "expected_key": "nl2repobench_test_commands",
+                    "task_dir": rel_dir,
+                },
+            )
+        )
+    if not items:
+        return [], ["NL2RepoBench start.md task files were not found"]
+    return items, []
+
+
+def extract_mcp_atlas_items(root: Path, limit: int) -> tuple[list[BenchmarkItem], list[str]]:
+    candidates = (
+        ("README.md", "MCP Atlas benchmark overview"),
+        ("services/mcp_eval/README.md", "MCP Atlas evaluation service"),
+        ("data_exports/README.md", "MCP Atlas exported datasets"),
+    )
+    items: list[BenchmarkItem] = []
+    for relative, title in candidates:
+        if len(items) >= limit:
+            break
+        path = root / relative
+        text = _read_text_if_exists(path).strip()
+        if len(text) < 80:
+            continue
+        question = (
+            f"{title}.\n\n"
+            "Use the available repository tools if helpful, then answer with the task format, "
+            "required MCP/data services, and what a valid agent trajectory should accomplish.\n\n"
+            f"Source: {relative}\n\n{truncate(text, 4200)}"
+        )
+        items.append(
+            BenchmarkItem(
+                question=truncate(question),
+                expected="Candidate answer should accurately describe the MCP Atlas task, services, and success criteria.",
+                source=f"{relative}:mcp-atlas",
+                metadata={
+                    "grading": "task_compliance",
+                    "expected_key": "mcp_atlas_task_contract",
+                    "required_capabilities": ["tool_call"],
+                },
+            )
+        )
+    if not items:
+        return [], ["MCP Atlas evaluation documentation was not found"]
+    return items, []
+
+
+def extract_bigcodebench_items(root: Path, limit: int) -> tuple[list[BenchmarkItem], list[str]]:
+    readme = root / "README.md"
+    loader = root / "bigcodebench" / "data" / "bigcodebench.py"
+    readme_text = _read_text_if_exists(readme).strip()
+    loader_text = _read_text_if_exists(loader).strip()
+    if len(readme_text) < 80 and len(loader_text) < 80:
+        return [], ["BigCodeBench README/data loader was not found"]
+    question = (
+        "BigCodeBench public code-generation benchmark task.\n"
+        "Using the upstream benchmark documentation and data-loader contract below, describe the prompt format, "
+        "expected generated Python code artifact, and evaluation behavior for BigCodeBench-Instruct.\n\n"
+        f"README excerpt:\n{truncate(readme_text, 3600)}\n\n"
+        f"Data-loader excerpt:\n{truncate(loader_text, 2200)}"
+    )
+    return [
+        BenchmarkItem(
+            question=truncate(question),
+            expected=(
+                "Candidate answer should identify BigCodeBench as practical Python code generation, "
+                "the instruct/complete prompt fields, and execution-based pass@k evaluation."
+            ),
+            source="README.md:bigcodebench-contract",
+            metadata={"grading": "task_compliance", "expected_key": "bigcodebench_generation_contract"},
+        )
+    ][:limit], []
+
+
+def extract_matharena_items(root: Path, limit: int) -> tuple[list[BenchmarkItem], list[str]]:
+    config_root = root / "configs" / "competitions"
+    if not config_root.is_dir():
+        return [], ["MathArena competition configs directory was not found"]
+    items: list[BenchmarkItem] = []
+    for path in sorted(config_root.rglob("*.yaml")):
+        if len(items) >= limit:
+            break
+        text = _read_text_if_exists(path)
+        instruction = _yaml_scalar(text, "instruction")
+        dataset_path = _yaml_scalar(text, "dataset_path")
+        n_problems = _yaml_scalar(text, "n_problems")
+        date = _yaml_scalar(text, "date")
+        if not instruction and not dataset_path:
+            continue
+        rel = _relative_to_root(path, root)
+        question = (
+            f"MathArena competition configuration task.\n\n"
+            f"Config: {rel}\n"
+            f"Dataset path: {dataset_path or 'unknown'}\n"
+            f"Problem count: {n_problems or 'unknown'}\n"
+            f"Date: {date or 'unknown'}\n\n"
+            f"Instruction format:\n{instruction or 'No instruction field provided.'}\n\n"
+            "Describe the expected answer format and solve any supplied contest problem using that format."
+        )
+        items.append(
+            BenchmarkItem(
+                question=truncate(question),
+                expected="Candidate answer should follow the MathArena competition instruction and final-answer format.",
+                source=f"{rel}:matharena-config",
+                metadata={
+                    "grading": "task_compliance",
+                    "expected_key": "matharena_competition_instruction",
+                    "dataset_path": dataset_path,
+                },
+            )
+        )
+    if not items:
+        return [], ["MathArena competition YAML configs did not expose benchmark instructions"]
+    return items, []
+
+
+def extract_file_artifact_readiness_items(
+    root: Path,
+    limit: int,
+    *,
+    benchmark: str,
+    asset_candidates: tuple[str, ...],
+    expected_key: str,
+) -> tuple[list[BenchmarkItem], list[str]]:
+    readme = root / "README.md"
+    if not readme.is_file():
+        return [], [f"{benchmark} README.md was not found"]
+    try:
+        readme_text = readme.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError as exc:
+        return [], [f"README.md: {exc}"]
+    input_assets = [candidate for candidate in asset_candidates if (root / candidate).exists()]
+    if not input_assets:
+        return [], [f"{benchmark} did not expose any file-artifact input assets"]
+    question = (
+        f"{benchmark} public benchmark file-artifact task.\n"
+        "Use the provided benchmark repository assets to prepare the requested deliverable in the output directory. "
+        "The excerpt below describes the upstream task format and expected submission behavior.\n\n"
+        f"{truncate(readme_text, 4200)}"
+    )
+    return [
+        BenchmarkItem(
+            question=truncate(question),
+            expected="Generated artifacts should satisfy the public benchmark deliverable requirements.",
+            source="README.md:file-artifact-readiness",
+            metadata={
+                "grading": "task_compliance",
+                "expected_key": expected_key,
+                "input_assets": input_assets,
+                "required_capabilities": ["file_artifact"],
+            },
+        )
+    ][:limit], []
+
+
+def _load_toml_file(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        return tomllib.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return {}
+
+
+def _dict_value(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _first_nonempty_text(*values: Any) -> str:
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def _read_text_if_exists(path: Path) -> str:
+    if not path.is_file():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _short_json_file_summary(path: Path, label: str) -> str:
+    if not path.is_file():
+        return f"{label}: not found"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except Exception as exc:
+        return f"{label}: could not parse ({exc})"
+    return f"{label}:\n{truncate(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), 2200)}"
+
+
+def _yaml_scalar(text: str, key: str) -> str:
+    match = re.search(rf"(?m)^{re.escape(key)}:\s*(.+?)\s*$", text)
+    if not match:
+        return ""
+    value = match.group(1).strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1]
+    return value.replace("\\n", "\n").strip()
+
+
+def _relative_to_root(path: Path, root: Path) -> str:
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
 
 
 def extract_biomystery_items(root: Path, limit: int) -> tuple[list[BenchmarkItem], list[str]]:
