@@ -72,7 +72,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
         dest="tool_parser",
         type=normalize_parser_name,
-        help="Tool-call parser for OpenAI-compatible responses; accepts vLLM-style names such as hermes, longcat, xlam, functiongemma, pythonic, and olmo3.",
+        help=(
+            "Tool-call parser for OpenAI-compatible responses; accepts vLLM-style names "
+            "such as qwen3, seed_oss, minimax_m2, gemma4, kimi_k2, glm47_moe, "
+            "hermes, longcat, xlam, functiongemma, pythonic, and olmo3."
+        ),
     )
     run.add_argument("--context-window", type=int, default=None)
     run.add_argument("--stop", action="append", default=None)
