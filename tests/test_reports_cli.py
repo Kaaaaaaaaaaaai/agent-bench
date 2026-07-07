@@ -12,7 +12,11 @@ from agent_bench.statuses import status_info
 
 def test_render_summary_html_contains_radar_svg():
     summary = {
-        "metadata": {"model": "mock", "created_at_utc": "2026-01-01T00:00:00+00:00"},
+        "metadata": {
+            "model": "mock",
+            "created_at_utc": "2026-01-01T00:00:00+00:00",
+            "git_commit": "abc123def4567890",
+        },
         "total_score": 50.0,
         "pass_rate": 50.0,
         "coding_pass_rate": None,
@@ -42,14 +46,32 @@ def test_render_summary_html_contains_radar_svg():
                 "group": "Coding",
                 "benchmark": "ExampleBench",
                 "score": 75.0,
+                "raw_score": 50.0,
+                "valid_score": 75.0,
                 "passed": False,
+                "status": "failed_model_answer",
+                "run_status": "completed",
+                "score_status": "failed_model_answer",
+                "included_in_official_score": True,
                 "homepage": "https://example.com",
                 "citation": "https://example.com/citation",
                 "license": "MIT",
                 "credit": "Example authors",
                 "file_count_sampled": 5,
                 "model_eval": {"answer": "B", "expected": "A", "question": "Pick the best fix."},
-            }
+            },
+            {
+                "group": "Coding",
+                "benchmark": "AssetBench",
+                "score": 0.0,
+                "status": "failed_missing_assets",
+                "run_status": "skipped",
+                "score_status": "not_applicable",
+                "included_in_official_score": False,
+                "blocker_type": "missing_asset",
+                "error": "Required benchmark assets are missing.",
+                "homepage": "https://assets.example.com",
+            },
         ],
     }
     html = render_summary_html(
@@ -73,31 +95,48 @@ def test_render_summary_html_contains_radar_svg():
         ],
     )
 
-    assert "Radar Chart" in html
-    assert "Benchmark Scores" in html
-    assert "Credits Citations Licenses" in html
+    assert "Result Summary" in html
+    assert "Benchmark Coverage" in html
+    assert "Benchmark Score Breakdown" in html
+    assert "Run Metadata" in html
+    assert "Non-Model Run Errors" in html
+    assert "Benchmark Citations" in html
     assert "Evaluation Methodology" not in html
     assert "ExampleBench" in html
-    assert "https://example.com/citation" in html
-    assert "<th>Status</th><th>Raw Score</th><th>Normalized 0-100</th>" in html
-    assert "<th>Image</th><th>Container</th><th>Network</th>" in html
-    assert "<th>Missing Tools</th><th>Missing Env</th><th>Missing Assets</th>" in html
-    assert "<th>Asset Cache</th><th>Setup Details</th>" in html
-    assert "<th>Benchmark</th><th>Status Code</th><th>Failure Class</th>" in html
-    assert "<th>Benchmark</th><th>Homepage</th><th>Repository/Dataset Ref</th>" in html
-    assert html.rfind("Credits Citations Licenses") > html.rfind("Failures And Status")
+    assert "AssetBench" in html
+    citation_catalog = Path("tasks/benchmark_citations.bib").read_text(encoding="utf-8")
+    assert html.count("@misc{") == citation_catalog.count("@misc{")
+    assert "@misc{bigcodebench" in html
+    assert "@misc{toolathlon" in html
+    assert html.count('<pre class="bibtex">') == 1
+    assert "max-height: 180px" in html
+    assert "overflow-y: auto" in html
+    assert "compact scrollable code section" in html
+    assert Path("tasks/benchmark_citations.bib").exists()
+    assert "Commit:" not in html
+    assert "<th>Normalized 0-100</th><th>Raw Score</th><th>Valid Score</th>" in html
+    assert "<th>Capabilities</th>" not in html
+    assert "<th>Tools</th>" not in html
+    assert "<th>Artifacts</th>" not in html
+    assert "<th>Notes</th>" not in html
+    assert "<th>Benchmark</th><th>Failure Class</th><th>Status</th>" in html
+    assert "<th>Benchmark</th><th>Container</th><th>Network</th>" not in html
+    assert "benchmark_setup" in html
+    assert html.rfind("Benchmark Citations") > html.rfind("Non-Model Run Errors")
     assert "<th>Benchmark</th><th>Category</th><th>Score</th>" not in html
     assert "<th>Method</th><th>Status</th>" not in html
     assert "<th>Method</th><th>Answer</th>" not in html
     assert "<th>Method</th><th>Expected</th>" not in html
     assert "<th>Kind</th>" not in html
-    assert "<h2>Metadata</h2>" in html
+    assert '<section class="section-block" id="result-summary">' in html
+    assert '<section class="section-block" id="benchmark-coverage">' in html
+    assert '<section class="section-block" id="benchmark-score-breakdown">' in html
     assert "Timing By Problem" not in html
     assert "TTFT" not in html
     assert "Tokens/s" not in html
     assert "Output Tokens" not in html
     assert "Scored-Suite Score" in html
-    assert "Conservative selected-suite" in html
+    assert "Conservative score" in html
     assert "Overall Score" not in html
     assert '<svg viewBox="0 0 320 260"' in html
     assert "alpha" in html
@@ -273,12 +312,12 @@ def test_cli_mock_smoke_runs_all_bundled_benchmarks(tmp_path, monkeypatch):
     assert summary["conservative_all_suite_score"] == pytest.approx(16 / 20)
     assert "public_benchmarks" not in html
     assert "SWE-bench" in html
-    assert "Failures And Status" in html
+    assert "Non-Model Run Errors" in html
     assert "Humanity&#x27;s Last Exam" in html
     assert "EDINET-Bench" not in html
     assert "MLE-bench" not in html
-    assert "Credits Citations Licenses" in html
-    assert "<th>Status</th><th>Raw Score</th><th>Normalized 0-100</th>" in html
+    assert "Benchmark Citations" in html
+    assert "<th>Normalized 0-100</th><th>Raw Score</th><th>Valid Score</th>" in html
 
 
 def test_aggregate_results_emits_timing_breakdowns():
