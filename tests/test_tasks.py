@@ -11,7 +11,6 @@ REPO_TASKS_DIR = Path(__file__).resolve().parents[1] / "tasks"
 ACTIVE_IDS = [
     "PB_001",
     "PB_004",
-    "PB_005",
     "PB_009",
     "PB_010",
     "PB_011",
@@ -19,11 +18,21 @@ ACTIVE_IDS = [
     "PB_013",
     "PB_015",
     "PB_016",
+    "PB_017",
+    "PB_018",
+    "PB_019",
+    "PB_020",
+    "PB_021",
+    "PB_022",
+    "PB_023",
+    "PB_024",
+    "PB_025",
+    "PB_026",
+    "PB_027",
 ]
 ACTIVE_NAMES = [
     "SWE-bench",
     "SWE-Lancer",
-    "SWE-bench Verified",
     "codeneedle",
     "StockBench",
     "InvestorBench",
@@ -31,6 +40,17 @@ ACTIVE_NAMES = [
     "FinMCP-Bench",
     "Finance Agent v2",
     "FinanceMath",
+    "Terminal-Bench 2.0",
+    "NL2RepoBench",
+    "DeepSWE",
+    "ProgramBench",
+    "MCP Atlas",
+    "Toolathlon",
+    "Humanity's Last Exam",
+    "LongBench",
+    "BigCodeBench",
+    "MathArena",
+    "CLAW-Eval",
 ]
 
 
@@ -175,10 +195,10 @@ def test_bundled_benchmark_folders_are_external_tasks_with_credits():
     loaded = load_tasks(REPO_TASKS_DIR)
     loaded_ids = [task.id for task in loaded]
 
-    assert len(legacy_tasks) == 10
+    assert len(legacy_tasks) == 20
     assert [task["id"] for task in legacy_tasks] == ACTIVE_IDS
-    assert len(registry) == 10
-    assert len(loaded) == 10
+    assert len(registry) == 20
+    assert len(loaded) == 20
     assert loaded_ids == ACTIVE_IDS
     assert [task.benchmark["name"] for task in loaded] == ACTIVE_NAMES
     assert all(Path(task.source).name == "manifest.json" for task in loaded)
@@ -188,16 +208,21 @@ def test_bundled_benchmark_folders_are_external_tasks_with_credits():
     assert all(task.benchmark.get("citation") for task in loaded)
     assert "public_benchmarks" not in {task.category for task in loaded}
     assert {task.category for task in loaded} == {
+        "Agentic",
         "Coding",
         "Finance",
+        "Knowledge",
         "Long Context",
+        "Math",
+        "Terminal",
+        "Tool Use",
     }
 
 
 def test_full_active_profile_selects_all_current_public_benchmarks():
     loaded = load_tasks(REPO_TASKS_DIR, profile="full_active")
 
-    assert len(loaded) == 10
+    assert len(loaded) == 20
     assert [task.id for task in loaded] == ACTIVE_IDS
 
 

@@ -1,16 +1,16 @@
 {
   "schema_version": "agent-bench.benchmark-config.v1",
-  "benchmark_id": "PB_005",
-  "benchmark_slug": "swe-bench-verified",
-  "display_name": "SWE-bench Verified",
-  "source_descriptor": "tasks/swe-bench-verified/manifest.json",
+  "benchmark_id": "PB_019",
+  "benchmark_slug": "deep-swe",
+  "display_name": "DeepSWE",
+  "source_descriptor": "tasks/deep-swe/manifest.json",
   "legacy_adapter": "repo_patch",
   "official_conditions": {
-    "official_split": "test",
+    "official_split": "public Harbor task set",
     "official_scoring_method": "agent-bench public adapter normalized score",
     "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
-    "official_grader_command": "agent-bench-probe --benchmark \"SWE-bench Verified\" --kind public-benchmark",
-    "official_evaluation_config": "tasks/swe-bench-verified/configs/official.json",
+    "official_grader_command": "agent-bench-probe --benchmark \"DeepSWE\" --kind public-benchmark",
+    "official_evaluation_config": "tasks/deep-swe/configs/official.json",
     "container_requirements": "agent-bench-external:python3.12 launcher image"
   },
   "container_command": "bash /benchmark/task/harness/run.sh"

@@ -1,0 +1,45 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_id": "PB_017",
+  "benchmark_slug": "terminal-bench",
+  "asset_root": "agent-bench-assets/terminal-bench",
+  "source": {
+    "repository_url": "https://github.com/harbor-framework/terminal-bench-2.git",
+    "commit": "2fd12b88aafdd04a52c298e3940bcb189f9766d6",
+    "dataset_id": "",
+    "dataset_revision": "",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/harbor-framework/terminal-bench-2.git",
+      "revision": "2fd12b88aafdd04a52c298e3940bcb189f9766d6",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": [
+          "README.md",
+          "adaptive-rejection-sampler",
+          "configure-git-webserver"
+        ]
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_paths",
+        "required_paths": [
+          "README.md",
+          "adaptive-rejection-sampler",
+          "configure-git-webserver"
+        ]
+      }
+    ]
+  }
+}

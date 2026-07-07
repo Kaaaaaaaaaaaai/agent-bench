@@ -1,0 +1,47 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_id": "PB_021",
+  "benchmark_slug": "mcp-atlas",
+  "asset_root": "agent-bench-assets/mcp-atlas",
+  "source": {
+    "repository_url": "https://github.com/scaleapi/mcp-atlas.git",
+    "commit": "c64799a8e4056582c1220e82751c445862a33308",
+    "dataset_id": "",
+    "dataset_revision": "",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/scaleapi/mcp-atlas.git",
+      "revision": "c64799a8e4056582c1220e82751c445862a33308",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": [
+          "README.md",
+          "run_eval.py",
+          "services",
+          "data_exports"
+        ]
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_paths",
+        "required_paths": [
+          "README.md",
+          "run_eval.py",
+          "services",
+          "data_exports"
+        ]
+      }
+    ]
+  }
+}

@@ -1,39 +1,43 @@
 {
   "version": "agent-bench.manifest.v1",
-  "id": "PB_005",
-  "display_name": "SWE-bench Verified",
+  "id": "PB_025",
+  "display_name": "BigCodeBench",
   "task_group": "Coding",
-  "description": "Run SWE-bench Verified locally through the Docker-backed public benchmark adapter.",
-  "homepage_url": "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified",
+  "description": "Run BigCodeBench locally through the Docker-backed public benchmark adapter.",
+  "homepage_url": "https://bigcode-bench.github.io/",
   "official_leaderboard_url": "",
   "source": {
-    "repository_url": "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified",
-    "commit": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
-    "dataset_id": "princeton-nlp/SWE-bench_Verified",
-    "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+    "repository_url": "https://github.com/bigcode-project/bigcodebench.git",
+    "commit": "09dd993f46c3fbf3a799465bb96d524edcb0b199",
+    "dataset_id": "",
+    "dataset_revision": "",
     "subdir": ""
   },
-  "license": "MIT",
-  "credit": "Princeton NLP and OpenAI SWE-bench Verified authors",
-  "citation": "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified",
+  "license": "Apache-2.0",
+  "credit": "BigCodeBench authors",
+  "citation": "https://github.com/bigcode-project/bigcodebench/blob/main/CITATION.cff",
   "official_conditions": {
-    "official_split": "test",
+    "official_split": "public code generation benchmark task set",
     "official_scoring_method": "agent-bench public adapter normalized score",
     "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
-    "official_grader_command": "agent-bench-probe --benchmark \"SWE-bench Verified\" --kind public-benchmark",
-    "official_evaluation_config": "tasks/swe-bench-verified/configs/official.json",
+    "official_grader_command": "agent-bench-probe --benchmark \"BigCodeBench\" --kind public-benchmark",
+    "official_evaluation_config": "tasks/bigcodebench/configs/official.json",
     "container_requirements": "agent-bench-external:python3.12 launcher image"
   },
   "assets": [
     {
-      "source": "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified",
-      "revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+      "source": "https://github.com/bigcode-project/bigcodebench.git",
+      "revision": "09dd993f46c3fbf3a799465bb96d524edcb0b199",
       "checksum": "",
       "expected_local_path": ".",
       "required": true,
       "validation_rules": {
-        "kind": "huggingface_dataset",
-        "dataset_id": "princeton-nlp/SWE-bench_Verified"
+        "kind": "repository_paths",
+        "required_paths": [
+          "README.md",
+          "bigcodebench",
+          "run.sh"
+        ]
       }
     }
   ],
@@ -69,12 +73,12 @@
   },
   "reporting": {
     "category_label": "Coding",
-    "display_order": 3,
-    "credit": "Princeton NLP and OpenAI SWE-bench Verified authors",
-    "citation": "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified",
-    "license": "MIT"
+    "display_order": 25,
+    "credit": "BigCodeBench authors",
+    "citation": "https://github.com/bigcode-project/bigcodebench/blob/main/CITATION.cff",
+    "license": "Apache-2.0"
   },
   "capabilities": [
-    "repo_patch"
+    "chat_answer"
   ]
 }

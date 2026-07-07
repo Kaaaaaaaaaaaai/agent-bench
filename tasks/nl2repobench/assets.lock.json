@@ -1,0 +1,45 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_id": "PB_018",
+  "benchmark_slug": "nl2repobench",
+  "asset_root": "agent-bench-assets/nl2repobench",
+  "source": {
+    "repository_url": "https://github.com/multimodal-art-projection/NL2RepoBench.git",
+    "commit": "781a1da1ee41fb8edb0bed22f586d69111610edf",
+    "dataset_id": "",
+    "dataset_revision": "",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/multimodal-art-projection/NL2RepoBench.git",
+      "revision": "781a1da1ee41fb8edb0bed22f586d69111610edf",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": [
+          "readme.md",
+          "test_files",
+          "workspaces"
+        ]
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_paths",
+        "required_paths": [
+          "readme.md",
+          "test_files",
+          "workspaces"
+        ]
+      }
+    ]
+  }
+}
