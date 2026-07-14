@@ -93,6 +93,13 @@ Supported local parser names include:
 
 - `openai-native`: OpenAI-compatible `message.tool_calls`.
 - `vllm-compatible`: OpenAI-style `tool_calls` plus legacy `message.function_call`.
+- `qwen3` / `nemotron-v3`: vLLM Qwen3 XML calls such as `<tool_call><function=name><parameter=key>value</parameter></function></tool_call>`.
+- `seed-oss`: Seed OSS Qwen3-style XML calls using `<seed:tool_call>...</seed:tool_call>`.
+- `minimax-m2`: MiniMax M2 `<minimax:tool_call>` blocks containing `<invoke name="...">` and `<parameter name="...">` tags.
+- `glm47-moe`: GLM-4.7 calls such as `<tool_call>name<arg_key>key</arg_key><arg_value>value</arg_value></tool_call>`.
+- `gemma4`: Gemma4 calls such as `<|tool_call>call:name{key:<|"|>value<|"|>}<tool_call|>`.
+- `kimi-k2`: Kimi K2 `<|tool_call_begin|>functions.name:N` sections with JSON arguments.
+- `harmony`: GPT-OSS/Harmony native `tool_calls`, legacy `function_call`, and raw Harmony message fallbacks.
 - `hermes` / `qwen3.5`: Hermes/Qwen tagged JSON such as `<tool_call>{"name":"...","arguments":{...}}</tool_call>`.
 - `longcat`: LongCat tagged JSON using `<longcat_tool_call>...</longcat_tool_call>`.
 - `xlam`: JSON-array tool calls, including code blocks, `[TOOL_CALLS]`, `<tool_call>`, and post-`</think>` JSON.
@@ -100,9 +107,9 @@ Supported local parser names include:
 - `pythonic`: Python-call lists such as `[tool_name(arg='value')]`.
 - `olmo3`: Olmo 3 `<function_calls>...</function_calls>` blocks with newline-separated Pythonic calls.
 - `json-in-content`: fallback JSON object or array parsing from assistant content.
-- `none`: disable text-call parsing.
+- `none`: disable tool-call parsing.
 
-Several vLLM parser names normalize to these local parsers for convenience, including `openai`, `qwen`, `qwen2.5`, `qwen3_xml`, `llama3_json`, `llama4_pythonic`, `granite`, `granite4`, `granite-20b-fc`, `internlm`, `jamba`, `mistral`, `deepseek_v3`, `deepseek_v31`, `kimi_k2`, `hunyuan_a13b`, `cohere_command3`, `glm45`, `glm47`, `gigachat3`, and `apertus`. This is intentionally narrower than vLLM's server-side parser system: Agent Bench parses completed OpenAI-compatible responses and text fallbacks, but it does not install vLLM chat templates, reasoning parsers, or parser plugins. If vLLM itself is launched with `--enable-auto-tool-choice --tool-call-parser ...`, it will usually return native `tool_calls`, and Agent Bench will record them without needing a matching local parser. See the vLLM tool-calling reference for server-side flags and model-specific chat templates: https://docs.vllm.ai/en/stable/features/tool_calling/
+Several vLLM parser names normalize to these local parsers for convenience, including `openai`, `qwen`, `qwen2.5`, `qwen3`, `qwen3.6`, `qwen3_xml`, `seed_oss`, `nemotron_v3`, `minimax_m2`, `gemma4`, `kimi_k2`, `glm47_moe`, `glm47`, `gpt_oss`, `llama3_json`, `llama4_pythonic`, `granite`, `granite4`, `granite-20b-fc`, `internlm`, `jamba`, `mistral`, `deepseek_v3`, `deepseek_v31`, `hunyuan_a13b`, `cohere_command3`, `glm45`, `gigachat3`, and `apertus`. This is intentionally narrower than vLLM's server-side parser system: Agent Bench parses completed OpenAI-compatible responses and text fallbacks, but it does not install vLLM chat templates, reasoning parsers, or parser plugins. If vLLM itself is launched with `--enable-auto-tool-choice --tool-call-parser ...`, it will usually return native `tool_calls`, and Agent Bench will record them without needing a matching local parser. See the vLLM tool-calling reference for server-side flags and model-specific chat templates: https://docs.vllm.ai/en/stable/features/tool_calling/
 
 ## Timeouts For Local Models
 

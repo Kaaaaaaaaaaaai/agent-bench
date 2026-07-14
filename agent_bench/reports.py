@@ -799,6 +799,9 @@ def _report_metadata_section(summary: dict[str, Any], metadata: dict[str, Any]) 
     target = _target_metadata(metadata)
     judge = _judge_metadata(metadata)
     rows = {
+        "schema_version": summary.get("schema_version"),
+        "benchmark_version": summary.get("benchmark_version"),
+        "selected_profile": summary.get("selected_profile"),
         "run_id": metadata.get("run_id"),
         "created_at_utc": metadata.get("created_at_utc"),
         "output_dir": metadata.get("output_dir"),
@@ -823,6 +826,10 @@ def _report_metadata_section(summary: dict[str, Any], metadata: dict[str, Any]) 
         "judge_model": judge.get("model"),
         "judge_timeout": judge.get("timeout_seconds"),
         "judge_fallback_used": judge.get("fallback_used"),
+        "request_concurrency": metadata.get("request_concurrency"),
+        "eval_concurrency": metadata.get("eval_concurrency"),
+        "timeout_seconds": metadata.get("timeout"),
+        "sandbox": metadata.get("sandbox"),
         "allow_host_docker_socket": metadata.get("allow_host_docker_socket"),
         "git_commit": metadata.get("git_commit"),
     }
