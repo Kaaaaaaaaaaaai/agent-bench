@@ -77,7 +77,15 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--context-window", type=int, default=None)
     run.add_argument("--stop", action="append", default=None)
     run.add_argument("--json-mode", choices=["auto", "on", "off"], default="auto")
-    run.add_argument("--sandbox", choices=["docker", "subprocess"], default="docker")
+    run.add_argument(
+        "--sandbox",
+        choices=["docker", "subprocess"],
+        default="docker",
+        help=(
+            "Coding evaluator isolation. Docker is the secure default; subprocess executes "
+            "model-generated code directly on the host and is intended only for trusted tests."
+        ),
+    )
     run.add_argument("--sandbox-image", default="agent-bench-python:3.12")
     run.add_argument("--external-launcher-image", default="agent-bench-external:python3.12")
     run.add_argument(
@@ -89,8 +97,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--allow-host-docker-socket",
         action="store_true",
         help=(
-            "Deprecated no-op kept for compatibility. Host Docker socket mounts are controlled by "
-            "benchmark manifests."
+            "Allow trusted benchmark manifests to mount the host Docker socket. This grants "
+            "root-equivalent host access and is disabled by default."
         ),
     )
     run.add_argument("--judge-provider", choices=["openai-compatible", "same-as-target", "none"], default="none")
@@ -119,6 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "run":
         if args.provider == "openai-compatible" and (not args.base_url or not args.model):
             parser.error("--base-url and --model are required for --provider openai-compatible")
+        _validate_cli_arguments(parser, args)
         _validate_cli_runtime_path(parser, Path(args.out), Path("runs"), "--out")
         _validate_cli_runtime_path(parser, Path(args.asset_root), Path("agent-bench-assets"), "--asset-root")
         include = _split_selectors(args.include)
@@ -221,6 +230,33 @@ def _validate_cli_runtime_path(
     if candidate == root or candidate.is_relative_to(root):
         return
     parser.error(f"{flag} must be under ./{allowed_relative_root.as_posix()}/")
+
+
+def _validate_cli_arguments(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    positive_values = {
+        "--request-concurrency": args.request_concurrency,
+        "--eval-concurrency": args.eval_concurrency,
+        "--timeout": args.timeout,
+        "--external-timeout": args.external_timeout,
+        "--model-request-timeout": args.model_request_timeout,
+        "--max-tokens": args.max_tokens,
+        "--judge-timeout": args.judge_timeout,
+    }
+    if args.context_window is not None:
+        positive_values["--context-window"] = args.context_window
+    for flag, value in positive_values.items():
+        if value <= 0:
+            parser.error(f"{flag} must be positive")
+    for flag, value in {
+        "--max-retries": args.max_retries,
+        "--judge-max-retries": args.judge_max_retries,
+    }.items():
+        if value < 0:
+            parser.error(f"{flag} must be non-negative")
+    if args.limit is not None and args.limit < 0:
+        parser.error("--limit must be non-negative")
+    if args.top_p is not None and not 0 < args.top_p <= 1:
+        parser.error("--top-p must be greater than 0 and at most 1")
 
 
 if __name__ == "__main__":

@@ -62,6 +62,8 @@ uv run agent-bench run \
   --out runs/local-full
 ```
 
+`--sandbox subprocess` executes model-generated coding answers directly on the host and is not a security boundary. Use it only with trusted output; keep the default Docker sandbox for untrusted models.
+
 Use `http://`, not `http;/`. The `--model` value should match the model ID returned by `/v1/models`; for example, a verified local run used `gemma-4-E2B` from `http://192.168.1.57:8000/v1/models`. When running the Docker image against a model server on the same host, use `http://host.docker.internal:<port>/v1`; when running from the host checkout, use the server's reachable host or LAN address directly.
 
 Run against Ollama's OpenAI-compatible endpoint:
@@ -215,4 +217,4 @@ Those values are written into `raw_responses.jsonl`, `graded_results.jsonl`, `re
 
 The default coding evaluator runs generated Python inside Docker with no network, memory and process limits, a read-only `/work` mount, and a timeout. The benchmark runner container needs the Docker socket mount so it can launch those evaluator containers, and it needs the shared `/tmp/agent-bench-sandboxes` mount so the host Docker daemon can read generated harness files.
 
-External benchmark suites run in separate disposable containers. The runner drops capabilities, uses `no-new-privileges`, applies pids/memory/CPU/timeout options where configured, mounts the asset cache read-only, and copies outputs back before removing the container. Host Docker socket access is mounted only when a benchmark manifest declares `requires_host_docker_socket`. The older `--allow-host-docker-socket` flag is deprecated and accepted only for script compatibility.
+External benchmark suites run in separate disposable containers. The runner drops capabilities, uses `no-new-privileges`, applies pids/memory/CPU/timeout options where configured, mounts the asset cache read-only, and copies outputs back before removing the container. Host Docker socket access is mounted only when a benchmark manifest declares `requires_host_docker_socket` and the operator explicitly passes `--allow-host-docker-socket`. Treat that opt-in as root-equivalent host access and use it only with trusted manifests and harnesses.

@@ -11,6 +11,8 @@ from typing import Any
 
 from agent_bench.models import Task
 
+MAX_SANDBOX_OUTPUT_BYTES = 8 * 1024 * 1024
+
 
 @dataclass(slots=True)
 class SandboxResult:
@@ -91,7 +93,7 @@ class DockerSandbox(BaseSandbox):
 
 
 class SubprocessSandbox(BaseSandbox):
-    """Local sandbox for tests and explicit non-Docker runs."""
+    """Unsafe local executor for trusted tests; this does not isolate candidate code."""
 
     async def run(self, task: Task, code: str, timeout_seconds: float) -> SandboxResult:
         return await asyncio.to_thread(self._run_sync, task, code, timeout_seconds)
@@ -150,24 +152,26 @@ def _run_command(
     total_cases: int,
     cwd: Path | None = None,
 ) -> SandboxResult:
-    try:
-        completed = subprocess.run(
-            command,
-            cwd=cwd,
-            text=True,
-            capture_output=True,
-            timeout=timeout_seconds,
-            check=False,
-        )
-    except subprocess.TimeoutExpired:
-        return SandboxResult(
-            passed_cases=0,
-            total_cases=total_cases,
-            error=f"Execution timed out after {timeout_seconds:.1f}s",
-            timed_out=True,
-        )
+    with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=cwd,
+                stdout=stdout_file,
+                stderr=stderr_file,
+                timeout=timeout_seconds,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return SandboxResult(
+                passed_cases=0,
+                total_cases=total_cases,
+                error=f"Execution timed out after {timeout_seconds:.1f}s",
+                timed_out=True,
+            )
+        stdout = _read_output_tail(stdout_file).strip()
+        stderr = _read_output_tail(stderr_file).strip()
 
-    stdout = completed.stdout.strip()
     if stdout:
         try:
             payload = json.loads(stdout.splitlines()[-1])
@@ -181,9 +185,15 @@ def _run_command(
         except (TypeError, ValueError, json.JSONDecodeError):
             pass
 
-    stderr = completed.stderr.strip()
     error = stderr or stdout or f"Sandbox process exited with code {completed.returncode}"
     return SandboxResult(passed_cases=0, total_cases=total_cases, error=error)
+
+
+def _read_output_tail(handle: Any, limit: int = MAX_SANDBOX_OUTPUT_BYTES) -> str:
+    handle.flush()
+    size = handle.seek(0, os.SEEK_END)
+    handle.seek(max(0, size - limit))
+    return handle.read(limit).decode("utf-8", errors="replace")
 
 
 HARNESS_CODE = r'''

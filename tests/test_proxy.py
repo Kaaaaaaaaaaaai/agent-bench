@@ -2,7 +2,16 @@ import io
 import json
 from subprocess import CompletedProcess
 
-from agent_bench.proxy import JsonlRecorder, OpenAIProxyConfig, OpenAIRecordingProxy, _CURL_STATUS_MARKER
+import httpx
+
+from agent_bench.proxy import (
+    JsonlRecorder,
+    OpenAIProxyConfig,
+    OpenAIRecordingProxy,
+    _CURL_STATUS_MARKER,
+    redact_secrets,
+    redact_url,
+)
 
 
 def test_openai_recording_proxy_forwards_and_records_redacted_jsonl(tmp_path):
@@ -20,7 +29,7 @@ def test_openai_recording_proxy_forwards_and_records_redacted_jsonl(tmp_path):
         fake_client = _FakeClient()
         proxy._client = fake_client
         handler = _FakeHandler(
-            path="/v1/chat/completions",
+            path=f"{proxy._url_prefix}/v1/chat/completions",
             headers={"Content-Length": "106", "X-Agent-Bench-Benchmark-Id": "bench_1"},
             body={
                 "model": "example-model",
@@ -73,7 +82,7 @@ def test_openai_recording_proxy_uses_curl_fallback(tmp_path, monkeypatch):
         )
         proxy._client = _FailingClient()
         handler = _FakeHandler(
-            path="/v1/chat/completions",
+            path=f"{proxy._url_prefix}/v1/chat/completions",
             headers={"Content-Length": "84", "X-Agent-Bench-Benchmark-Id": "bench_1"},
             body={"model": "example-model", "messages": [{"role": "user", "content": "hello"}]},
         )
@@ -99,7 +108,7 @@ def test_openai_recording_proxy_ignores_downstream_disconnect_after_recording(tm
         )
         proxy._client = _FakeClient()
         handler = _FakeHandler(
-            path="/v1/chat/completions",
+            path=f"{proxy._url_prefix}/v1/chat/completions",
             headers={"Content-Length": "84", "X-Agent-Bench-Benchmark-Id": "bench_1"},
             body={"model": "example-model", "messages": [{"role": "user", "content": "hello"}]},
             wfile=_BrokenPipeWriter(),
@@ -123,8 +132,78 @@ def test_openai_recording_proxy_uses_container_ip_for_containerized_runs(tmp_pat
             recorder,
         )
         proxy._server = _FakeServer()
-        assert proxy.base_url == "http://127.0.0.1:43210/v1"
-        assert proxy.container_base_url == "http://172.18.0.5:43210/v1"
+        assert proxy.base_url == f"http://127.0.0.1:43210{proxy._url_prefix}/v1"
+        assert proxy.container_base_url == f"http://172.18.0.5:43210{proxy._url_prefix}/v1"
+
+
+def test_openai_recording_proxy_rejects_unauthenticated_and_oversized_requests(tmp_path):
+    with JsonlRecorder(tmp_path / "raw_responses.jsonl") as recorder:
+        proxy = OpenAIRecordingProxy(
+            OpenAIProxyConfig(
+                upstream_base_url="http://upstream.test/v1",
+                model="example-model",
+                max_request_bytes=8,
+            ),
+            recorder,
+        )
+        proxy._client = _FakeClient()
+
+        unauthenticated = _FakeHandler(
+            path="/v1/chat/completions",
+            headers={},
+            body={"model": "example-model"},
+        )
+        proxy._handle_post(unauthenticated)
+
+        oversized = _FakeHandler(
+            path=f"{proxy._url_prefix}/v1/chat/completions",
+            headers={},
+            body={"model": "example-model"},
+        )
+        proxy._handle_post(oversized)
+
+    assert unauthenticated.status == 403
+    assert oversized.status == 413
+    assert proxy._client.url == ""
+
+
+def test_openai_recording_proxy_does_not_replay_non_connect_failures(tmp_path, monkeypatch):
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("curl replayed request")
+
+    monkeypatch.setattr("agent_bench.proxy.subprocess.run", fail_if_called)
+    with JsonlRecorder(tmp_path / "raw_responses.jsonl") as recorder:
+        proxy = OpenAIRecordingProxy(
+            OpenAIProxyConfig(upstream_base_url="http://upstream.test/v1", model="example-model"),
+            recorder,
+        )
+        proxy._client = _TimeoutClient()
+        handler = _FakeHandler(
+            path=f"{proxy._url_prefix}/v1/chat/completions",
+            headers={},
+            body={"model": "example-model"},
+        )
+        proxy._handle_post(handler)
+
+    assert handler.status == 502
+
+
+def test_proxy_redaction_preserves_token_counts_and_hides_proxy_access_token():
+    payload = redact_secrets(
+        {
+            "max_tokens": 1024,
+            "completion_tokens": 12,
+            "client_secret": "sensitive",
+        }
+    )
+
+    assert payload["max_tokens"] == 1024
+    assert payload["completion_tokens"] == 12
+    assert payload["client_secret"] == "<redacted>"
+    assert (
+        redact_url("http://127.0.0.1:1234/_agent_bench/secret-token/v1")
+        == "http://127.0.0.1:1234/_agent_bench/<redacted>/v1"
+    )
 
 
 class _FakeResponse:
@@ -163,7 +242,15 @@ class _FakeClient:
 
 class _FailingClient:
     def post(self, url, json, headers):
-        raise OSError("No route to host")
+        raise httpx.ConnectError("No route to host")
+
+    def close(self):
+        return None
+
+
+class _TimeoutClient:
+    def post(self, url, json, headers):
+        raise httpx.ReadTimeout("upstream response timed out")
 
     def close(self):
         return None

@@ -85,7 +85,7 @@ class ExternalBenchmarkRunner:
         started = time.perf_counter()
         manifest = manifest_from_task(task)
         validation = manifest.validate(allow_host_docker_socket=config.allow_host_docker_socket)
-        task_output_dir = config.output_dir / "external" / task.id
+        task_output_dir = config.output_dir / "external" / _safe_task_output_name(task.id)
         task_output_dir.mkdir(parents=True, exist_ok=True)
         config.asset_root.mkdir(parents=True, exist_ok=True)
         if not validation.ok:
@@ -188,8 +188,10 @@ class ExternalBenchmarkRunner:
                 details=_benchmark_details(task, manifest, task_output_dir, result_payload),
             )
 
-        copy_error = _copy_container_outputs(config, container_name, task_output_dir)
-        _remove_container(config, container_name)
+        try:
+            copy_error = _copy_container_outputs(config, container_name, task_output_dir)
+        finally:
+            _remove_container(config, container_name)
         result_file = task_output_dir / "agent_bench_result.json"
         payload = _load_result_payload(result_file)
         output = (completed.stdout or "") + (completed.stderr or "")
@@ -504,8 +506,12 @@ def _docker_run_command(
 
 
 def _benchmark_task_mount_dir(config: ExternalBenchmarkConfig, task: Task) -> Path:
+    source_root = config.source_root.resolve()
     source = Path(task.source)
-    candidate = source if source.is_absolute() else config.source_root / source
+    candidate = (source if source.is_absolute() else config.source_root / source).resolve()
+    if not candidate.is_relative_to(source_root):
+        fallback = source_root / "tasks"
+        return fallback if fallback.exists() else source_root
     if candidate.is_file():
         return candidate.parent
     if candidate.is_dir():
@@ -552,7 +558,7 @@ def _docker_network_mode(manifest: BenchmarkManifest) -> str:
 
 
 def _docker_socket_mount_enabled(config: ExternalBenchmarkConfig, manifest: BenchmarkManifest) -> bool:
-    return bool(manifest.container.requires_host_docker_socket)
+    return bool(config.allow_host_docker_socket and manifest.container.requires_host_docker_socket)
 
 
 def _effective_container_user(manifest: BenchmarkManifest) -> str:
@@ -815,6 +821,12 @@ def _prepare_benchmark_asset_cache(
     recipe = _asset_cache_recipe(task, config)
     if recipe is None:
         return None
+    invalid_subpaths = recipe.get("invalid_subpaths", ())
+    if invalid_subpaths:
+        return (
+            "asset cache download skipped: cache recipe contains unsafe subpaths: "
+            + ", ".join(str(path) for path in invalid_subpaths)
+        )
     cache_dir = config.asset_root / recipe["key"]
     sentinel = cache_dir / ".agent-bench-assets-ready.json"
     if sentinel.is_file() and _cache_has_materialized_files(cache_dir):
@@ -1028,6 +1040,7 @@ def _asset_cache_recipe(task: Task, config: ExternalBenchmarkConfig) -> dict[str
     includes = recipe.get("includes")
     if not isinstance(includes, list):
         includes = [f"{path}/**" for path in subpaths if path != "."]
+    invalid_subpaths = [path for path in subpaths if not _is_safe_cache_subpath(path)]
     return {
         "key": _asset_cache_key(key),
         "repository": repository,
@@ -1035,11 +1048,31 @@ def _asset_cache_recipe(task: Task, config: ExternalBenchmarkConfig) -> dict[str
         "requires_git_lfs": bool(recipe.get("requires_git_lfs", True)),
         "includes": tuple(str(item) for item in includes),
         "subpaths": subpaths,
+        "invalid_subpaths": tuple(invalid_subpaths),
     }
 
 
 def _asset_cache_key(value: str) -> str:
     return _safe_slug(value).lower()
+
+
+def _is_safe_cache_subpath(value: str) -> bool:
+    if not value or "\\" in value:
+        return False
+    path = Path(value)
+    return not path.is_absolute() and ".." not in path.parts
+
+
+def _safe_task_output_name(value: str) -> str:
+    if (
+        value
+        and len(value) <= 128
+        and value[0].isalnum()
+        and all(ch.isalnum() or ch in "._-" for ch in value)
+    ):
+        return value
+    digest = hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()[:12]
+    return f"invalid-{digest}"
 
 
 def _safe_slug(value: str) -> str:
