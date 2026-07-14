@@ -236,8 +236,9 @@ async def run_benchmark(config: RunConfig) -> dict[str, Any]:
                 judge_proxy.stop()
             await client.aclose()
 
-        grades.sort(key=lambda result: _task_order(tasks, result.task_id))
-        responses.sort(key=lambda response: _task_order(tasks, response.task_id))
+        task_order = {task.id: index for index, task in enumerate(tasks)}
+        grades.sort(key=lambda result: task_order.get(result.task_id, len(tasks)))
+        responses.sort(key=lambda response: task_order.get(response.task_id, len(tasks)))
         run_duration_seconds = time.perf_counter() - run_started
         metadata = _metadata(
             config,
@@ -596,13 +597,6 @@ def _metadata(
             "summary_html": str(output_dir / "summary.html"),
         },
     }
-
-def _task_order(tasks: list[Task], task_id: str) -> int:
-    for index, task in enumerate(tasks):
-        if task.id == task_id:
-            return index
-    return len(tasks)
-
 
 def _git_commit() -> str:
     try:

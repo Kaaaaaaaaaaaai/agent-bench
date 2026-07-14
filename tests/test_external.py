@@ -254,7 +254,7 @@ def test_external_runner_mounts_docker_socket_when_descriptor_requires_it(monkey
             timeout=5.0,
             asset_root=tmp_path / "asset-cache",
             source_root=tmp_path,
-            allow_host_docker_socket=False,
+            allow_host_docker_socket=True,
         ),
     )
 
@@ -268,8 +268,8 @@ def test_external_runner_mounts_docker_socket_when_descriptor_requires_it(monkey
     assert result.details["network_mode"] == "host"
     assert result.details["docker_socket_mount"]["enabled"] is True
     assert result.details["docker_socket_mount"]["descriptor_requires_host_docker_socket"] is True
-    assert result.details["docker_socket_mount"]["global_allow_host_docker_socket"] is False
-    assert result.details["docker_socket_mount"]["deprecated_allow_host_docker_socket_flag"] is False
+    assert result.details["docker_socket_mount"]["global_allow_host_docker_socket"] is True
+    assert result.details["docker_socket_mount"]["deprecated_allow_host_docker_socket_flag"] is True
     assert result.details["docker_socket_mount"]["enabled_by_manifest"] is True
     assert result.details["result"]["network_mode"] == "host"
     assert result.details["result"]["docker_socket_mount"]["enabled"] is True
@@ -329,7 +329,7 @@ def test_external_runner_uses_packaged_task_dir_without_bind_mounts(monkeypatch,
     assert result.details["asset_cache_mount"]["enabled"] is False
 
 
-def test_external_runner_does_not_require_deprecated_docker_socket_flag(monkeypatch, tmp_path):
+def test_external_runner_requires_docker_socket_opt_in(monkeypatch, tmp_path):
     commands: list[list[str]] = []
 
     def fake_run(command, **kwargs):
@@ -372,10 +372,10 @@ def test_external_runner_does_not_require_deprecated_docker_socket_flag(monkeypa
         ),
     )
 
-    assert result.passed is True
-    assert "/var/run/docker.sock:/var/run/docker.sock" in commands[1]
-    assert result.details["docker_socket_mount"]["enabled"] is True
-    assert result.details["docker_socket_mount"]["deprecated_allow_host_docker_socket_flag"] is False
+    assert result.passed is False
+    assert result.details["result"]["status"] == "failed_manifest_validation"
+    assert "explicit operator opt-in" in (result.error or "")
+    assert commands == []
 
 
 def test_external_runner_fails_when_result_file_missing(monkeypatch, tmp_path):
@@ -502,6 +502,65 @@ def test_external_runner_reports_container_startup_stderr(monkeypatch, tmp_path)
     assert "invalid mount config" in result.error
     payload = json.loads((tmp_path / "external" / "PB_001" / "agent_bench_result.json").read_text(encoding="utf-8"))
     assert payload["error"] == result.error
+
+
+def test_external_runner_rejects_asset_cache_parent_traversal(tmp_path):
+    task = _manifest_task()
+    task.source = "tasks/unsafe/manifest.json"
+    _write_asset_lock_task_folder(
+        tmp_path,
+        "unsafe",
+        {
+            "repository": "https://example.com/repo.git",
+            "ref": "0123456789abcdef0123456789abcdef01234567",
+            "requires_git_lfs": False,
+            "subpaths": ["../../outside"],
+        },
+    )
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    marker = outside / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+    config = ExternalBenchmarkConfig(
+        provider="openai-compatible",
+        base_url="http://localhost:8000/v1",
+        model="example-model",
+        api_key_env="",
+        output_dir=tmp_path / "output",
+        timeout=5.0,
+        asset_root=tmp_path / "asset-cache",
+        source_root=tmp_path,
+    )
+
+    error = _prepare_benchmark_asset_cache(task, config)
+
+    assert error is not None
+    assert "unsafe subpaths" in error
+    assert marker.read_text(encoding="utf-8") == "keep"
+
+
+def test_external_runner_uses_safe_output_directory_for_invalid_task_id(tmp_path):
+    task = _manifest_task()
+    task.id = "../../escape"
+    task.benchmark["manifest"]["id"] = task.id
+    config = ExternalBenchmarkConfig(
+        provider="openai-compatible",
+        base_url="http://localhost:8000/v1",
+        model="example-model",
+        api_key_env="",
+        output_dir=tmp_path / "output",
+        timeout=5.0,
+        asset_root=tmp_path / "asset-cache",
+        source_root=tmp_path,
+    )
+
+    result = ExternalBenchmarkRunner()._run_sync(task, config)
+
+    assert result.passed is False
+    result_path = Path(result.details["output_dir"])
+    assert result_path.is_relative_to(config.output_dir / "external")
+    assert result_path.name.startswith("invalid-")
+    assert not (tmp_path / "escape").exists()
 
 
 def test_external_runner_prepares_paperbench_asset_cache(monkeypatch, tmp_path):

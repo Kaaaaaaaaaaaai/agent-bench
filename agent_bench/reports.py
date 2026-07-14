@@ -134,240 +134,418 @@ def update_latest(timestamp_dir: Path, latest_dir: Path) -> None:
 def render_summary_html(summary: dict[str, Any], results: list[GradeResult]) -> str:
     metadata = summary.get("metadata") if isinstance(summary.get("metadata"), dict) else {}
     benchmark_results = _report_rows(summary, results)
-    coverage = summary.get("coverage_summary", summary.get("coverage", {}))
+    coverage = summary.get("coverage_summary") if isinstance(summary.get("coverage_summary"), dict) else {}
+    if not coverage:
+        coverage = summary.get("coverage") if isinstance(summary.get("coverage"), dict) else {}
     target = _target_metadata(metadata)
     judge = _judge_metadata(metadata)
     run_id = metadata.get("run_id") or metadata.get("output_dir") or "agent-bench-run"
-    created_at = metadata.get("created_at_utc") or metadata.get("created_at") or ""
-    model_name = target.get("model") or metadata.get("model") or "unknown model"
-    provider = target.get("provider_type") or target.get("provider") or metadata.get("provider") or "provider n/a"
-    score_label, score_display, score_fraction, score_hint = _headline_score(summary)
+    created_at = metadata.get("created_at_utc") or ""
+    target_model = target.get("model") or metadata.get("model") or "unknown model"
+    target_provider = target.get("provider_type") or metadata.get("provider") or ""
+    target_base_url = target.get("base_url") or metadata.get("base_url") or ""
+    judge_label = _join_if(
+        [
+            judge.get("provider"),
+            judge.get("model"),
+            "fallback used" if judge.get("fallback_used") else "",
+        ],
+        " / ",
+    )
+    radar_scores = _summary_radar_scores(summary, benchmark_results)
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Agent Bench Final Report</title>
-  <style>
-    :root {{
-      color-scheme: dark;
-      --paper: #080d13;
-      --surface: #101821;
-      --surface-raised: #14202c;
-      --ink: #ecf4f1;
-      --muted: #9fb0ad;
-      --soft: #182530;
-      --line: #263642;
-      --line-strong: #3b5362;
-      --teal: #41d6c3;
-      --cyan: #67d5ff;
-      --green: #66e3a1;
-      --amber: #f4bd61;
-      --rose: #ff7f9f;
-      --blue: #91b7ff;
-      --shadow: 0 18px 45px rgba(0, 0, 0, 0.34);
-    }}
-    * {{ box-sizing: border-box; }}
-    html {{ background: var(--paper); }}
-    body {{ margin: 0; font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--ink); background: var(--paper); }}
-    a {{ color: var(--blue); text-decoration-thickness: 1px; text-underline-offset: 2px; }}
-    h1, h2, h3, p {{ margin-top: 0; }}
-    h1 {{ margin-bottom: 10px; font-size: clamp(30px, 5vw, 52px); line-height: 1.02; letter-spacing: 0; }}
-    h2 {{ margin-bottom: 6px; font-size: 22px; line-height: 1.2; letter-spacing: 0; }}
-    h3 {{ margin-bottom: 10px; font-size: 15px; letter-spacing: 0; }}
-    code, pre {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }}
-    .shell {{ width: min(1280px, calc(100% - 32px)); margin: 0 auto; }}
-    .report-header {{ border-bottom: 1px solid var(--line); background: radial-gradient(circle at top left, rgba(65, 214, 195, 0.14), transparent 34%), #0a1118; }}
-    .header-layout {{ display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 360px); gap: 28px; align-items: end; padding: 34px 0 28px; }}
-    .eyebrow {{ margin-bottom: 10px; color: var(--teal); font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }}
-    .dek {{ max-width: 760px; margin-bottom: 18px; color: var(--muted); font-size: 16px; }}
-    .muted {{ color: var(--muted); }}
-    .run-strip {{ display: flex; flex-wrap: wrap; gap: 8px; }}
-    .run-strip span {{ display: inline-flex; min-height: 30px; align-items: center; border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; background: rgba(16, 24, 33, 0.78); color: #d9e7e3; }}
-    .score-hero {{ border: 1px solid var(--line-strong); border-radius: 8px; padding: 18px; background: linear-gradient(180deg, #14202c, #101821); box-shadow: var(--shadow); }}
-    .score-hero span {{ display: block; color: var(--muted); font-size: 12px; font-weight: 750; text-transform: uppercase; }}
-    .score-hero strong {{ display: block; margin: 6px 0 10px; font-size: 44px; line-height: 1; letter-spacing: 0; }}
-    .score-hero small {{ display: block; margin-top: 10px; color: var(--muted); }}
-    .report-main {{ padding: 30px 0 52px; }}
-    .section-block {{ margin-top: 30px; }}
-    .section-block:first-child {{ margin-top: 0; }}
-    .section-heading {{ display: flex; justify-content: space-between; gap: 16px; align-items: end; margin-bottom: 14px; }}
-    .section-heading p {{ margin-bottom: 0; color: var(--muted); max-width: 820px; }}
-    .summary-grid {{ display: grid; grid-template-columns: minmax(280px, 380px) minmax(0, 1fr); gap: 18px; align-items: stretch; }}
-    .radar-panel, .metric-card, .coverage-tile {{ border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); }}
-    .radar-panel {{ padding: 16px; }}
-    .radar-panel svg {{ display: block; width: 100%; height: auto; }}
-    .radar-legend {{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; color: var(--muted); font-size: 12px; }}
-    .radar-legend span {{ display: inline-flex; gap: 5px; align-items: center; }}
-    .radar-legend i {{ display: inline-block; width: 9px; height: 9px; border-radius: 999px; background: var(--teal); }}
-    .metric-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(166px, 1fr)); gap: 12px; }}
-    .metric-card {{ min-height: 112px; padding: 14px; }}
-    .metric-card span {{ display: block; color: var(--muted); font-size: 12px; font-weight: 720; }}
-    .metric-card strong {{ display: block; margin-top: 8px; font-size: 26px; line-height: 1.05; overflow-wrap: anywhere; }}
-    .metric-card small {{ display: block; margin-top: 8px; color: var(--muted); }}
-    .coverage-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 16px; }}
-    .coverage-tile {{ padding: 14px; }}
-    .coverage-tile span {{ display: block; color: var(--muted); font-size: 12px; font-weight: 720; }}
-    .coverage-tile strong {{ display: block; margin-top: 6px; font-size: 24px; }}
-    .progress-track {{ height: 9px; overflow: hidden; border-radius: 999px; background: #24323c; }}
-    .progress-fill {{ height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--teal), var(--cyan)); }}
-    .scorebar {{ display: grid; grid-template-columns: minmax(90px, 1fr) 64px; gap: 10px; align-items: center; min-width: 170px; }}
-    .scorebar .progress-track {{ height: 8px; }}
-    .scorebar span {{ text-align: right; font-variant-numeric: tabular-nums; font-weight: 750; }}
-    .table-wrap {{ width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); }}
-    table {{ width: 100%; border-collapse: collapse; min-width: 760px; }}
-    th, td {{ padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }}
-    th {{ background: #172331; color: #c9d8d5; font-size: 12px; letter-spacing: .03em; text-transform: uppercase; white-space: nowrap; }}
-    td {{ overflow-wrap: anywhere; }}
-    tbody tr:last-child td {{ border-bottom: 0; }}
-    .group-row td {{ background: #0d151e; color: #dce9e6; font-weight: 780; }}
-    .status-pill {{ display: inline-flex; align-items: center; min-height: 24px; border-radius: 999px; padding: 2px 9px; border: 1px solid var(--line); background: #101a24; color: #d5e3df; font-size: 12px; font-weight: 760; white-space: nowrap; }}
-    .status-pill.success {{ border-color: rgba(102, 227, 161, 0.42); background: rgba(102, 227, 161, 0.12); color: var(--green); }}
-    .status-pill.model {{ border-color: rgba(145, 183, 255, 0.42); background: rgba(145, 183, 255, 0.12); color: var(--blue); }}
-    .status-pill.skipped {{ border-color: rgba(244, 189, 97, 0.42); background: rgba(244, 189, 97, 0.12); color: var(--amber); }}
-    .status-pill.error {{ border-color: rgba(255, 127, 159, 0.42); background: rgba(255, 127, 159, 0.12); color: var(--rose); }}
-    .metadata {{ display: grid; grid-template-columns: minmax(160px, 230px) minmax(0, 1fr); gap: 8px 16px; border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: var(--surface); box-shadow: var(--shadow); }}
-    .metadata dt {{ color: var(--muted); font-weight: 720; }}
-    .metadata dd {{ margin: 0; overflow-wrap: anywhere; }}
-    .metadata-grid {{ display: grid; grid-template-columns: minmax(280px, 430px) minmax(0, 1fr); gap: 18px; align-items: start; }}
-    .bibtex {{ max-height: 180px; overflow-y: auto; overflow-x: auto; scrollbar-gutter: stable; margin: 0; border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: #05080d; color: #dff8ef; white-space: pre-wrap; word-break: break-word; box-shadow: var(--shadow); }}
-    .empty-state {{ border: 1px dashed var(--line-strong); border-radius: 8px; padding: 16px; background: var(--surface); color: var(--muted); }}
-    @media (max-width: 1180px) {{
-      .shell {{ width: min(100% - 28px, 1120px); }}
-      .metric-grid {{ grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }}
-      .score-breakdown {{ min-width: 980px; }}
-    }}
-    @media (max-width: 900px) {{
-      .shell {{ width: min(100% - 24px, 1280px); }}
-      .header-layout, .summary-grid, .metadata-grid {{ grid-template-columns: 1fr; }}
-      .score-hero strong {{ font-size: 38px; }}
-      .section-heading {{ display: block; }}
-    }}
-    @media (max-width: 760px) {{
-      .score-breakdown {{ min-width: 0; }}
-      .score-breakdown thead {{ display: none; }}
-      .score-breakdown tbody, .score-breakdown tr, .score-breakdown td {{ display: block; width: 100%; }}
-      .score-breakdown tr {{ border-bottom: 1px solid var(--line); padding: 8px 0; }}
-      .score-breakdown tr.group-row {{ padding: 0; }}
-      .score-breakdown td {{ display: grid; grid-template-columns: minmax(112px, 42%) minmax(0, 1fr); gap: 10px; border-bottom: 0; padding: 7px 12px; }}
-      .score-breakdown td::before {{ content: attr(data-label); color: var(--muted); font-size: 12px; font-weight: 760; text-transform: uppercase; }}
-      .score-breakdown .group-row td {{ display: block; padding: 10px 12px; }}
-      .score-breakdown .group-row td::before {{ content: none; }}
-      .scorebar {{ min-width: 0; }}
-    }}
-    @media (max-width: 560px) {{
-      h1 {{ font-size: 32px; }}
-      .run-strip span {{ width: 100%; border-radius: 8px; }}
-      .metric-grid, .coverage-grid {{ grid-template-columns: 1fr; }}
-      .metadata {{ grid-template-columns: 1fr; }}
-      th, td {{ padding: 9px 10px; }}
-    }}
-    @media (max-width: 420px) {{
-      .shell {{ width: min(100% - 16px, 1280px); }}
-      .header-layout {{ padding: 26px 0 22px; }}
-      .score-hero strong {{ font-size: 34px; }}
-      .metric-card, .coverage-tile, .radar-panel {{ padding: 12px; }}
-      .score-breakdown td {{ grid-template-columns: 1fr; gap: 3px; }}
-    }}
-    @media print {{
-      .report-header {{ background: #fff; }}
-      .score-hero, .metric-card, .coverage-tile, .table-wrap, .metadata, .radar-panel, .bibtex {{ box-shadow: none; }}
-      .table-wrap, .bibtex {{ overflow: visible; }}
-    }}
-  </style>
+  <title>Agent Bench Report - {html.escape(str(target_model))}</title>
+  <style>{_report_css()}</style>
 </head>
 <body>
-  <header class="report-header">
-    <div class="shell header-layout">
-      <div>
-        <p class="eyebrow">Agent Bench Final Report</p>
-        <h1>{html.escape(str(model_name))}</h1>
-        <p class="dek">Benchmark run {html.escape(str(run_id))}{_join_if(created_at, " recorded ")} across {html.escape(_coverage_label(coverage))}.</p>
-        <div class="run-strip">
-          <span>Provider: {html.escape(str(provider))}</span>
-          <span>Judge: {html.escape(str(judge.get("model") or judge.get("provider") or "none"))}</span>
-          <span>Duration: {html.escape(_format_seconds_safe(summary.get("total_run_duration_seconds")))}</span>
+  <div class="shell">
+    <header class="report-header">
+      <div class="header-copy">
+        <p class="eyebrow">Agent Bench Report</p>
+        <h1>{html.escape(str(target_model))}</h1>
+        <p class="run-line">{html.escape(str(run_id))} · {html.escape(str(created_at))}</p>
+        <p class="run-line">{html.escape(_join_if([target_provider, target_base_url], " · "))}</p>
+      </div>
+      <div class="headline-panel">
+        <span>Scored-Suite Score</span>
+        <strong>{html.escape(_headline_score(summary))}</strong>
+        <small>{html.escape(_coverage_label(coverage))}</small>
+      </div>
+    </header>
+
+    <main>
+      <section id="result-summary" class="report-section">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Result Summary</p>
+            <h2>Result Summary</h2>
+          </div>
+          <p>{html.escape(judge_label or "No judge metadata recorded")}</p>
         </div>
-      </div>
-      <div class="score-hero" aria-label="{html.escape(score_label)}">
-        <span>{html.escape(score_label)}</span>
-        <strong>{html.escape(score_display)}</strong>
-        {_progress_bar(score_fraction)}
-        <small>{html.escape(score_hint)}</small>
-      </div>
-    </div>
-  </header>
-  <main class="shell report-main">
-    <section class="section-block" id="result-summary">
-      <div class="section-heading">
-        <div>
-          <h2>Result Summary</h2>
-          <p>Score and coverage are separated so a low score is not confused with an incomplete run.</p>
+        {_report_metric_cards(summary, coverage)}
+        <div class="summary-grid">
+          <div class="radar-panel">
+            <h3>Capability Radar</h3>
+            {_radar_svg(radar_scores)}
+          </div>
+          <div class="summary-panel">
+            <h3>Score Context</h3>
+            {_score_context(summary, coverage)}
+          </div>
         </div>
-      </div>
-      <div class="summary-grid">
-        <div class="radar-panel">
-          {_radar_svg(_summary_radar_scores(summary))}
-          <div class="radar-legend"><span><i></i>Category score</span><span>Scale 0-100%</span></div>
+      </section>
+
+      <section id="benchmark-coverage" class="report-section">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Benchmark Coverage</p>
+            <h2>Benchmark Coverage</h2>
+          </div>
+          <p>{html.escape(_coverage_label(coverage))}</p>
         </div>
-        {_report_metric_cards(summary, benchmark_results)}
-      </div>
-    </section>
-    <section class="section-block" id="benchmark-coverage">
-      <div class="section-heading">
-        <div>
-          <h2>Benchmark Coverage</h2>
-          <p>Configured suites, successfully scored suites, exclusions, and category-level coverage.</p>
+        {_coverage_section(summary, coverage)}
+      </section>
+
+      <section id="benchmark-score-breakdown" class="report-section">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Benchmark Score Breakdown</p>
+            <h2>Benchmark Score Breakdown</h2>
+          </div>
+          <p>{len(benchmark_results)} benchmark rows</p>
         </div>
-      </div>
-      {_coverage_section(summary, coverage)}
-    </section>
-    <section class="section-block" id="benchmark-score-breakdown">
-      <div class="section-heading">
-        <div>
-          <h2>Benchmark Score Breakdown</h2>
-          <p>Official-score inclusion is shown separately from model performance and raw adapter output.</p>
+        {_score_breakdown_table(benchmark_results)}
+      </section>
+
+      <section id="run-metadata" class="report-section">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Run Metadata</p>
+            <h2>Run Metadata</h2>
+          </div>
         </div>
-      </div>
-      {_score_breakdown_table(benchmark_results)}
-    </section>
-    <section class="section-block" id="run-metadata">
-      <div class="section-heading">
-        <div>
-          <h2>Run Metadata</h2>
-          <p>Execution settings, target model, judge model, manifests, source refs, and asset coverage.</p>
+        {_report_metadata_section(summary, metadata)}
+      </section>
+
+      <section id="non-model-errors" class="report-section">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Run Errors</p>
+            <h2>Non-Model Run Errors</h2>
+          </div>
         </div>
-      </div>
-      {_report_metadata_section(summary, metadata)}
-    </section>
-    <section class="section-block" id="non-model-errors">
-      <div class="section-heading">
-        <div>
-          <h2>Non-Model Run Errors</h2>
-          <p>Setup, infrastructure, asset, timeout, judge, and unsupported-capability issues encountered during the run.</p>
+        {_non_model_error_section(benchmark_results)}
+      </section>
+
+      <section id="benchmark-citations" class="report-section citations-section">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Benchmark Citations</p>
+            <h2>Benchmark Citations</h2>
+          </div>
         </div>
-      </div>
-      {_non_model_error_section(benchmark_results)}
-    </section>
-    <section class="section-block" id="benchmark-citations">
-      <div class="section-heading">
-        <div>
-          <h2>Benchmark Citations</h2>
-          <p>BibTeX-style references for benchmark suites, kept in a compact scrollable code section.</p>
-        </div>
-      </div>
-      {_citation_section(benchmark_results)}
-    </section>
-  </main>
+        {_citation_section(benchmark_results)}
+      </section>
+    </main>
+  </div>
 </body>
 </html>
 """
 
 
+def _report_css() -> str:
+    return """
+    :root {
+      color-scheme: dark;
+      --bg: #080d14;
+      --bg-soft: #0d141f;
+      --panel: #111a27;
+      --panel-2: #162233;
+      --panel-3: #1c2a3e;
+      --line: #2c3b50;
+      --line-strong: #3e536c;
+      --text: #edf4ff;
+      --muted: #9fb0c7;
+      --subtle: #6f829c;
+      --blue: #63a7ff;
+      --green: #45d09a;
+      --amber: #f4c15d;
+      --red: #ff7f7f;
+      --cyan: #67d7e8;
+    }
+    * { box-sizing: border-box; }
+    html { background: var(--bg); }
+    body {
+      margin: 0;
+      min-width: 320px;
+      font: 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 18% 0%, rgba(99, 167, 255, 0.18), transparent 34rem),
+        linear-gradient(180deg, #0a1019 0%, var(--bg) 46rem);
+    }
+    a { color: var(--blue); }
+    h1, h2, h3, p { margin: 0; }
+    .shell { width: min(100%, 1440px); margin: 0 auto; padding: 24px clamp(14px, 3vw, 40px) 56px; }
+    .report-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+      gap: 20px;
+      align-items: stretch;
+      padding: clamp(22px, 4vw, 40px);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: linear-gradient(135deg, rgba(17, 26, 39, 0.96), rgba(22, 34, 51, 0.88));
+      box-shadow: 0 22px 70px rgba(0, 0, 0, 0.38);
+    }
+    .eyebrow {
+      margin-bottom: 7px;
+      color: var(--cyan);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    h1 { font-size: clamp(28px, 4vw, 48px); line-height: 1.05; letter-spacing: 0; }
+    h2 { font-size: clamp(22px, 2.2vw, 30px); line-height: 1.12; letter-spacing: 0; }
+    h3 { font-size: 16px; line-height: 1.2; letter-spacing: 0; }
+    .run-line { margin-top: 9px; color: var(--muted); overflow-wrap: anywhere; }
+    .headline-panel {
+      display: grid;
+      align-content: center;
+      gap: 8px;
+      min-height: 170px;
+      padding: 22px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: #0b121d;
+    }
+    .headline-panel span,
+    .headline-panel small { color: var(--muted); }
+    .headline-panel strong { font-size: clamp(40px, 7vw, 68px); line-height: 0.95; letter-spacing: 0; color: var(--green); }
+    main { display: grid; gap: 22px; margin-top: 22px; }
+    .report-section {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(17, 26, 39, 0.92);
+      overflow: hidden;
+    }
+    .section-heading {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: end;
+      padding: 22px 24px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    .section-heading > p { max-width: 560px; color: var(--muted); text-align: right; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 10px;
+      padding: 20px 24px 0;
+    }
+    .card {
+      min-width: 0;
+      min-height: 110px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-2);
+    }
+    .card span { display: block; color: var(--muted); font-size: 12px; }
+    .card strong { display: block; margin-top: 8px; font-size: clamp(20px, 2vw, 29px); line-height: 1.06; overflow-wrap: anywhere; }
+    .summary-grid,
+    .coverage-grid {
+      display: grid;
+      grid-template-columns: minmax(320px, 0.92fr) minmax(0, 1.38fr);
+      gap: 16px;
+      padding: 20px 24px 24px;
+    }
+    .radar-panel,
+    .summary-panel,
+    .coverage-panel {
+      min-width: 0;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0d1521;
+    }
+    .radar-panel svg { display: block; width: 100%; max-width: 440px; height: auto; margin: 10px auto 0; }
+    .score-context { display: grid; gap: 12px; margin-top: 14px; }
+    .context-row { display: grid; grid-template-columns: minmax(160px, 0.9fr) minmax(0, 1.2fr) auto; gap: 14px; align-items: center; }
+    .context-row span { color: var(--muted); }
+    .context-row strong { text-align: right; white-space: nowrap; }
+    .bar {
+      position: relative;
+      height: 9px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #233146;
+    }
+    .bar i { display: block; height: 100%; width: var(--value, 0%); border-radius: inherit; background: linear-gradient(90deg, var(--blue), var(--green)); }
+    .coverage-grid { grid-template-columns: minmax(0, 1fr); }
+    .coverage-cards {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      padding: 20px 24px 0;
+    }
+    .coverage-card {
+      min-height: 92px;
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-2);
+    }
+    .coverage-card span { color: var(--muted); font-size: 12px; }
+    .coverage-card strong { display: block; margin-top: 7px; font-size: 24px; line-height: 1; }
+    .table-wrap { width: 100%; overflow-x: auto; padding: 0 24px 24px; }
+    table { width: 100%; border-collapse: collapse; min-width: 760px; }
+    th, td { padding: 11px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      color: var(--muted);
+      background: var(--panel-3);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    td { color: #dce8f7; overflow-wrap: anywhere; }
+    tr:hover td { background: rgba(99, 167, 255, 0.06); }
+    .score-breakdown { min-width: 1040px; }
+    .score-value { display: grid; gap: 6px; min-width: 120px; }
+    .score-value strong { font-size: 15px; color: var(--text); }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      max-width: 100%;
+      padding: 2px 8px;
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      background: #0b121d;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      white-space: normal;
+    }
+    .pill.pass { border-color: rgba(69, 208, 154, 0.52); color: var(--green); }
+    .pill.warn { border-color: rgba(244, 193, 93, 0.55); color: var(--amber); }
+    .pill.fail { border-color: rgba(255, 127, 127, 0.58); color: var(--red); }
+    .official.included { color: var(--green); font-weight: 700; }
+    .official.excluded { color: var(--amber); font-weight: 700; }
+    .metadata {
+      display: grid;
+      grid-template-columns: minmax(180px, 0.28fr) minmax(0, 1fr);
+      gap: 0;
+      padding: 0 24px 24px;
+      margin: 0;
+    }
+    .metadata dt,
+    .metadata dd {
+      min-width: 0;
+      margin: 0;
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--line);
+      overflow-wrap: anywhere;
+    }
+    .metadata dt { color: var(--muted); background: #0d1521; }
+    .metadata dd { color: var(--text); }
+    .empty-state {
+      margin: 0 24px 24px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--muted);
+      background: #0d1521;
+    }
+    .citations-section { margin-bottom: 6px; }
+    .bibtex {
+      max-height: 180px;
+      margin: 0 24px 24px;
+      padding: 16px;
+      overflow-y: auto;
+      overflow-x: auto;
+      scrollbar-gutter: stable;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #050912;
+      color: #d8e7ff;
+      font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      white-space: pre;
+    }
+    .bibtex code { font: inherit; }
+    @media (max-width: 1180px) {
+      .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .coverage-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .summary-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 900px) {
+      .shell { padding: 14px 10px 36px; }
+      .report-header { grid-template-columns: 1fr; padding: 22px; }
+      .headline-panel { min-height: 130px; }
+      .section-heading { display: grid; align-items: start; padding: 20px 16px 14px; }
+      .section-heading > p { text-align: left; }
+      .cards, .coverage-cards { padding: 16px 16px 0; }
+      .summary-grid, .coverage-grid { padding: 16px; }
+      .table-wrap { padding: 0 16px 20px; }
+      .metadata { grid-template-columns: 1fr; padding: 0 16px 20px; }
+      .metadata dt { padding-bottom: 3px; border-bottom: 0; }
+      .metadata dd { padding-top: 0; }
+      .bibtex { margin: 0 16px 20px; }
+    }
+    @media (max-width: 760px) {
+      .cards, .coverage-cards { grid-template-columns: 1fr 1fr; }
+      .score-breakdown { min-width: 0; }
+      .score-breakdown thead { display: none; }
+      .score-breakdown,
+      .score-breakdown tbody,
+      .score-breakdown tr,
+      .score-breakdown td { display: block; width: 100%; }
+      .score-breakdown tr {
+        margin-bottom: 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #0d1521;
+        overflow: hidden;
+      }
+      .score-breakdown td {
+        display: grid;
+        grid-template-columns: minmax(118px, 0.42fr) minmax(0, 1fr);
+        gap: 12px;
+        border-bottom: 1px solid var(--line);
+      }
+      .score-breakdown td::before {
+        content: attr(data-label);
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+    }
+    @media (max-width: 560px) {
+      .cards, .coverage-cards { grid-template-columns: 1fr; }
+      .context-row { grid-template-columns: 1fr; gap: 6px; }
+      .context-row strong { text-align: left; }
+      .score-breakdown td { grid-template-columns: 1fr; gap: 6px; }
+      h1 { font-size: 30px; }
+    }
+    """
+
+
 def _report_rows(summary: dict[str, Any], results: list[GradeResult]) -> list[dict[str, Any]]:
-    benchmark_results = summary.get("benchmark_results")
-    if isinstance(benchmark_results, list) and benchmark_results:
-        return [row for row in benchmark_results if isinstance(row, dict)]
+    rows = summary.get("benchmark_results")
+    if isinstance(rows, list) and rows:
+        return [row for row in rows if isinstance(row, dict)]
     return _fallback_benchmark_rows(results)
 
 
@@ -375,147 +553,103 @@ def _fallback_benchmark_rows(results: list[GradeResult]) -> list[dict[str, Any]]
     rows: list[dict[str, Any]] = []
     for result in results:
         details = result.details if isinstance(result.details, dict) else {}
-        payload = _benchmark_payload(result)
+        payload = details.get("result") if isinstance(details.get("result"), dict) else {}
+        score = (float(result.score) / float(result.max_score) * 100.0) if result.max_score else 0.0
         rows.append(
             {
-                "suite_id": result.task_id,
-                "task_id": result.task_id,
+                "benchmark": _result_benchmark_name(result),
                 "group": details.get("group", result.category),
-                "benchmark": details.get("benchmark", _result_benchmark_name(result)),
-                "profile": "",
-                "score": round(result.score * 100.0, 4),
+                "profile": details.get("profile", result.category),
+                "score": round(score, 4),
                 "raw_score": _unit_to_percent(payload.get("raw_score")),
                 "valid_score": _unit_to_percent(payload.get("valid_score")),
-                "included_in_official_score": _included_in_official_score(result),
                 "status": _result_status(result),
                 "run_status": _run_status(result),
                 "score_status": _score_status(result),
-                "duration_seconds": result.task_duration_seconds,
-                "blocker_type": _blocker_type(result),
-                "error": _result_error_reason(result),
-                "error_details": _result_error_reason(result),
-                "homepage": details.get("homepage", ""),
-                "official_leaderboard_url": details.get("official_leaderboard_url", ""),
-                "license": details.get("license", ""),
-                "credit": details.get("credit", ""),
-                "citation": details.get("citation", details.get("homepage", "")),
-                "manifest": details.get("manifest", {}),
-                "source": details.get("source", {}),
-                "required_capabilities": payload.get("required_capabilities", details.get("required_capabilities", [])),
-                "supported_capabilities": payload.get("supported_capabilities", []),
-                "capabilities_verified": _capabilities_verified(result),
-                "required_tools": payload.get("required_tools", []),
-                "exposed_tools": payload.get("exposed_tools", []),
-                "missing_tools": payload.get("missing_tools", []),
-                "missing_env": payload.get("missing_env", payload.get("missing_environment", [])),
+                "included_in_official_score": _included_in_official_score(result),
                 "evaluated_task_count": payload.get("evaluated_task_count"),
-                "valid_evaluated_task_count": payload.get("valid_evaluated_task_count"),
                 "evaluation_passed_count": payload.get("evaluation_passed_count"),
-                "grading_methods": [],
-                "docker_image": payload.get("docker_image", details.get("docker_image", "")),
-                "container_name": payload.get("container_name", details.get("container_name", "")),
-                "network_mode": payload.get("network_mode", details.get("network_mode", "")),
-                "setup_details": payload.get("setup_details", details.get("setup_details", {})),
+                "duration_seconds": result.task_duration_seconds,
+                "error": result.error,
+                "error_details": _result_error_reason(result),
+                "blocker_type": _blocker_type(result),
+                "homepage": details.get("homepage"),
+                "license": details.get("license"),
+                "credit": details.get("credit"),
+                "citation": details.get("citation", details.get("homepage")),
             }
         )
-    return sorted(rows, key=lambda row: (str(row.get("group", "")), str(row.get("benchmark", ""))))
+    return rows
 
 
 def _target_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     target = metadata.get("target_model")
-    if isinstance(target, dict):
-        return target
-    return {}
+    return target if isinstance(target, dict) else {}
 
 
 def _judge_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     judge = metadata.get("judge")
-    if isinstance(judge, dict):
-        return judge
-    return {}
+    return judge if isinstance(judge, dict) else {}
 
 
-def _headline_score(summary: dict[str, Any]) -> tuple[str, str, float, str]:
-    headline = summary.get("headline") if isinstance(summary.get("headline"), dict) else {}
-    for key in ("valid_judged_score", "valid_judged_suite_score"):
-        value = headline.get(key, summary.get(key))
-        if value is not None:
-            return (
-                "Scored-Suite Score",
-                _format_rate_auto(value),
-                _fraction_from_rate(value),
-                "Average score across suites that produced official-equivalent judgments.",
-            )
-    value = summary.get("score_valid_tasks_only", summary.get("total_score"))
-    return (
-        "Scored-Suite Score",
-        _format_percent_display(value),
-        _fraction_from_percent(value),
-        "Average score across valid judged suites.",
-    )
+def _headline_score(summary: dict[str, Any]) -> str:
+    for key in ("score_valid_tasks_only", "valid_judged_score", "total_score", "benchmark_level_mean_score"):
+        if summary.get(key) is not None:
+            return _format_percent_display(summary.get(key))
+    return "n/a"
 
 
-def _report_metric_cards(summary: dict[str, Any], benchmark_results: list[dict[str, Any]]) -> str:
-    coverage = summary.get("coverage_summary", summary.get("coverage", {}))
-    scored = _coverage_value(coverage, "successfully_scored_benchmarks", "valid_judged_suite_count", summary.get("valid_task_count", 0))
-    total = _coverage_value(coverage, "total_configured_benchmarks", "suite_count", summary.get("suite_count", summary.get("task_count", 0)))
+def _report_metric_cards(summary: dict[str, Any], coverage: dict[str, Any]) -> str:
     cards = [
-        (
-            "Valid judged score",
-            _format_rate_auto(summary.get("valid_judged_score", summary.get("valid_judged_suite_score"))),
-            "Official-equivalent judged suites",
-        ),
-        (
-            "Conservative score",
-            _format_rate_auto(summary.get("conservative_all_suite_score", summary.get("conservative_selected_suite_score"))),
-            "Counts exclusions as zero",
-        ),
-        ("Suite coverage", _format_rate_auto(summary.get("suite_coverage_rate", _coverage_rate(coverage))), f"{scored}/{total} suites scored"),
-        ("Item coverage", _format_rate_auto(summary.get("item_coverage_rate")), "Valid judged benchmark items"),
-        ("Non-model errors", str(len(_non_model_error_rows(benchmark_results))), "Setup, infra, judge, assets, timeout"),
-        ("Run duration", _format_seconds_safe(summary.get("total_run_duration_seconds")), "Wall-clock elapsed time"),
-        ("Model score", _format_percent_display(summary.get("model_score_valid_tasks_only")), "Only capability-verified attempts"),
-        ("Parser repairs", _format_integer_safe(summary.get("parser_repair_count")), "Judge or output repairs"),
+        ("Scored Suite", _headline_score(summary)),
+        ("Conservative", _format_rate_auto(summary.get("conservative_all_suite_score"))),
+        ("Suite Coverage", _format_rate_auto(coverage.get("coverage_rate", summary.get("suite_coverage_rate")))),
+        ("Valid Suites", _coverage_value(coverage, "successfully_scored_benchmarks", "valid_judged_suite_count")),
+        ("Items Passed", _format_integer_safe(summary.get("item_passed_count", summary.get("passed_count")))),
+        ("Run Time", _format_seconds_safe(summary.get("total_run_duration_seconds", summary.get("run_duration_seconds")))),
     ]
-    return '<div class="metric-grid">' + "".join(_summary_card(label, value, hint) for label, value, hint in cards) + "</div>"
+    return '<div class="cards">' + "".join(_summary_card(label, value) for label, value in cards) + "</div>"
 
 
-def _summary_card(label: str, value: str, hint: str) -> str:
-    return (
-        '<div class="metric-card">'
-        f"<span>{html.escape(label)}</span>"
-        f"<strong>{html.escape(value)}</strong>"
-        f"<small>{html.escape(hint)}</small>"
-        "</div>"
-    )
+def _summary_card(label: str, value: str) -> str:
+    return f'<div class="card"><span>{html.escape(label)}</span><strong>{html.escape(value)}</strong></div>'
 
 
-def _progress_bar(fraction: float) -> str:
-    width = max(0.0, min(100.0, fraction * 100.0))
-    return (
-        '<div class="progress-track" aria-hidden="true">'
-        f'<div class="progress-fill" style="width: {width:.2f}%"></div>'
-        "</div>"
-    )
-
-
-def _summary_radar_scores(summary: dict[str, Any]) -> dict[str, float]:
+def _summary_radar_scores(summary: dict[str, Any], benchmark_results: list[dict[str, Any]]) -> dict[str, float]:
     scores = summary.get("category_scores")
     if isinstance(scores, dict) and scores:
-        normalized: dict[str, float] = {}
-        for label, value in scores.items():
-            try:
-                normalized[str(label)] = float(value)
-            except (TypeError, ValueError):
-                continue
-        if len(normalized) <= 8:
-            return normalized
-        ordered = sorted(normalized.items(), key=lambda item: item[1], reverse=True)
-        top = dict(ordered[:7])
-        rest = [value for _, value in ordered[7:]]
-        top["Other"] = sum(rest) / len(rest)
-        return top
-    return _average_scores(summary)
+        return {str(key): _percent_number(value) for key, value in scores.items()}
+    grouped: dict[str, list[float]] = {}
+    for row in benchmark_results:
+        group = str(row.get("group") or row.get("profile") or "Benchmarks")
+        grouped.setdefault(group, []).append(_percent_number(row.get("score")))
+    return {group: sum(values) / len(values) for group, values in grouped.items() if values}
+
+
+def _score_context(summary: dict[str, Any], coverage: dict[str, Any]) -> str:
+    rows = [
+        ("Benchmark Level Mean", summary.get("benchmark_level_mean_score")),
+        ("Model Valid Tasks", summary.get("model_score_valid_tasks_only")),
+        ("Raw All Tasks", summary.get("raw_score_all_tasks", summary.get("raw_score"))),
+        ("Item Coverage", summary.get("item_coverage_rate", coverage.get("item_coverage_rate"))),
+        ("JSON Validity", summary.get("json_validity_rate")),
+    ]
+    rendered = []
+    for label, value in rows:
+        display = _format_rate_auto(value) if "Coverage" in label else _format_percent_display(value)
+        rendered.append(
+            '<div class="context-row">'
+            f"<span>{html.escape(label)}</span>"
+            f"{_progress_bar(value)}"
+            f"<strong>{html.escape(display)}</strong>"
+            "</div>"
+        )
+    return '<div class="score-context">' + "".join(rendered) + "</div>"
+
+
+def _progress_bar(value: Any) -> str:
+    width = max(0.0, min(100.0, _percent_number(value)))
+    return f'<div class="bar" aria-hidden="true" style="--value: {width:.4f}%"><i></i></div>'
 
 
 def _coverage_label(coverage: Any) -> str:
@@ -523,47 +657,42 @@ def _coverage_label(coverage: Any) -> str:
         return "coverage n/a"
     scored = coverage.get("successfully_scored_benchmarks", coverage.get("valid_judged_suite_count"))
     total = coverage.get("total_configured_benchmarks", coverage.get("suite_count"))
-    if isinstance(scored, int) and isinstance(total, int):
-        return f"{scored}/{total} scored"
+    if isinstance(scored, (int, float)) and isinstance(total, (int, float)) and total:
+        return f"{int(scored)}/{int(total)} scored"
+    rate = coverage.get("coverage_rate", coverage.get("suite_coverage_rate"))
+    if rate is not None:
+        return f"{_format_rate_auto(rate)} coverage"
     return "coverage n/a"
 
 
-def _coverage_section(summary: dict[str, Any], coverage: Any) -> str:
-    profile_results = summary.get("profile_results")
+def _coverage_section(summary: dict[str, Any], coverage: dict[str, Any]) -> str:
     return (
         _coverage_overview_cards(summary, coverage)
+        + '<div class="coverage-grid"><div class="coverage-panel">'
         + "<h3>Coverage By Category</h3>"
         + _coverage_table(coverage)
-        + "<h3>Coverage By Profile</h3>"
-        + _profile_coverage_table(profile_results)
+        + "</div></div>"
     )
 
 
-def _coverage_overview_cards(summary: dict[str, Any], coverage: Any) -> str:
-    if not isinstance(coverage, dict):
-        coverage = {}
-    total = _coverage_value(coverage, "total_configured_benchmarks", "suite_count", summary.get("suite_count", summary.get("task_count", 0)))
-    attempted = _coverage_value(coverage, "attempted_benchmarks", "attempted_suite_count", total)
-    scored = _coverage_value(coverage, "successfully_scored_benchmarks", "valid_judged_suite_count", summary.get("valid_task_count", 0))
-    excluded = _coverage_value(coverage, "excluded_from_score_benchmarks", "failed_benchmarks", max(0, int(total) - int(scored)))
+def _coverage_overview_cards(summary: dict[str, Any], coverage: dict[str, Any]) -> str:
     cards = [
-        ("Configured", str(total)),
-        ("Attempted", str(attempted)),
-        ("Scored", str(scored)),
-        ("Excluded", str(excluded)),
-        ("Suite coverage", _format_rate_auto(summary.get("suite_coverage_rate", _coverage_rate(coverage)))),
-        ("Item coverage", _format_rate_auto(summary.get("item_coverage_rate", coverage.get("item_coverage_rate")))),
+        ("Configured", _coverage_value(coverage, "total_configured_benchmarks", "suite_count")),
+        ("Attempted", _coverage_value(coverage, "attempted_benchmarks", "task_count")),
+        ("Scored", _coverage_value(coverage, "successfully_scored_benchmarks", "valid_judged_suite_count")),
+        ("Failed", _coverage_value(coverage, "failed_benchmarks", "benchmark_item_invalid_count")),
     ]
-    return (
-        '<div class="coverage-grid">'
-        + "".join(
-            '<div class="coverage-tile">'
-            f"<span>{html.escape(label)}</span><strong>{html.escape(value)}</strong>"
-            "</div>"
-            for label, value in cards
-        )
-        + "</div>"
-    )
+    if not any(value != "n/a" for _, value in cards):
+        cards = [
+            ("Selected Suites", _format_integer_safe(summary.get("selected_suite_count"))),
+            ("Known Suites", _format_integer_safe(summary.get("known_suite_count"))),
+            ("Excluded Suites", _format_integer_safe(summary.get("excluded_suite_count"))),
+            ("Coverage", _format_rate_auto(summary.get("suite_coverage_rate"))),
+        ]
+    return '<div class="coverage-cards">' + "".join(
+        f'<div class="coverage-card"><span>{html.escape(label)}</span><strong>{html.escape(value)}</strong></div>'
+        for label, value in cards
+    ) + "</div>"
 
 
 def _coverage_table(coverage: Any) -> str:
@@ -579,117 +708,91 @@ def _coverage_table(coverage: Any) -> str:
         rows.append(
             "<tr>"
             f"<td>{html.escape(str(category))}</td>"
-            f"<td>{int(data.get('total_configured_benchmarks', 0))}</td>"
-            f"<td>{int(data.get('successfully_scored_benchmarks', 0))}</td>"
-            f"<td>{int(data.get('failed_benchmarks', 0))}</td>"
-            f"<td>{_format_rate_auto(data.get('coverage_rate'))}</td>"
+            f"<td>{_format_integer_safe(data.get('total_configured_benchmarks'))}</td>"
+            f"<td>{_format_integer_safe(data.get('attempted_benchmarks'))}</td>"
+            f"<td>{_format_integer_safe(data.get('successfully_scored_benchmarks'))}</td>"
+            f"<td>{_format_integer_safe(data.get('failed_benchmarks'))}</td>"
+            f"<td>{html.escape(_format_rate_auto(data.get('coverage_rate')))}</td>"
             "</tr>"
         )
+    if not rows:
+        return '<div class="empty-state">No category coverage data recorded.</div>'
     return (
-        '<div class="table-wrap"><table><thead><tr><th>Category</th><th>Configured</th><th>Scored</th>'
-        "<th>Failed</th><th>Coverage</th></tr></thead>"
+        '<div class="table-wrap"><table><thead><tr><th>Category</th><th>Configured</th>'
+        "<th>Attempted</th><th>Scored</th><th>Failed</th><th>Coverage</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody></table></div>"
     )
 
 
-def _profile_coverage_table(profile_results: Any) -> str:
-    if not isinstance(profile_results, dict) or not profile_results:
-        return '<div class="empty-state">No profile coverage data recorded.</div>'
+def _score_breakdown_table(benchmark_results: list[dict[str, Any]]) -> str:
+    if not benchmark_results:
+        return '<div class="empty-state">No benchmark score rows were recorded.</div>'
     rows = []
-    for profile, data in sorted(profile_results.items()):
-        if not isinstance(data, dict):
-            continue
-        blockers = data.get("blocker_counts")
-        blocker_text = ", ".join(f"{key}: {count}" for key, count in sorted(blockers.items())) if isinstance(blockers, dict) else ""
-        rows.append(
-            "<tr>"
-            f"<td>{html.escape(str(profile))}</td>"
-            f"<td>{int(data.get('valid_judged_suite_count', 0))}/{int(data.get('suite_count', 0))}</td>"
-            f"<td>{_format_rate_auto(data.get('suite_coverage_rate'))}</td>"
-            f"<td>{_format_rate_auto(data.get('valid_judged_score'))}</td>"
-            f"<td>{html.escape(blocker_text)}</td>"
-            "</tr>"
-        )
-    return (
-        '<div class="table-wrap"><table><thead><tr><th>Profile</th><th>Runnable Suites</th><th>Coverage</th>'
-        f"<th>Valid Score</th><th>Blockers</th></tr></thead><tbody>{''.join(rows)}</tbody></table></div>"
-    )
-
-
-def _score_breakdown_table(benchmark_results: Any) -> str:
-    if not isinstance(benchmark_results, list) or not benchmark_results:
-        return '<div class="empty-state">No benchmark rows were recorded.</div>'
-    rows: list[str] = []
-    current_group: str | None = None
     for row in benchmark_results:
-        if not isinstance(row, dict):
-            continue
-        group = str(row.get("group", "Other"))
-        if group != current_group:
-            rows.append(f'<tr class="group-row"><td colspan="10">{html.escape(group)}</td></tr>')
-            current_group = group
+        benchmark = str(row.get("benchmark") or row.get("suite_id") or row.get("task_id") or "")
+        profile = str(row.get("profile") or row.get("group") or "")
+        score = row.get("score")
+        raw_score = row.get("raw_score")
+        valid_score = row.get("valid_score")
+        included = bool(row.get("included_in_official_score"))
+        official_class = "included" if included else "excluded"
+        official_label = "Included" if included else "Excluded"
         rows.append(
             "<tr>"
-            f"<td data-label=\"Benchmark\">{html.escape(str(row.get('benchmark', '')))}</td>"
-            f"<td data-label=\"Profile\">{html.escape(str(row.get('profile') or ''))}</td>"
-            f"<td data-label=\"Normalized 0-100\">{_score_bar(row.get('score'))}</td>"
-            f"<td data-label=\"Raw Score\">{html.escape(_format_percent_display(row.get('raw_score')))}</td>"
-            f"<td data-label=\"Valid Score\">{html.escape(_format_percent_display(row.get('valid_score')))}</td>"
-            f"<td data-label=\"Official Score\">{'yes' if row.get('included_in_official_score') else 'no'}</td>"
-            f"<td data-label=\"Status\">{_status_pill(row.get('status'))}</td>"
-            f"<td data-label=\"Run\">{html.escape(str(row.get('run_status') or ''))}</td>"
-            f"<td data-label=\"Score Status\">{html.escape(str(row.get('score_status') or ''))}</td>"
-            f"<td data-label=\"Items\">{html.escape(_items_summary(row))}</td>"
+            f'<td data-label="Benchmark">{html.escape(benchmark)}</td>'
+            f'<td data-label="Profile">{html.escape(profile)}</td>'
+            f'<td data-label="Normalized 0-100">{_score_bar(score)}</td>'
+            f'<td data-label="Raw Score">{html.escape(_format_percent_display(raw_score))}</td>'
+            f'<td data-label="Valid Score">{html.escape(_format_percent_display(valid_score))}</td>'
+            f'<td data-label="Official Score"><span class="official {official_class}">{html.escape(official_label)}</span></td>'
+            f'<td data-label="Status">{_status_pill(str(row.get("status") or ""))}</td>'
+            f'<td data-label="Run">{html.escape(str(row.get("run_status") or ""))}</td>'
+            f'<td data-label="Score Status">{html.escape(str(row.get("score_status") or ""))}</td>'
+            f'<td data-label="Items">{html.escape(_items_summary(row))}</td>'
             "</tr>"
         )
     return (
-        '<div class="table-wrap"><table class="score-breakdown"><thead><tr><th>Benchmark</th><th>Profile</th>'
-        "<th>Normalized 0-100</th><th>Raw Score</th><th>Valid Score</th><th>Official Score</th>"
-        "<th>Status</th><th>Run</th><th>Score Status</th><th>Items</th>"
-        f"</tr></thead><tbody>{''.join(rows)}</tbody></table></div>"
+        '<div class="table-wrap"><table class="score-breakdown"><thead><tr>'
+        "<th>Benchmark</th><th>Profile</th><th>Normalized 0-100</th><th>Raw Score</th>"
+        "<th>Valid Score</th><th>Official Score</th><th>Status</th><th>Run</th>"
+        "<th>Score Status</th><th>Items</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table></div>"
     )
 
 
-def _status_pill(status: Any) -> str:
+def _status_pill(status: str) -> str:
     normalized = normalize_status(status)
     info = status_info(normalized)
-    if normalized in {"success", "success_with_warnings", "passed"} or info.failure_class == "none":
-        tone = "success"
-    elif info.failure_class == "model":
-        tone = "model"
-    elif info.failure_class == "user_skip" or normalized.startswith("skipped"):
-        tone = "skipped"
-    else:
-        tone = "error"
+    css_class = "pass" if info.failure_class == "none" else "fail" if info.failure_class == "model" else "warn"
+    if normalized in {PASSED, SCORE_PASSED}:
+        css_class = "pass"
+    if normalized in {SCORE_PARTIALLY_CORRECT}:
+        css_class = "warn"
     label = normalized or "unknown"
-    return f'<span class="status-pill {tone}">{html.escape(label)}</span>'
+    return f'<span class="pill {css_class}">{html.escape(label)}</span>'
 
 
 def _score_bar(value: Any) -> str:
     percent = _percent_number(value)
-    display = _format_percent_display(value)
     return (
-        '<div class="scorebar">'
-        + _progress_bar(percent / 100.0)
-        + f"<span>{html.escape(display)}</span>"
-        + "</div>"
+        '<div class="score-value">'
+        f"<strong>{html.escape(_format_percent_display(value))}</strong>"
+        f"{_progress_bar(percent)}"
+        "</div>"
     )
 
 
 def _items_summary(row: dict[str, Any]) -> str:
-    evaluated = row.get("evaluated_task_count")
+    passed = row.get("evaluation_passed_count", row.get("passed_items"))
+    evaluated = row.get("evaluated_task_count", row.get("total_items"))
     valid = row.get("valid_evaluated_task_count")
-    passed = row.get("evaluation_passed_count")
-    if evaluated is None and valid is None and passed is None:
-        return "n/a"
-    parts = []
     if passed is not None and evaluated is not None:
-        parts.append(f"{passed}/{evaluated} passed")
-    elif evaluated is not None:
-        parts.append(f"{evaluated} evaluated")
-    if valid is not None:
-        parts.append(f"{valid} valid")
-    return "; ".join(parts)
+        suffix = f", {int(valid)} valid" if isinstance(valid, (int, float)) else ""
+        return f"{int(passed)}/{int(evaluated)}{suffix}"
+    status_counts = row.get("status_counts")
+    if isinstance(status_counts, dict) and status_counts:
+        return ", ".join(f"{key}: {value}" for key, value in sorted(status_counts.items()))
+    return "n/a"
 
 
 def _report_metadata_section(summary: dict[str, Any], metadata: dict[str, Any]) -> str:
@@ -702,10 +805,17 @@ def _report_metadata_section(summary: dict[str, Any], metadata: dict[str, Any]) 
         "run_id": metadata.get("run_id"),
         "created_at_utc": metadata.get("created_at_utc"),
         "output_dir": metadata.get("output_dir"),
-        "git_commit": metadata.get("git_commit"),
-        "target_provider": target.get("provider_type", target.get("provider", metadata.get("provider"))),
+        "target_provider": target.get("provider_type", metadata.get("provider")),
         "target_base_url": target.get("base_url", metadata.get("base_url")),
         "target_model": target.get("model", metadata.get("model")),
+        "request_concurrency": metadata.get("request_concurrency"),
+        "eval_concurrency": metadata.get("eval_concurrency"),
+        "model_request_timeout": metadata.get("model_request_timeout"),
+        "external_timeout": metadata.get("external_timeout"),
+        "selected_profile": metadata.get("selected_profile"),
+        "selected_suite_count": metadata.get("selected_suite_count", summary.get("selected_suite_count")),
+        "known_suite_count": metadata.get("known_suite_count", summary.get("known_suite_count")),
+        "excluded_suite_count": metadata.get("excluded_suite_count", summary.get("excluded_suite_count")),
         "temperature": target.get("temperature", metadata.get("temperature")),
         "top_p": target.get("top_p", metadata.get("top_p")),
         "max_tokens": target.get("max_tokens", metadata.get("max_tokens")),
@@ -714,14 +824,14 @@ def _report_metadata_section(summary: dict[str, Any], metadata: dict[str, Any]) 
         "judge_provider": judge.get("provider"),
         "judge_base_url": judge.get("base_url"),
         "judge_model": judge.get("model"),
-        "judge_temperature": judge.get("temperature"),
-        "judge_timeout_seconds": judge.get("timeout_seconds"),
+        "judge_timeout": judge.get("timeout_seconds"),
         "judge_fallback_used": judge.get("fallback_used"),
         "request_concurrency": metadata.get("request_concurrency"),
         "eval_concurrency": metadata.get("eval_concurrency"),
         "timeout_seconds": metadata.get("timeout"),
         "sandbox": metadata.get("sandbox"),
         "allow_host_docker_socket": metadata.get("allow_host_docker_socket"),
+        "git_commit": metadata.get("git_commit"),
     }
     return _metadata_definition_list(_compact_metadata_rows(rows))
 
@@ -730,6 +840,8 @@ def _metadata_definition_list(values: dict[str, Any]) -> str:
     rows = []
     for key, value in values.items():
         rows.append(f"<dt>{html.escape(str(key))}</dt><dd>{html.escape(_display_value(value))}</dd>")
+    if not rows:
+        return '<div class="empty-state">No run metadata recorded.</div>'
     return f'<dl class="metadata">{"".join(rows)}</dl>'
 
 
@@ -737,203 +849,144 @@ def _compact_metadata_rows(values: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in values.items() if value not in (None, "", [], {})}
 
 
-def _non_model_error_section(benchmark_results: Any) -> str:
+def _non_model_error_section(benchmark_results: list[dict[str, Any]]) -> str:
     rows = _non_model_error_rows(benchmark_results)
     if not rows:
         return '<div class="empty-state">No non-model run errors were recorded.</div>'
-    html_rows = []
+    rendered = []
     for row in rows:
-        status = normalize_status(row.get("status"))
+        status = str(row.get("status") or "")
         info = status_info(status)
-        error = _display_error(str(row.get("error_details") or row.get("error") or ""))
-        html_rows.append(
+        rendered.append(
             "<tr>"
-            f"<td>{html.escape(str(row.get('benchmark', '')))}</td>"
-            f"<td>{html.escape(_report_failure_class(row, info.failure_class))}</td>"
+            f"<td>{html.escape(str(row.get('benchmark') or row.get('suite_id') or row.get('task_id') or ''))}</td>"
             f"<td>{_status_pill(status)}</td>"
-            f"<td>{html.escape(str(row.get('run_status') or ''))}</td>"
-            f"<td>{html.escape(str(row.get('blocker_type') or ''))}</td>"
-            f"<td>{html.escape(error or info.explanation)}</td>"
+            f"<td>{html.escape(_report_failure_class(row))}</td>"
+            f"<td>{html.escape(_display_error(str(row.get('error_details') or row.get('error') or info.explanation or '')))}</td>"
+            f"<td>{'no' if row.get('included_in_official_score') else 'yes'}</td>"
             f"<td>{html.escape(_suggested_action(row))}</td>"
             "</tr>"
         )
     return (
-        '<div class="table-wrap"><table><thead><tr><th>Benchmark</th><th>Failure Class</th><th>Status</th>'
-        "<th>Run</th><th>Blocker</th><th>Explanation</th><th>Suggested Action</th></tr></thead>"
-        f"<tbody>{''.join(html_rows)}</tbody></table></div>"
+        '<div class="table-wrap"><table><thead><tr><th>Benchmark</th><th>Status</th>'
+        "<th>Failure Class</th><th>Explanation</th><th>Excluded</th><th>Suggested Action</th></tr></thead>"
+        f"<tbody>{''.join(rendered)}</tbody></table></div>"
     )
 
 
-def _non_model_error_rows(benchmark_results: Any) -> list[dict[str, Any]]:
-    if not isinstance(benchmark_results, list):
-        return []
-    rows = [row for row in benchmark_results if isinstance(row, dict) and _is_non_model_error_row(row)]
-    return sorted(rows, key=lambda row: (str(row.get("group", "")), str(row.get("benchmark", ""))))
+def _non_model_error_rows(benchmark_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [row for row in benchmark_results if _is_non_model_error_row(row)]
 
 
 def _is_non_model_error_row(row: dict[str, Any]) -> bool:
     status = normalize_status(row.get("status"))
-    error = str(row.get("error_details") or row.get("error") or "").strip()
     info = status_info(status)
     if info.failure_class in {"none", "model"}:
         return False
-    if info.failure_class == "user_skip" and not error:
-        return False
-    if row.get("included_in_official_score") and info.counts_toward_official_score and not error:
-        return False
-    return bool(status or error)
+    if not row.get("included_in_official_score"):
+        return True
+    if row.get("blocker_type") or row.get("error") or row.get("error_details"):
+        return True
+    return info.failure_class not in {"none", "model"}
 
 
-def _report_failure_class(row: dict[str, Any], fallback: str) -> str:
-    status = normalize_status(row.get("status"))
-    blocker = str(row.get("blocker_type") or "")
-    if status in {FAILED_MISSING_ASSETS, FAILED_MISSING_REQUIRED_TOOL, FAILED_INVALID_TASK_CONTEXT}:
-        return "benchmark_setup"
-    if any(marker in blocker for marker in ("asset", "tool", "grader", "task_context", "reference", "manifest")):
-        return "benchmark_setup"
-    if status in {FAILED_GRADER, FAILED_TOKEN_BUDGET, TIMED_OUT, FAILED_HARNESS_SETUP, FAILED_DATASET_EXTRACTION}:
-        return "infrastructure"
-    return fallback
+def _report_failure_class(row: dict[str, Any]) -> str:
+    blocker = row.get("blocker_type")
+    if isinstance(blocker, str) and blocker.strip():
+        return blocker.strip()
+    return status_info(row.get("status")).failure_class
 
 
 def _suggested_action(row: dict[str, Any]) -> str:
-    manifest = row.get("manifest") if isinstance(row.get("manifest"), dict) else {}
-    result = row.get("result") if isinstance(row.get("result"), dict) else {}
-    validation = result.get("validation") if isinstance(result.get("validation"), dict) else {}
-    issues = validation.get("issues") if isinstance(validation.get("issues"), list) else []
-    for issue in issues:
-        if isinstance(issue, dict) and issue.get("suggestion"):
-            return str(issue["suggestion"])
-    blocker = str(row.get("blocker_type") or "")
-    status = normalize_status(row.get("status"))
-    if "asset" in blocker or status in {FAILED_MISSING_ASSETS, FAILED_DATASET_EXTRACTION}:
-        return "Refresh benchmark assets and rerun validation."
-    if "tool" in blocker or status == FAILED_MISSING_REQUIRED_TOOL:
-        return "Install or expose the required benchmark tool and rerun."
-    if status in {FAILED_GRADER, FAILED_TOKEN_BUDGET}:
-        return "Inspect judge output, parser diagnostics, and token limits."
-    if status == TIMED_OUT:
-        return "Increase timeout or inspect benchmark/container logs."
-    if manifest:
-        return "Validate the benchmark manifest and official-run settings."
-    return "Inspect graded results and benchmark logs."
+    blocker = _report_failure_class(row)
+    if blocker in {"missing_asset", "git_lfs_pointer_stub"}:
+        return "Materialize benchmark assets and rerun validation."
+    if blocker in {"missing_required_tool", "unsupported_capability"}:
+        return "Check adapter tool exposure and benchmark capability declarations."
+    if blocker in {"missing_grader", "disabled_scoring", "judge_parse_error"}:
+        return "Inspect judge/grader configuration and rerun the affected benchmark."
+    if blocker in {"benchmark_setup", "repo_patch_harness_setup", "invalid_task_context"}:
+        return "Fix the benchmark manifest or harness setup, then rerun."
+    if blocker in {"infrastructure", "execution_error"}:
+        return "Inspect container, timeout, and runner logs for the benchmark."
+    return "Inspect graded_results.jsonl and benchmark logs."
 
 
-def _citation_section(benchmark_results: Any) -> str:
+def _citation_section(benchmark_results: list[dict[str, Any]]) -> str:
     catalog = _benchmark_citation_catalog()
-    if catalog:
-        return _code_block(catalog)
-    if not isinstance(benchmark_results, list) or not benchmark_results:
-        return '<div class="empty-state">No benchmark citations were recorded.</div>'
-    entries: list[str] = []
-    seen: set[str] = set()
-    for row in benchmark_results:
-        if not isinstance(row, dict):
-            continue
-        entry = _bibtex_entry(row)
-        key = _bibtex_entry_key(entry) or _bibtex_key(str(row.get("benchmark") or "Benchmark"))
-        if key in seen:
-            continue
-        seen.add(key)
-        entries.append(entry)
-    if not entries:
-        return '<div class="empty-state">No benchmark citations were recorded.</div>'
-    return _code_block("\n\n".join(entries))
+    if not catalog:
+        catalog = "\n\n".join(_bibtex_entry(row) for row in benchmark_results if isinstance(row, dict))
+    catalog = catalog.strip() + "\n" if catalog.strip() else "% No benchmark citations were recorded.\n"
+    return _code_block(catalog)
 
 
 def _benchmark_citation_catalog() -> str:
-    try:
-        return BENCHMARK_CITATIONS_PATH.read_text(encoding="utf-8").strip()
-    except OSError:
+    if not BENCHMARK_CITATIONS_PATH.exists():
         return ""
+    return BENCHMARK_CITATIONS_PATH.read_text(encoding="utf-8")
 
 
 def _bibtex_entry(row: dict[str, Any]) -> str:
-    citation = str(row.get("citation") or "").strip()
-    if citation.startswith("@"):
-        return citation
-    title = str(row.get("benchmark") or "Benchmark")
-    key = _bibtex_key(title)
-    homepage = str(row.get("homepage") or "").strip()
-    url = citation if citation.startswith(("http://", "https://")) else homepage
-    fields = [f"  title = {{{_bibtex_value(title)}}}"]
+    benchmark = str(row.get("benchmark") or row.get("suite_id") or row.get("task_id") or "benchmark")
+    title = benchmark
+    author = str(row.get("credit") or f"{benchmark} authors")
+    url = str(row.get("citation") or row.get("homepage") or "")
+    license_value = str(row.get("license") or "Unspecified")
+    key = _bibtex_entry_key(benchmark)
+    lines = [
+        f"@misc{{{key},",
+        f"  title = {{{_bibtex_value(title)}}},",
+        f"  author = {{{_bibtex_value(author)}}},",
+    ]
     if url:
-        fields.append(f"  url = {{{_bibtex_value(url)}}}")
-    if citation and citation != url:
-        fields.append(f"  note = {{{_bibtex_value(citation)}}}")
-    credit = str(row.get("credit") or "").strip()
-    if credit:
-        fields.append(f"  author = {{{_bibtex_value(credit)}}}")
-    license_name = str(row.get("license") or "").strip()
-    if license_name:
-        fields.append(f"  license = {{{_bibtex_value(license_name)}}}")
-    return "@misc{" + key + ",\n" + ",\n".join(fields) + "\n}"
+        lines.append(f"  url = {{{_bibtex_value(url)}}},")
+    lines.append(f"  license = {{{_bibtex_value(license_value)}}}")
+    lines.append("}")
+    return "\n".join(lines)
 
 
-def _bibtex_entry_key(entry: str) -> str:
-    first_line = entry.strip().splitlines()[0] if entry.strip() else ""
-    if not first_line.startswith("@") or "{" not in first_line:
-        return ""
-    return first_line.split("{", 1)[1].split(",", 1)[0].strip()
-
-
-def _bibtex_key(title: str) -> str:
-    chars = [ch.lower() if ch.isalnum() else "_" for ch in title]
-    key = "".join(chars).strip("_")
-    while "__" in key:
-        key = key.replace("__", "_")
-    if not key or not key[0].isalpha():
-        key = "benchmark_" + key
-    return key
+def _bibtex_entry_key(value: str) -> str:
+    key = []
+    for char in value.lower():
+        if char.isalnum():
+            key.append(char)
+        elif key and key[-1] != "_":
+            key.append("_")
+    return "".join(key).strip("_") or "benchmark"
 
 
 def _bibtex_value(value: str) -> str:
-    return " ".join(value.split()).replace("{", "\\{").replace("}", "\\}")
+    return value.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
 
 
-def _code_block(value: str) -> str:
-    return f'<pre class="bibtex"><code>{html.escape(value)}</code></pre>'
+def _code_block(content: str) -> str:
+    return f'<pre class="bibtex" tabindex="0"><code>{html.escape(content)}</code></pre>'
 
 
-def _coverage_value(coverage: Any, primary: str, fallback: str, default: Any) -> Any:
-    if not isinstance(coverage, dict):
-        return default
-    return coverage.get(primary, coverage.get(fallback, default))
-
-
-def _coverage_rate(coverage: Any) -> Any:
-    if not isinstance(coverage, dict):
-        return None
-    return coverage.get("coverage_rate", coverage.get("suite_coverage_rate"))
+def _coverage_value(coverage: dict[str, Any], primary: str, fallback: str) -> str:
+    value = coverage.get(primary, coverage.get(fallback))
+    return _format_integer_safe(value)
 
 
 def _format_rate_auto(value: Any) -> str:
     if value is None:
         return "n/a"
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError):
-        return str(value)
-    percent = numeric * 100.0 if abs(numeric) <= 1.0 else numeric
-    return f"{percent:.2f}%"
+    return f"{_percent_number(value):.2f}%"
 
 
 def _format_percent_display(value: Any) -> str:
     if value is None:
         return "n/a"
-    try:
-        return f"{float(value):.2f}%"
-    except (TypeError, ValueError):
-        return str(value)
+    return f"{_percent_number(value):.2f}%"
 
 
 def _format_seconds_safe(value: Any) -> str:
     if value is None:
         return "n/a"
     try:
-        return f"{float(value):.3f}s"
+        return f"{float(value):.2f}s"
     except (TypeError, ValueError):
-        return str(value)
+        return "n/a"
 
 
 def _format_integer_safe(value: Any) -> str:
@@ -942,52 +995,31 @@ def _format_integer_safe(value: Any) -> str:
     try:
         return str(int(value))
     except (TypeError, ValueError):
-        return str(value)
+        return "n/a"
 
 
 def _display_value(value: Any) -> str:
     if value is None:
         return "n/a"
     if isinstance(value, (dict, list)):
-        return _short_json(value)
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
     return str(value)
 
 
 def _percent_number(value: Any) -> float:
+    if value is None:
+        return 0.0
     try:
-        return max(0.0, min(100.0, float(value)))
+        number = float(value)
     except (TypeError, ValueError):
         return 0.0
+    if 0.0 <= number <= 1.0:
+        return number * 100.0
+    return number
 
 
-def _fraction_from_rate(value: Any) -> float:
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError):
-        return 0.0
-    return max(0.0, min(1.0, numeric if abs(numeric) <= 1.0 else numeric / 100.0))
-
-
-def _fraction_from_percent(value: Any) -> float:
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError):
-        return 0.0
-    return max(0.0, min(1.0, numeric / 100.0))
-
-
-def _join_if(value: Any, prefix: str) -> str:
-    if value in (None, ""):
-        return ""
-    return prefix + html.escape(str(value))
-
-
-def _link(url: str, label: str) -> str:
-    if not url:
-        return ""
-    if url.startswith(("http://", "https://")):
-        return f'<a href="{html.escape(url, quote=True)}">{html.escape(label or url)}</a>'
-    return html.escape(label or url)
+def _join_if(values: list[Any], separator: str) -> str:
+    return separator.join(str(value) for value in values if value not in (None, "", [], {}))
 
 
 def _write_results_csv(path: Path, results: list[GradeResult]) -> None:
@@ -1291,7 +1323,7 @@ def _radar_svg(scores: dict[str, float]) -> str:
     for fraction in (0.25, 0.5, 0.75, 1.0):
         points = [_point(cx, cy, radius * fraction, index, axes) for index in range(axes)]
         grid_polygons.append(
-            f'<polygon points="{_points(points)}" fill="none" stroke="#314250" stroke-width="1" />'
+            f'<polygon points="{_points(points)}" fill="none" stroke="#33445c" stroke-width="1" />'
         )
 
     axis_lines = []
@@ -1300,10 +1332,10 @@ def _radar_svg(scores: dict[str, float]) -> str:
         end = _point(cx, cy, radius, index, axes)
         label_point = _point(cx, cy, radius + 28.0, index, axes)
         axis_lines.append(
-            f'<line x1="{cx:.1f}" y1="{cy:.1f}" x2="{end[0]:.1f}" y2="{end[1]:.1f}" stroke="#405667" />'
+            f'<line x1="{cx:.1f}" y1="{cy:.1f}" x2="{end[0]:.1f}" y2="{end[1]:.1f}" stroke="#506783" />'
         )
         label_nodes.append(
-            f'<text x="{label_point[0]:.1f}" y="{label_point[1]:.1f}" text-anchor="middle" dominant-baseline="middle" font-size="10" fill="#dbe8e5">{html.escape(label)}</text>'
+            f'<text x="{label_point[0]:.1f}" y="{label_point[1]:.1f}" text-anchor="middle" dominant-baseline="middle" font-size="10" fill="#c8d6e8">{html.escape(label)}</text>'
         )
 
     value_points = [_point(cx, cy, radius * (value / 100.0), index, axes) for index, value in enumerate(values)]
@@ -1311,9 +1343,9 @@ def _radar_svg(scores: dict[str, float]) -> str:
         '<svg viewBox="0 0 320 260" role="img" aria-label="Radar chart of category scores">'
         + "".join(grid_polygons)
         + "".join(axis_lines)
-        + f'<polygon points="{_points(value_points)}" fill="#41d6c3" fill-opacity="0.24" stroke="#67d5ff" stroke-width="2" />'
+        + f'<polygon points="{_points(value_points)}" fill="#63a7ff" fill-opacity="0.24" stroke="#63a7ff" stroke-width="2" />'
         + "".join(
-            f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3" fill="#66e3a1" />' for x, y in value_points
+            f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3" fill="#45d09a" />' for x, y in value_points
         )
         + "".join(label_nodes)
         + "</svg>"
