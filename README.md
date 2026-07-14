@@ -48,12 +48,12 @@ docker run --rm -it \
 Run directly from a local checkout against an OpenAI-compatible server on your LAN:
 
 ```bash
-curl http://192.168.1.57:8000/v1/models
+curl http://YOUR_IP_ADDRESS:8000/v1/models
 
 UV_CACHE_DIR=/private/tmp/uv-cache-agent-bench \
 uv run agent-bench run \
   --provider openai-compatible \
-  --base-url http://192.168.1.57:8000/v1 \
+  --base-url http://YOUR_IP_ADDRESS:8000/v1 \
   --model <model-id-from-/v1/models> \
   --request-concurrency 2 \
   --eval-concurrency 2 \
@@ -63,8 +63,6 @@ uv run agent-bench run \
 ```
 
 `--sandbox subprocess` executes model-generated coding answers directly on the host and is not a security boundary. Use it only with trusted output; keep the default Docker sandbox for untrusted models.
-
-Use `http://`, not `http;/`. The `--model` value should match the model ID returned by `/v1/models`; for example, a verified local run used `gemma-4-E2B` from `http://192.168.1.57:8000/v1/models`. When running the Docker image against a model server on the same host, use `http://host.docker.internal:<port>/v1`; when running from the host checkout, use the server's reachable host or LAN address directly.
 
 Run against Ollama's OpenAI-compatible endpoint:
 
