@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.benchmark-config.v1",
-  "benchmark_id": "PB_027",
+  "benchmark_name": "CLAW-Eval",
   "benchmark_slug": "claw-eval",
   "display_name": "CLAW-Eval",
   "source_descriptor": "tasks/claw-eval/manifest.json",

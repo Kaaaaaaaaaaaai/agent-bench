@@ -1,6 +1,5 @@
 {
   "version": "agent-bench.manifest.v1",
-  "id": "PB_013",
   "display_name": "FinMCP-Bench",
   "task_group": "Finance",
   "description": "Run FinMCP-Bench locally through the Docker-backed public benchmark adapter.",

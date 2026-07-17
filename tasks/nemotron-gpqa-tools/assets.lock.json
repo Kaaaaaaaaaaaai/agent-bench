@@ -1,0 +1,60 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_name": "GPQA Diamond (with tools)",
+  "benchmark_slug": "nemotron-gpqa-tools",
+  "asset_root": "agent-bench-assets/nemotron-gpqa-tools",
+  "source": {
+    "repository_url": "https://github.com/idavidrein/gpqa.git",
+    "commit": "56686c06f5e19865c153de0fdb11be3890014df7",
+    "dataset_id": "Idavidrein/gpqa",
+    "dataset_revision": "633f5ee89ab8ad4522a9f850766b73f62147ffdd",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/idavidrein/gpqa.git",
+      "revision": "56686c06f5e19865c153de0fdb11be3890014df7",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": ["README.md", "dataset.zip", "baselines", "prompts"]
+      }
+    },
+    {
+      "source": "https://huggingface.co/datasets/Idavidrein/gpqa",
+      "revision": "633f5ee89ab8ad4522a9f850766b73f62147ffdd",
+      "checksum": "",
+      "expected_local_path": "huggingface:Idavidrein/gpqa",
+      "required": true,
+      "validation_rules": {
+        "kind": "huggingface_dataset",
+        "dataset_id": "Idavidrein/gpqa",
+        "config": "gpqa_diamond",
+        "split": "train",
+        "expected_records": 198,
+        "gated": true
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_paths",
+        "required_paths": ["README.md", "dataset.zip", "baselines", "prompts"]
+      },
+      {
+      "kind": "huggingface_dataset",
+      "dataset_id": "Idavidrein/gpqa",
+      "config": "gpqa_diamond",
+      "split": "train",
+      "expected_records": 198,
+      "gated": true
+      }
+    ]
+  }
+}

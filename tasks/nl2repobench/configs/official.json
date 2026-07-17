@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.benchmark-config.v1",
-  "benchmark_id": "PB_018",
+  "benchmark_name": "NL2RepoBench",
   "benchmark_slug": "nl2repobench",
   "display_name": "NL2RepoBench",
   "source_descriptor": "tasks/nl2repobench/manifest.json",

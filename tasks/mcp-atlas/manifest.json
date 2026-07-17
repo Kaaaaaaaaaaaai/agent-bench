@@ -1,6 +1,5 @@
 {
   "version": "agent-bench.manifest.v1",
-  "id": "PB_021",
   "display_name": "MCP Atlas",
   "task_group": "Tool Use",
   "description": "Run MCP Atlas locally through the Docker-backed public benchmark adapter.",

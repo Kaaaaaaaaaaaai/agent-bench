@@ -1,0 +1,27 @@
+{
+  "schema_version": "agent-bench.benchmark-config.v1",
+  "benchmark_name": "RULER 1M",
+  "benchmark_slug": "nemotron-ruler-1m",
+  "display_name": "RULER 1M",
+  "source_descriptor": "tasks/nemotron-ruler-1m/manifest.json",
+  "nvidia_model_card_revision": "1d370e47fbc56d1019a471c2339663cdbbb5236f",
+  "nemo_task": "ruler-1m-completions",
+  "required_context_tokens": 1048576,
+  "official_conditions": {
+    "official_split": "RULER synthetic suite at 1,048,576 tokens",
+    "official_scoring_method": "official RULER aggregate accuracy",
+    "official_prompt_format": "RULER completion prompt at 1M",
+    "official_grader_command": "nemo-evaluator-launcher run --config local_nemotron-3-super-120b-a12b-base.yaml -t ruler-1m-completions",
+    "official_evaluation_config": "tasks/nemotron-ruler-1m/configs/official.json",
+    "hardware_requirements": "Model context window at least 1048576 tokens",
+    "container_requirements": "Pinned component environment; missing native grader, long-context capacity, judge, gated scorer, or source assets fails closed"
+  },
+  "provenance_blocker": "English words, HotpotQA, Paul Graham essays, SQuAD, generated data, and tokenizer must also be pinned and hashed.",
+  "access_policy": {
+    "fail_closed": true,
+    "official_score_requires_native_grader": true,
+    "smoke_score_is_official": false
+  },
+  "container_command": "bash /benchmark/task/harness/run.sh"
+}
+

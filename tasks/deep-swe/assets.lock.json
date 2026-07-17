@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.assets-lock.v1",
-  "benchmark_id": "PB_019",
+  "benchmark_name": "DeepSWE",
   "benchmark_slug": "deep-swe",
   "asset_root": "agent-bench-assets/deep-swe",
   "source": {

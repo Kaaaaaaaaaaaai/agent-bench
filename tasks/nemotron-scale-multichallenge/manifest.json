@@ -1,0 +1,80 @@
+{
+  "version": "agent-bench.manifest.v1",
+  "display_name": "Scale AI MultiChallenge",
+  "task_group": "Instruction Following",
+  "description": "Run the Scale AI MultiChallenge leaf condition reported by the NVIDIA Puzzle model card with pinned public assets and fail-closed native requirements.",
+  "homepage_url": "https://huggingface.co/datasets/ScaleAI/MultiChallenge",
+  "official_leaderboard_url": "",
+  "source": {
+    "repository_url": "",
+    "commit": "",
+    "dataset_id": "ScaleAI/MultiChallenge",
+    "dataset_revision": "670fd81f270314d0f8f82b34fcfe2187fd28f699",
+    "subdir": ""
+  },
+  "license": "CC-BY-4.0",
+  "credit": "Scale AI MultiChallenge authors",
+  "citation": "https://huggingface.co/datasets/ScaleAI/MultiChallenge",
+  "official_conditions": {
+    "official_split": "dedicated packaged multi-turn evaluation",
+    "official_scoring_method": "official MultiChallenge judge score",
+    "official_prompt_format": "official multi-turn instruction-following prompt",
+    "official_grader_command": "nemo-evaluator-launcher run --config local_nemotron-3-super-120b-a12b.yaml -t scale_ai_multichallenge",
+    "official_evaluation_config": "tasks/nemotron-scale-multichallenge/configs/official.json",
+    "container_requirements": "Pinned component environment; missing native grader, simulator, sandbox, package digest, or assets fails closed"
+  },
+  "assets": [
+    {
+      "source": "https://huggingface.co/datasets/ScaleAI/MultiChallenge",
+      "revision": "670fd81f270314d0f8f82b34fcfe2187fd28f699",
+      "checksum": "",
+      "expected_local_path": "huggingface:ScaleAI/MultiChallenge",
+      "required": true,
+      "validation_rules": {
+        "kind": "huggingface_dataset",
+        "dataset_id": "ScaleAI/MultiChallenge"
+      }
+    }
+  ],
+  "container": {
+    "image": "agent-bench-external:python3.12",
+    "build_context": ".",
+    "dockerfile": "harness/Dockerfile",
+    "command": "bash /benchmark/task/harness/run.sh",
+    "environment_allowed": [],
+    "mounts": [],
+    "network": "model_proxy",
+    "cpus": 2,
+    "memory": "4g",
+    "pids_limit": 256,
+    "timeout_seconds": 21600,
+    "requires_nested_docker": false,
+    "requires_host_docker_socket": false,
+    "run_as_user": "10001:10001"
+  },
+  "adapter": {
+    "module": "",
+    "entry_point": "harness/run.sh",
+    "expected_output_files": [
+      "agent_bench_result.json"
+    ],
+    "result_parser": "agent_bench_result_json"
+  },
+  "scoring": {
+    "raw_score_field": "score",
+    "max_score": 1,
+    "normalization": "fraction_to_0_100",
+    "direction": "higher_is_better"
+  },
+  "reporting": {
+    "category_label": "Instruction Following",
+    "display_order": 41,
+    "credit": "Scale AI MultiChallenge authors",
+    "citation": "https://huggingface.co/datasets/ScaleAI/MultiChallenge",
+    "license": "CC-BY-4.0"
+  },
+  "capabilities": [
+    "multi_turn_judge"
+  ],
+  "required_tools": []
+}

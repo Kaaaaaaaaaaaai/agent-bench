@@ -1,0 +1,31 @@
+{
+  "source": {
+    "url": "https://huggingface.co/nvidia/NVIDIA-Nemotron-Labs-3-Puzzle-75B-A9B-NVFP4",
+    "revision": "1d370e47fbc56d1019a471c2339663cdbbb5236f"
+  },
+  "note": "One entry per non-derived benchmark condition in the model-card evaluation table. The model card determines membership and conditions only; each task manifest and asset lock use the original benchmark repository and dataset. TauBench Average is derived from the three domain rows and is intentionally not registered as a runnable task.",
+  "tasks": [
+    "MMLU-Pro",
+    "AIME25 (no tools)",
+    "HMMT Feb25 (no tools)",
+    "HMMT Feb25 (with tools)",
+    "GPQA Diamond (no tools)",
+    "GPQA Diamond (with tools)",
+    "LiveCodeBench v5 (2024-07 to 2024-12)",
+    "SciCode (subtask)",
+    "Humanity's Last Exam",
+    "Terminal-Bench Hard (NVIDIA 48-task subset)",
+    "TauBench V2 Airline",
+    "TauBench V2 Retail",
+    "TauBench V2 Telecom",
+    "IFBench (prompt)",
+    "Scale AI MultiChallenge",
+    "Arena-Hard-V2",
+    "AA-LCR",
+    "RULER 256k",
+    "RULER 512k",
+    "RULER 1M",
+    "MMLU-ProX",
+    "WMT24++ (en-to-xx)"
+  ]
+}

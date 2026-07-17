@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.benchmark-config.v1",
-  "benchmark_id": "PB_021",
+  "benchmark_name": "MCP Atlas",
   "benchmark_slug": "mcp-atlas",
   "display_name": "MCP Atlas",
   "source_descriptor": "tasks/mcp-atlas/manifest.json",

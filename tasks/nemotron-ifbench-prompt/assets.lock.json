@@ -1,0 +1,36 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_name": "IFBench (prompt)",
+  "benchmark_slug": "nemotron-ifbench-prompt",
+  "asset_root": "agent-bench-assets/nemotron-ifbench-prompt",
+  "source": {
+    "repository_url": "https://github.com/allenai/IFBench.git",
+    "commit": "1091c4c3de6c1f6ed12c012ed68f11ea450b0117",
+    "dataset_id": "",
+    "dataset_revision": "",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/allenai/IFBench.git",
+      "revision": "1091c4c3de6c1f6ed12c012ed68f11ea450b0117",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_clone"
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_clone"
+      }
+    ]
+  }
+}
+

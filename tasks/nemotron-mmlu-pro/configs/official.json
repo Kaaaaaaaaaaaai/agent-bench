@@ -1,0 +1,24 @@
+{
+  "schema_version": "agent-bench.benchmark-config.v1",
+  "benchmark_name": "MMLU-Pro",
+  "benchmark_slug": "nemotron-mmlu-pro",
+  "display_name": "MMLU-Pro",
+  "source_descriptor": "tasks/nemotron-mmlu-pro/manifest.json",
+  "nvidia_model_card_revision": "1d370e47fbc56d1019a471c2339663cdbbb5236f",
+  "nemo_task": "nemo_skills.ns_mmlu_pro",
+  "official_conditions": {
+    "official_split": "test; 10-choice boxed prompt; 1 repeat",
+    "official_scoring_method": "exact multiple-choice accuracy",
+    "official_prompt_format": "NVIDIA mcq-10choices-boxed prompt",
+    "official_grader_command": "nemo-evaluator-launcher run --config local_nemotron-3-super-120b-a12b.yaml -t nemo_skills.ns_mmlu_pro",
+    "official_evaluation_config": "tasks/nemotron-mmlu-pro/configs/official.json",
+    "container_requirements": "Pinned NeMo component environment; missing gated assets, native grader, sandbox, judge, or simulator fails closed"
+  },
+  "access_policy": {
+    "fail_closed": true,
+    "official_score_requires_native_grader": true,
+    "smoke_score_is_official": false
+  },
+  "container_command": "bash /benchmark/task/harness/run.sh"
+}
+

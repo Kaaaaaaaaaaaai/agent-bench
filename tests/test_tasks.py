@@ -8,31 +8,8 @@ from agent_bench.tasks import TaskLoadError, load_task_registry, load_tasks
 
 
 REPO_TASKS_DIR = Path(__file__).resolve().parents[1] / "tasks"
-ACTIVE_IDS = [
-    "PB_001",
-    "PB_004",
-    "PB_009",
-    "PB_010",
-    "PB_011",
-    "PB_012",
-    "PB_013",
-    "PB_015",
-    "PB_016",
-    "PB_017",
-    "PB_018",
-    "PB_019",
-    "PB_020",
-    "PB_021",
-    "PB_022",
-    "PB_023",
-    "PB_024",
-    "PB_025",
-    "PB_026",
-    "PB_027",
-]
-ACTIVE_NAMES = [
-    "SWE-bench",
-    "SWE-Lancer",
+ACTIVE_BENCHMARKS = [
+    "SWE-bench Verified",
     "codeneedle",
     "StockBench",
     "InvestorBench",
@@ -51,12 +28,31 @@ ACTIVE_NAMES = [
     "BigCodeBench",
     "MathArena",
     "CLAW-Eval",
+    "MMLU-Pro",
+    "AIME25 (no tools)",
+    "HMMT Feb25 (no tools)",
+    "HMMT Feb25 (with tools)",
+    "GPQA Diamond (no tools)",
+    "GPQA Diamond (with tools)",
+    "LiveCodeBench v5 (2024-07 to 2024-12)",
+    "SciCode (subtask)",
+    "Terminal-Bench Hard (NVIDIA 48-task subset)",
+    "TauBench V2 Airline",
+    "TauBench V2 Retail",
+    "TauBench V2 Telecom",
+    "IFBench (prompt)",
+    "Scale AI MultiChallenge",
+    "Arena-Hard-V2",
+    "AA-LCR",
+    "RULER 256k",
+    "RULER 512k",
+    "RULER 1M",
+    "MMLU-ProX",
+    "WMT24++ (en-to-xx)",
 ]
 
-
-def _manifest_payload(task_id: str, name: str, display_order: int = 1) -> dict:
+def _manifest_payload(name: str, display_order: int = 1) -> dict:
     return {
-        "id": task_id,
         "display_name": name,
         "task_group": "Coding",
         "description": f"Run {name}.",
@@ -195,12 +191,14 @@ def test_bundled_benchmark_folders_are_external_tasks_with_credits():
     loaded = load_tasks(REPO_TASKS_DIR)
     loaded_ids = [task.id for task in loaded]
 
-    assert len(legacy_tasks) == 20
-    assert [task["id"] for task in legacy_tasks] == ACTIVE_IDS
-    assert len(registry) == 20
-    assert len(loaded) == 20
-    assert loaded_ids == ACTIVE_IDS
-    assert [task.benchmark["name"] for task in loaded] == ACTIVE_NAMES
+    assert len(legacy_tasks) == 40
+    assert [task["benchmark"]["name"] for task in legacy_tasks] == ACTIVE_BENCHMARKS
+    assert len(registry) == 40
+    assert len(loaded) == 40
+    assert loaded_ids == ACTIVE_BENCHMARKS
+    assert [task.benchmark["name"] for task in loaded] == ACTIVE_BENCHMARKS
+    assert all(task.id == task.benchmark["name"] for task in loaded)
+    assert all("id" not in task for task in legacy_tasks)
     assert all(Path(task.source).name == "manifest.json" for task in loaded)
     assert all(task["type"] == "external_benchmark" for task in legacy_tasks)
     assert all(task.benchmark.get("license") for task in loaded)
@@ -209,21 +207,125 @@ def test_bundled_benchmark_folders_are_external_tasks_with_credits():
     assert "public_benchmarks" not in {task.category for task in loaded}
     assert {task.category for task in loaded} == {
         "Agentic",
+        "Chat",
         "Coding",
         "Finance",
+        "General Knowledge",
+        "Instruction Following",
         "Knowledge",
         "Long Context",
         "Math",
+        "Multilingual",
+        "Reasoning",
         "Terminal",
         "Tool Use",
     }
+
+    for manifest_path in REPO_TASKS_DIR.glob("*/manifest.json"):
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert "id" not in manifest
+        task_dir = manifest_path.parent
+        asset_lock = json.loads((task_dir / "assets.lock.json").read_text(encoding="utf-8"))
+        official_config = json.loads(
+            (task_dir / "configs" / "official.json").read_text(encoding="utf-8")
+        )
+        assert asset_lock["benchmark_name"] == manifest["display_name"]
+        assert official_config["benchmark_name"] == manifest["display_name"]
 
 
 def test_full_active_profile_selects_all_current_public_benchmarks():
     loaded = load_tasks(REPO_TASKS_DIR, profile="full_active")
 
-    assert len(loaded) == 20
-    assert [task.id for task in loaded] == ACTIVE_IDS
+    assert len(loaded) == 40
+    assert [task.id for task in loaded] == ACTIVE_BENCHMARKS
+
+
+def test_legacy_descriptor_flag_does_not_reparse_manifest_duplicates(monkeypatch):
+    monkeypatch.setenv("AGENT_BENCH_ENABLE_LEGACY_PUBLIC_BENCHMARKS", "1")
+
+    loaded = load_task_registry(REPO_TASKS_DIR)
+
+    assert [task.id for task in loaded] == ACTIVE_BENCHMARKS
+
+
+def test_nemotron_model_card_leaf_conditions_match_registered_tasks():
+    descriptor = json.loads(
+        (REPO_TASKS_DIR / "_metadata" / "nemotron-3-puzzle-benchmarks.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    registered = {task.id for task in load_task_registry(REPO_TASKS_DIR)}
+    expected = set(descriptor["tasks"])
+
+    assert descriptor["source"]["revision"] == "1d370e47fbc56d1019a471c2339663cdbbb5236f"
+    assert len(descriptor["tasks"]) == 22
+    assert len(expected) == 22
+    assert expected <= registered
+
+
+def test_nemotron_leaf_assets_use_original_benchmark_publishers():
+    manifests = {
+        payload["display_name"]: payload
+        for path in REPO_TASKS_DIR.glob("*/manifest.json")
+        for payload in [json.loads(path.read_text(encoding="utf-8"))]
+    }
+    expected_sources = {
+        "MMLU-Pro": ("https://github.com/TIGER-AI-Lab/MMLU-Pro.git", "TIGER-Lab/MMLU-Pro"),
+        "AIME25 (no tools)": ("https://github.com/eth-sri/matharena.git", "MathArena/aime_2025"),
+        "HMMT Feb25 (no tools)": ("https://github.com/eth-sri/matharena.git", "MathArena/hmmt_feb_2025"),
+        "HMMT Feb25 (with tools)": ("https://github.com/eth-sri/matharena.git", "MathArena/hmmt_feb_2025"),
+        "GPQA Diamond (no tools)": ("https://github.com/idavidrein/gpqa.git", "Idavidrein/gpqa"),
+        "GPQA Diamond (with tools)": ("https://github.com/idavidrein/gpqa.git", "Idavidrein/gpqa"),
+        "Scale AI MultiChallenge": ("", "ScaleAI/MultiChallenge"),
+        "AA-LCR": ("", "ArtificialAnalysis/AA-LCR"),
+        "MMLU-ProX": ("https://github.com/weihao1115/MMLU-ProX.git", "li-lab/MMLU-ProX"),
+        "WMT24++ (en-to-xx)": ("https://github.com/google-research/mt-metrics-eval.git", "google/wmt24pp"),
+    }
+
+    for benchmark_name, (repository, dataset_id) in expected_sources.items():
+        manifest = manifests[benchmark_name]
+        assert manifest["source"]["repository_url"] == repository
+        assert manifest["source"]["dataset_id"] == dataset_id
+        assert all(
+            "github.com/NVIDIA-NeMo/" not in asset["source"]
+            for asset in manifest["assets"]
+        )
+
+    source_files = [
+        path
+        for task_dir in REPO_TASKS_DIR.glob("nemotron-*")
+        for path in (task_dir / "manifest.json", task_dir / "assets.lock.json")
+        if path.is_file()
+    ]
+    assert all(
+        "github.com/NVIDIA-NeMo/Evaluator" not in path.read_text(encoding="utf-8")
+        and "github.com/NVIDIA-NeMo/Skills" not in path.read_text(encoding="utf-8")
+        for path in source_files
+    )
+
+
+def test_nemotron_source_adapter_harnesses_cannot_claim_official_scores():
+    manifests = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in REPO_TASKS_DIR.glob("*/manifest.json")
+    ]
+    nemo_manifests = [
+        manifest
+        for manifest in manifests
+        if str(manifest.get("official_conditions", {}).get("official_grader_command", ""))
+        .startswith("nemo-evaluator-launcher ")
+    ]
+
+    assert len(nemo_manifests) == 22
+    for manifest in nemo_manifests:
+        task_dir = next(
+            path.parent
+            for path in REPO_TASKS_DIR.glob("*/manifest.json")
+            if json.loads(path.read_text(encoding="utf-8"))["display_name"]
+            == manifest["display_name"]
+        )
+        harness = (task_dir / "harness" / "run.sh").read_text(encoding="utf-8")
+        assert "export AGENT_BENCH_EVALUATION_CONTRACT=source_adapter_smoke" in harness
 
 
 def test_load_tasks_discovers_benchmark_folders_without_central_registry(tmp_path):
@@ -232,19 +334,19 @@ def test_load_tasks_discovers_benchmark_folders_without_central_registry(tmp_pat
     second = task_dir / "second_bench"
     first.mkdir(parents=True)
     second.mkdir(parents=True)
-    (first / "manifest.json").write_text(json.dumps(_manifest_payload("PB_EX", "ExampleBench", 2)), encoding="utf-8")
-    (second / "manifest.json").write_text(json.dumps(_manifest_payload("PB_SECOND", "SecondBench", 1)), encoding="utf-8")
+    (first / "manifest.json").write_text(json.dumps(_manifest_payload("ExampleBench", 2)), encoding="utf-8")
+    (second / "manifest.json").write_text(json.dumps(_manifest_payload("SecondBench", 1)), encoding="utf-8")
     (task_dir / "public_benchmarks.json").write_text(json.dumps([{"id": "BROKEN"}]), encoding="utf-8")
 
     loaded = load_tasks(task_dir)
 
-    assert [task.id for task in loaded] == ["PB_SECOND", "PB_EX"]
+    assert [task.id for task in loaded] == ["SecondBench", "ExampleBench"]
     assert {Path(task.source).parent.name for task in loaded} == {"example_bench", "second_bench"}
 
     shutil.rmtree(second)
     loaded_after_remove = load_tasks(task_dir)
 
-    assert [task.id for task in loaded_after_remove] == ["PB_EX"]
+    assert [task.id for task in loaded_after_remove] == ["ExampleBench"]
 
 
 def test_core_runner_execution_code_does_not_branch_on_bundled_benchmark_names():
@@ -255,7 +357,7 @@ def test_core_runner_execution_code_does_not_branch_on_bundled_benchmark_names()
         repo_root / "agent_bench" / "runner.py",
         repo_root / "agent_bench" / "tasks.py",
     ]
-    forbidden = {item.lower() for item in ACTIVE_IDS + ACTIVE_NAMES + ["FinToolBench"]}
+    forbidden = {item.lower() for item in ACTIVE_BENCHMARKS + ["FinToolBench"]}
     hits = []
     for path in core_files:
         text = path.read_text(encoding="utf-8").lower()
@@ -266,7 +368,7 @@ def test_core_runner_execution_code_does_not_branch_on_bundled_benchmark_names()
 
 def test_finmcp_descriptor_is_static_not_live_tool_call():
     tasks = json.loads((REPO_TASKS_DIR / "public_benchmarks.json").read_text(encoding="utf-8"))
-    descriptor = next(task for task in tasks if task["id"] == "PB_013")
+    descriptor = next(task for task in tasks if task["benchmark"]["name"] == "FinMCP-Bench")
 
     assert "tool_call" not in descriptor["benchmark"]["capabilities"]
     assert descriptor["benchmark"]["adapter"] == "static_transcript_reasoning"
@@ -279,7 +381,6 @@ def test_load_tasks_supports_external_benchmark(tmp_path):
         json.dumps(
             [
                 {
-                    "id": "PB_001",
                     "type": "external_benchmark",
                     "question": "Run benchmark",
                     "benchmark": {
@@ -312,7 +413,6 @@ def test_load_tasks_keeps_non_mit_license_as_metadata(tmp_path):
         json.dumps(
             [
                 {
-                    "id": "PB_001",
                     "type": "external_benchmark",
                     "question": "Run benchmark",
                     "benchmark": {

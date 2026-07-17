@@ -1,0 +1,27 @@
+{
+  "schema_version": "agent-bench.benchmark-config.v1",
+  "benchmark_name": "AA-LCR",
+  "benchmark_slug": "nemotron-aa-lcr",
+  "display_name": "AA-LCR",
+  "source_descriptor": "tasks/nemotron-aa-lcr/manifest.json",
+  "nvidia_model_card_revision": "1d370e47fbc56d1019a471c2339663cdbbb5236f",
+  "nemo_task": "ns_aa_lcr",
+  "required_context_tokens": null,
+  "official_conditions": {
+    "official_split": "100 long-context questions; 16 repeats; separate Qwen judge",
+    "official_scoring_method": "official LLM-judge score",
+    "official_prompt_format": "AA-LCR prompt with extracted source documents",
+    "official_grader_command": "nemo-evaluator-launcher run --config local_nemotron-3-super-120b-a12b-base.yaml -t ns_aa_lcr",
+    "official_evaluation_config": "tasks/nemotron-aa-lcr/configs/official.json",
+    "hardware_requirements": "",
+    "container_requirements": "Pinned component environment; missing native grader, long-context capacity, judge, gated scorer, or source assets fails closed"
+  },
+  "provenance_blocker": "",
+  "access_policy": {
+    "fail_closed": true,
+    "official_score_requires_native_grader": true,
+    "smoke_score_is_official": false
+  },
+  "container_command": "bash /benchmark/task/harness/run.sh"
+}
+

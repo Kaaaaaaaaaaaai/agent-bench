@@ -1,0 +1,37 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_name": "Scale AI MultiChallenge",
+  "benchmark_slug": "nemotron-scale-multichallenge",
+  "asset_root": "agent-bench-assets/nemotron-scale-multichallenge",
+  "source": {
+    "repository_url": "",
+    "commit": "",
+    "dataset_id": "ScaleAI/MultiChallenge",
+    "dataset_revision": "670fd81f270314d0f8f82b34fcfe2187fd28f699",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://huggingface.co/datasets/ScaleAI/MultiChallenge",
+      "revision": "670fd81f270314d0f8f82b34fcfe2187fd28f699",
+      "checksum": "",
+      "expected_local_path": "huggingface:ScaleAI/MultiChallenge",
+      "required": true,
+      "validation_rules": {
+        "kind": "huggingface_dataset",
+        "dataset_id": "ScaleAI/MultiChallenge"
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "huggingface_dataset",
+        "dataset_id": "ScaleAI/MultiChallenge"
+      }
+    ]
+  }
+}

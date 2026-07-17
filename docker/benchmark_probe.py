@@ -68,6 +68,9 @@ ANSWER_KEYS = (
     "final_response",
     "patch",
     "gold_patch",
+    "test_patch",
+    "fail_to_pass",
+    "pass_to_pass",
     "python_solution",
 )
 CHOICE_KEYS = ("choices", "options", "candidates", "multiple_choice_targets")
@@ -158,6 +161,7 @@ SWELANCER_GRADER_TIMEOUT_ENV = "AGENT_BENCH_SWELANCER_GRADER_TIMEOUT"
 TARGET_REPO_ROOT_ENV = "AGENT_BENCH_TARGET_REPO_ROOT"
 FINANCE_AGENT_V2_FIXTURE_ROOT_ENV = "AGENT_BENCH_FINANCE_AGENT_V2_FIXTURE_ROOT"
 DEFAULT_ASSET_ROOT = "/tmp/agent-bench-assets"
+SOURCE_ADAPTER_SMOKE_CONTRACT = "source_adapter_smoke"
 FINANCE_AGENT_V2_REQUIRED_TOOLS = {
     "web_search",
     "edgar_search",
@@ -1353,7 +1357,7 @@ def _base_result_payload(
     exposed_tools = _contract_exposed_tools(capability_contract)
     missing_tools = _contract_missing_tools(capability_contract)
     missing_env = _contract_missing_env(capability_contract)
-    return {
+    payload = {
         "benchmark": args.benchmark,
         "group": os.environ.get("AGENT_BENCH_BENCHMARK_GROUP") or "Benchmarks",
         "kind": args.kind,
@@ -1391,6 +1395,8 @@ def _base_result_payload(
         "capability_contract": capability_contract,
         "unsupported_capabilities": unsupported_capabilities,
     }
+    payload.update(_evaluation_contract_fields())
+    return payload
 
 
 def _capability_profile(
@@ -1550,8 +1556,9 @@ def _annotate_tool_contract(
 
 def _required_capabilities(benchmark: str) -> set[str]:
     configured = _capabilities_from_env()
+    native_grader = _native_grader_capability()
     if configured:
-        return configured
+        return configured | native_grader
     normalized = normalize_text(benchmark).replace("-", " ")
     capability_map = {
         "swe bench": {"repo_patch"},
@@ -1566,8 +1573,42 @@ def _required_capabilities(benchmark: str) -> set[str]:
     }
     for key, capabilities in capability_map.items():
         if normalized == key:
-            return set(capabilities)
-    return {"chat_answer"}
+            return set(capabilities) | native_grader
+    return {"chat_answer"} | native_grader
+
+
+def _native_grader_capability() -> set[str]:
+    # A source-adapter smoke run validates the pinned original assets, model
+    # endpoint, extraction, and generic adapter. It is deliberately separate
+    # from the model-card's native evaluator contract and must never inherit an
+    # official-score claim merely because the source rows are gradable.
+    if _source_adapter_smoke_enabled():
+        return set()
+    descriptor = _benchmark_descriptor()
+    conditions = descriptor.get("official_conditions")
+    if not isinstance(conditions, dict):
+        return set()
+    command = str(conditions.get("official_grader_command") or "").strip()
+    if command.startswith("nemo-evaluator-launcher "):
+        return {"nemo_evaluator_component"}
+    if command.startswith("python -m swebench.harness.run_evaluation "):
+        return {"swebench_official_grader"}
+    return set()
+
+
+def _source_adapter_smoke_enabled() -> bool:
+    return os.environ.get("AGENT_BENCH_EVALUATION_CONTRACT", "").strip() == SOURCE_ADAPTER_SMOKE_CONTRACT
+
+
+def _evaluation_contract_fields() -> dict[str, Any]:
+    if not _source_adapter_smoke_enabled():
+        return {}
+    return {
+        "evaluation_contract": SOURCE_ADAPTER_SMOKE_CONTRACT,
+        "score_mode": SOURCE_ADAPTER_SMOKE_CONTRACT,
+        "official_equivalent": False,
+        "included_in_official_score": False,
+    }
 
 
 def _item_required_capabilities(item: BenchmarkItem) -> set[str]:
@@ -1895,7 +1936,7 @@ def extract_huggingface_items(limit: int) -> tuple[list[BenchmarkItem], list[str
     if not dataset_ids:
         return [], []
     try:
-        from datasets import load_dataset
+        from datasets import load_dataset, load_from_disk
     except ImportError as exc:
         return [], [f"Hugging Face streaming requires the datasets package ({exc})"]
 
@@ -1904,6 +1945,24 @@ def extract_huggingface_items(limit: int) -> tuple[list[BenchmarkItem], list[str
     for dataset_id in dataset_ids:
         if len(items) >= limit:
             break
+        cache_value = os.environ.get("AGENT_BENCH_DATASET_CACHE_PATH", "").strip()
+        cache_path = Path(cache_value) if cache_value else None
+        if cache_path is not None and cache_path.is_dir():
+            try:
+                dataset = load_from_disk(str(cache_path))
+                items.extend(
+                    _items_from_huggingface_iterable(
+                        dataset,
+                        f"huggingface:{dataset_id}/materialized",
+                        limit - len(items),
+                    )
+                )
+            except Exception as exc:
+                errors.append(f"{dataset_id}/materialized: {exc}")
+            continue
+        if os.environ.get("AGENT_BENCH_REQUIRE_MATERIALIZED_DATASET") == "1":
+            errors.append(f"{dataset_id}: required materialized dataset cache was not found")
+            continue
         extracted, dataset_errors = _extract_huggingface_dataset_items(
             load_dataset,
             dataset_id,
@@ -1945,11 +2004,15 @@ def _extract_huggingface_dataset_items(
 ) -> tuple[list[BenchmarkItem], list[str]]:
     items: list[BenchmarkItem] = []
     errors: list[str] = []
+    revision = os.environ.get("AGENT_BENCH_DATASET_REVISION", "").strip()
+    load_kwargs = {"streaming": True}
+    if revision:
+        load_kwargs["revision"] = revision
     for split in ("test", "validation", "dev", "train"):
         if len(items) >= limit:
             break
         try:
-            dataset = load_dataset(dataset_id, split=split, streaming=True)
+            dataset = load_dataset(dataset_id, split=split, **load_kwargs)
         except Exception as exc:
             errors.append(f"{dataset_id}/{split}: {exc}")
             continue
@@ -1963,7 +2026,7 @@ def _extract_huggingface_dataset_items(
     if items:
         return items, errors
     try:
-        dataset_dict = load_dataset(dataset_id, streaming=True)
+        dataset_dict = load_dataset(dataset_id, **load_kwargs)
     except Exception as exc:
         errors.append(f"{dataset_id}: {exc}")
         return items, errors
@@ -3369,7 +3432,12 @@ def item_from_record(record: Any, source: str) -> BenchmarkItem | None:
         grading = "task_compliance"
     else:
         grading = "rubric" if expected_key in RUBRIC_KEYS else "exact"
-        if _is_financemath_benchmark() and expected_key == "python_solution":
+        if expected_key in {"patch", "gold_patch", "test_patch"}:
+            # Repository gold patches and test oracles are grader-only. They
+            # must never become model-visible prompts or published item data.
+            grading = "task_compliance"
+            expected_value = "Candidate patch should satisfy the public issue statement."
+        elif _is_financemath_benchmark() and expected_key == "python_solution":
             solution_answer = _numeric_answer_from_python_solution(expected_value)
             if solution_answer:
                 expected_value = solution_answer
@@ -3430,9 +3498,6 @@ def _record_metadata(
         "base_sha",
         "revision",
         "instance_id",
-        "test_patch",
-        "patch",
-        "gold_patch",
     ):
         original = lower_to_key.get(key)
         if original is None:
@@ -3440,8 +3505,6 @@ def _record_metadata(
         value = record.get(original)
         if isinstance(value, (str, int, float, bool)):
             metadata[key] = str(value)
-    if expected_key in {"patch", "gold_patch"} and expected:
-        metadata["reference_patch"] = expected
     for key in (
         "input_assets",
         "input_files",
@@ -7363,7 +7426,10 @@ def _max_answer_tokens(item: BenchmarkItem) -> int:
     upper_bound = _bounded_int(raw, DEFAULT_AGENT_MAX_TOKENS, 512, 65536)
     grading = str(item.metadata.get("grading", "exact"))
     if item.choices:
-        target = 512
+        # Reasoning-model APIs may account for hidden reasoning inside the
+        # completion budget. A 512-token ceiling can therefore truncate before
+        # any visible choice is emitted even for a short multiple-choice item.
+        target = 4096
     elif item.metadata.get("_file_artifact_task"):
         target = 4096
     elif _looks_like_patch_task(item):
@@ -7863,7 +7929,7 @@ def chat_completion_headers(label: str) -> dict[str, str]:
     headers = {
         "Content-Type": "application/json",
         "X-Agent-Bench-Proxy-Label": label,
-        "X-Agent-Bench-Benchmark-Id": os.environ.get("AGENT_BENCH_BENCHMARK_ID", ""),
+        "X-Agent-Bench-Benchmark-Name": os.environ.get("AGENT_BENCH_BENCHMARK_NAME", ""),
         "X-Agent-Bench-Task-Id": os.environ.get("AGENT_BENCH_TASK_ID", ""),
     }
     api_key = os.environ.get("AGENT_BENCH_API_KEY", "")
@@ -7980,6 +8046,7 @@ def evaluation_payload(
         "missing_tools": missing_tools,
     }
     payload.update(extra)
+    payload.update(_evaluation_contract_fields())
     grade = payload.get("grade")
     if isinstance(grade, dict):
         explicit_inclusion = grade.get("included_in_official_score")

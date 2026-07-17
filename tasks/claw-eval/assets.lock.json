@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.assets-lock.v1",
-  "benchmark_id": "PB_027",
+  "benchmark_name": "CLAW-Eval",
   "benchmark_slug": "claw-eval",
   "asset_root": "agent-bench-assets/claw-eval",
   "source": {

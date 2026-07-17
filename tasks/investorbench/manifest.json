@@ -1,6 +1,5 @@
 {
   "version": "agent-bench.manifest.v1",
-  "id": "PB_011",
   "display_name": "InvestorBench",
   "task_group": "Finance",
   "description": "Run InvestorBench locally through the Docker-backed public benchmark adapter.",

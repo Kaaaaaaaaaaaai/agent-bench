@@ -1,0 +1,69 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_name": "WMT24++ (en-to-xx)",
+  "benchmark_slug": "nemotron-wmt24pp",
+  "asset_root": "agent-bench-assets/nemotron-wmt24pp",
+  "source": {
+    "repository_url": "https://github.com/google-research/mt-metrics-eval.git",
+    "commit": "68a481aea1a787392d55af8f76ac8ef40c5f4664",
+    "dataset_id": "google/wmt24pp",
+    "dataset_revision": "e65f5856b1de3319c748c15e5aec0bc2336ec3b0",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/google-research/mt-metrics-eval.git",
+      "revision": "68a481aea1a787392d55af8f76ac8ef40c5f4664",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": ["README.md", "setup.py", "mt_metrics_eval"]
+      }
+    },
+    {
+      "source": "https://huggingface.co/datasets/google/wmt24pp",
+      "revision": "e65f5856b1de3319c748c15e5aec0bc2336ec3b0",
+      "checksum": "",
+      "expected_local_path": "huggingface:google/wmt24pp",
+      "required": true,
+      "validation_rules": {
+        "kind": "huggingface_dataset",
+        "dataset_id": "google/wmt24pp"
+      }
+    },
+    {
+      "source": "https://huggingface.co/Unbabel/XCOMET-XXL",
+      "revision": "873bac1b1c461e410c4a6e379f6790d3d1c7c214",
+      "checksum": "",
+      "expected_local_path": "huggingface:Unbabel/XCOMET-XXL",
+      "required": true,
+      "validation_rules": {
+        "kind": "huggingface_model",
+        "model_id": "Unbabel/XCOMET-XXL",
+        "gated": true
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_paths",
+        "required_paths": ["README.md", "setup.py", "mt_metrics_eval"]
+      },
+      {
+        "kind": "huggingface_dataset",
+        "dataset_id": "google/wmt24pp"
+      },
+      {
+        "kind": "huggingface_model",
+        "model_id": "Unbabel/XCOMET-XXL",
+        "gated": true
+      }
+    ]
+  }
+}

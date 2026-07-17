@@ -262,15 +262,15 @@ def test_cli_mock_smoke_runs_all_bundled_benchmarks(tmp_path, monkeypatch):
     assert exit_code == 0
     summary = json.loads((tmp_path / out_dir / "summary.json").read_text(encoding="utf-8"))
     html = (tmp_path / out_dir / "summary.html").read_text(encoding="utf-8")
-    assert summary["task_count"] == 20
-    assert summary["selected_suite_count"] == 20
-    assert summary["known_suite_count"] == 20
-    assert summary["excluded_suite_count"] == 4
-    assert len(summary["excluded_suites"]) == 4
-    assert len(summary["benchmark_results"]) == 20
-    assert summary["suite_coverage_rate"] == pytest.approx(16 / 20)
-    assert summary["coverage_summary"]["successfully_scored_benchmarks"] == 16
-    assert summary["conservative_all_suite_score"] == pytest.approx(16 / 20)
+    assert summary["task_count"] == 40
+    assert summary["selected_suite_count"] == 40
+    assert summary["known_suite_count"] == 40
+    assert summary["excluded_suite_count"] == 9
+    assert len(summary["excluded_suites"]) == 9
+    assert len(summary["benchmark_results"]) == 40
+    assert summary["suite_coverage_rate"] == pytest.approx(31 / 40)
+    assert summary["coverage_summary"]["successfully_scored_benchmarks"] == 31
+    assert summary["conservative_all_suite_score"] == pytest.approx(31 / 40)
     assert "public_benchmarks" not in html
     assert "SWE-bench" in html
     assert "Failures And Status" in html
@@ -335,7 +335,7 @@ def test_aggregate_results_emits_external_benchmark_rows():
     summary = aggregate_results(
         [
             GradeResult(
-                task_id="PB_001",
+                task_id="SWE-bench Verified",
                 category="Coding",
                 kind="external_benchmark",
                 score=0.75,
@@ -409,7 +409,7 @@ def test_aggregate_results_emits_external_benchmark_rows():
 
 def test_external_benchmark_csv_row_keeps_answer_separate_from_status():
     result = GradeResult(
-        task_id="PB_TOOL",
+        task_id="ToolBench",
         category="Finance",
         kind="external_benchmark",
         score=0.0,
@@ -546,7 +546,7 @@ def test_aggregate_results_surfaces_repo_patch_canary_blocker_type():
     summary = aggregate_results(
         [
             GradeResult(
-                task_id="PB_001",
+                task_id="SWE-bench Verified",
                 category="Coding",
                 kind="external_benchmark",
                 score=0.0,
@@ -586,7 +586,7 @@ def test_aggregate_results_uses_nested_judge_parse_and_model_valid_counts():
     summary = aggregate_results(
         [
             GradeResult(
-                task_id="PB_016",
+                task_id="FinanceMath",
                 category="Finance",
                 kind="external_benchmark",
                 score=0.0,
@@ -626,7 +626,7 @@ def test_aggregate_results_excludes_tool_call_without_exposed_tools():
     summary = aggregate_results(
         [
             GradeResult(
-                task_id="PB_TOOL",
+                task_id="ToolBench",
                 category="Finance",
                 kind="external_benchmark",
                 score=1.0,
@@ -661,7 +661,7 @@ def test_aggregate_results_excludes_missing_environment_requirements():
     summary = aggregate_results(
         [
             GradeResult(
-                task_id="PB_015",
+                task_id="Finance Agent v2",
                 category="Finance",
                 kind="external_benchmark",
                 score=1.0,
@@ -700,7 +700,7 @@ def test_aggregate_results_excludes_non_official_smoke_scores():
     summary = aggregate_results(
         [
             GradeResult(
-                task_id="PB_004",
+                task_id="ExampleBench Four",
                 category="Coding",
                 kind="external_benchmark",
                 score=0.0,
@@ -731,7 +731,7 @@ def test_aggregate_results_excludes_non_official_smoke_scores():
     assert summary["excluded_suite_count"] == 1
     assert summary["coverage_summary"]["excluded_from_score_benchmarks"] == 1
     assert summary["metadata"]["excluded_suite_count"] == 1
-    assert summary["metadata"]["excluded_suites"][0]["suite_id"] == "PB_004"
+    assert summary["metadata"]["excluded_suites"][0]["benchmark_name"] == "ExampleBench Four"
     assert summary["benchmark_results"][0]["included_in_official_score"] is False
     assert summary["benchmark_results"][0]["official_equivalent"] is False
     assert summary["benchmark_results"][0]["score_mode"] == "smoke_patch_presence"
@@ -743,7 +743,7 @@ def test_aggregate_results_counts_payload_unsupported_capabilities():
     summary = aggregate_results(
         [
             GradeResult(
-                task_id="PB_TOOL",
+                task_id="ToolBench",
                 category="Finance",
                 kind="external_benchmark",
                 score=0.0,
@@ -765,7 +765,7 @@ def test_aggregate_results_counts_payload_unsupported_capabilities():
                 },
             ),
             GradeResult(
-                task_id="PB_015",
+                task_id="Finance Agent v2",
                 category="Finance",
                 kind="external_benchmark",
                 score=0.0,
@@ -831,7 +831,7 @@ def test_usage_summary_uses_benchmark_item_denominator_and_hidden_reasoning_coun
     summary = aggregate_results(
         [
             GradeResult(
-                task_id="PB_TOOL",
+                task_id="ToolBench",
                 category="Finance",
                 kind="external_benchmark",
                 score=0.0,

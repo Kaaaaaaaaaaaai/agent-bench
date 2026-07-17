@@ -58,7 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--suite",
         action="append",
         default=None,
-        help="Suite ID or benchmark name to run; may be passed multiple times or comma-separated",
+        help="Benchmark name to run; may be passed multiple times or comma-separated",
     )
     run.add_argument("--temperature", type=float, default=0.0)
     run.add_argument("--top-p", type=float, default=None)
@@ -122,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
         _validate_cli_runtime_path(parser, Path(args.out), Path("runs"), "--out")
         _validate_cli_runtime_path(parser, Path(args.asset_root), Path("agent-bench-assets"), "--asset-root")
         include = _split_selectors(args.include)
-        suite_ids = _split_selectors(args.suite)
+        benchmark_names = _split_selectors(args.suite)
         config = RunConfig(
             provider=args.provider,
             base_url=args.base_url,
@@ -139,7 +139,7 @@ def main(argv: list[str] | None = None) -> int:
             limit=args.limit,
             include=include,
             profile=args.profile,
-            suite_ids=suite_ids,
+            benchmark_names=benchmark_names,
             temperature=args.temperature,
             top_p=args.top_p,
             max_tokens=args.max_tokens,

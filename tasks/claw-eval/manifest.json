@@ -1,6 +1,5 @@
 {
   "version": "agent-bench.manifest.v1",
-  "id": "PB_027",
   "display_name": "CLAW-Eval",
   "task_group": "Agentic",
   "description": "Run CLAW-Eval locally through the Docker-backed public benchmark adapter.",

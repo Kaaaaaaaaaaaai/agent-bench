@@ -61,7 +61,7 @@ class RunConfig:
     external_launcher_image: str = "agent-bench-external:python3.12"
     asset_root: Path = DEFAULT_EXTERNAL_ASSET_ROOT
     profile: str = "full_active"
-    suite_ids: set[str] | None = None
+    benchmark_names: set[str] | None = None
     judge_provider: str = "none"
     judge_base_url: str | None = None
     judge_model: str | None = None
@@ -116,7 +116,7 @@ async def run_benchmark(config: RunConfig) -> dict[str, Any]:
             registry,
             include=config.include,
             limit=config.limit,
-            suite_ids=config.suite_ids,
+            benchmark_names=config.benchmark_names,
             profile=config.profile,
         )
         logger.info(f"Selected {len(tasks)} task(s) from {len(registry)} known suite(s)")
@@ -402,7 +402,7 @@ async def _run_external_benchmark(
 
 
 def _run_configuration_message(config: RunConfig) -> str:
-    suites = ",".join(sorted(config.suite_ids)) if config.suite_ids else "all"
+    suites = ",".join(sorted(config.benchmark_names)) if config.benchmark_names else "all"
     include = ",".join(sorted(config.include)) if config.include else "all"
     model = config.model or ("mock-perfect" if config.provider == "mock" else "")
     return (
@@ -462,7 +462,7 @@ def _needs_model_proxy(config: RunConfig, tasks: list[Task]) -> bool:
 def _raw_response_record(task: Task, response: ModelResponse) -> dict[str, Any]:
     return {
         "record_type": "benchmark_wrapper_response" if task.is_external_benchmark else "model_response",
-        "benchmark_id": task.id if task.is_external_benchmark else "",
+        "benchmark_name": task.id if task.is_external_benchmark else "",
         "task_id": task.id,
         "request_id": f"task_{task.id}",
         "timestamp": datetime.now(UTC).isoformat(),
@@ -483,7 +483,7 @@ def _graded_result_record(task: Task, grade: GradeResult) -> dict[str, Any]:
     result = details.get("result") if isinstance(details.get("result"), dict) else {}
     return {
         "record_type": "graded_result",
-        "benchmark_id": task.id if task.is_external_benchmark else "",
+        "benchmark_name": task.id if task.is_external_benchmark else "",
         "task_id": grade.task_id,
         "raw_score": result.get("raw_score"),
         "normalized_score": grade.score * 100.0,

@@ -1,6 +1,5 @@
 {
   "version": "agent-bench.manifest.v1",
-  "id": "PB_015",
   "display_name": "Finance Agent v2",
   "task_group": "Finance",
   "description": "Run Finance Agent v2 locally through the Docker-backed public benchmark adapter.",

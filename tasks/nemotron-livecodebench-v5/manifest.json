@@ -1,0 +1,92 @@
+{
+  "version": "agent-bench.manifest.v1",
+  "display_name": "LiveCodeBench v5 (2024-07 to 2024-12)",
+  "task_group": "Coding",
+  "description": "Run the LiveCodeBench v5 (2024-07 to 2024-12) condition reported by NVIDIA-Nemotron-Labs-3-Puzzle-75B-A9B using pinned upstream assets and fail-closed official requirements.",
+  "homepage_url": "https://github.com/LiveCodeBench/LiveCodeBench",
+  "official_leaderboard_url": "",
+  "source": {
+    "repository_url": "https://github.com/LiveCodeBench/LiveCodeBench.git",
+    "commit": "28fef95ea8c9f7a547c8329f2cd3d32b92c1fa24",
+    "dataset_id": "livecodebench/code_generation_lite",
+    "dataset_revision": "c52cd175916e995019dcd848d1054b419d2e70b5",
+    "subdir": ""
+  },
+  "license": "MIT harness; mixed/ambiguous competition-content terms",
+  "credit": "LiveCodeBench authors and source contests",
+  "citation": "https://github.com/LiveCodeBench/LiveCodeBench",
+  "official_conditions": {
+    "official_split": "test_v5_2407_2412; 8 repeats",
+    "official_scoring_method": "pass@1 using isolated execution tests",
+    "official_prompt_format": "NVIDIA LiveCodeBench code-generation prompt",
+    "official_grader_command": "nemo-evaluator-launcher run --config local_nemotron-3-super-120b-a12b.yaml -t ns_livecodebench_v5",
+    "official_evaluation_config": "tasks/nemotron-livecodebench-v5/configs/official.json",
+    "container_requirements": "Pinned NeMo component environment; missing gated assets, native grader, sandbox, judge, or simulator fails closed"
+  },
+  "assets": [
+    {
+      "source": "https://github.com/LiveCodeBench/LiveCodeBench.git",
+      "revision": "28fef95ea8c9f7a547c8329f2cd3d32b92c1fa24",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_clone"
+      }
+    },
+    {
+      "source": "https://huggingface.co/datasets/livecodebench/code_generation_lite",
+      "revision": "c52cd175916e995019dcd848d1054b419d2e70b5",
+      "checksum": "",
+      "expected_local_path": "huggingface:livecodebench/code_generation_lite",
+      "required": true,
+      "validation_rules": {
+        "kind": "huggingface_dataset",
+        "dataset_id": "livecodebench/code_generation_lite",
+        "config": "release_v5",
+        "split": "test"
+      }
+    }
+  ],
+  "container": {
+    "image": "agent-bench-external:python3.12",
+    "build_context": ".",
+    "dockerfile": "harness/Dockerfile",
+    "command": "bash /benchmark/task/harness/run.sh",
+    "environment_allowed": [],
+    "mounts": [],
+    "network": "model_proxy",
+    "cpus": 2,
+    "memory": "4g",
+    "pids_limit": 256,
+    "timeout_seconds": 21600,
+    "requires_nested_docker": false,
+    "requires_host_docker_socket": false,
+    "run_as_user": "10001:10001"
+  },
+  "adapter": {
+    "module": "",
+    "entry_point": "harness/run.sh",
+    "expected_output_files": [
+      "agent_bench_result.json"
+    ],
+    "result_parser": "agent_bench_result_json"
+  },
+  "scoring": {
+    "raw_score_field": "score",
+    "max_score": 1,
+    "normalization": "fraction_to_0_100",
+    "direction": "higher_is_better"
+  },
+  "reporting": {
+    "category_label": "Coding",
+    "display_order": 34,
+    "credit": "LiveCodeBench authors and source contests",
+    "citation": "https://github.com/LiveCodeBench/LiveCodeBench",
+    "license": "MIT harness; mixed/ambiguous competition-content terms"
+  },
+  "capabilities": [
+    "code_execution"
+  ],
+  "required_tools": []
+}

@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.assets-lock.v1",
-  "benchmark_id": "PB_018",
+  "benchmark_name": "NL2RepoBench",
   "benchmark_slug": "nl2repobench",
   "asset_root": "agent-bench-assets/nl2repobench",
   "source": {

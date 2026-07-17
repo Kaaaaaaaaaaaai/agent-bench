@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.assets-lock.v1",
-  "benchmark_id": "PB_025",
+  "benchmark_name": "BigCodeBench",
   "benchmark_slug": "bigcodebench",
   "asset_root": "agent-bench-assets/bigcodebench",
   "source": {

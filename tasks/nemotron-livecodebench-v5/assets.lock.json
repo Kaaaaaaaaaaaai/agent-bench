@@ -1,0 +1,54 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_name": "LiveCodeBench v5 (2024-07 to 2024-12)",
+  "benchmark_slug": "nemotron-livecodebench-v5",
+  "asset_root": "agent-bench-assets/nemotron-livecodebench-v5",
+  "source": {
+    "repository_url": "https://github.com/LiveCodeBench/LiveCodeBench.git",
+    "commit": "28fef95ea8c9f7a547c8329f2cd3d32b92c1fa24",
+    "dataset_id": "livecodebench/code_generation_lite",
+    "dataset_revision": "c52cd175916e995019dcd848d1054b419d2e70b5",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/LiveCodeBench/LiveCodeBench.git",
+      "revision": "28fef95ea8c9f7a547c8329f2cd3d32b92c1fa24",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_clone"
+      }
+    },
+    {
+      "source": "https://huggingface.co/datasets/livecodebench/code_generation_lite",
+      "revision": "c52cd175916e995019dcd848d1054b419d2e70b5",
+      "checksum": "",
+      "expected_local_path": "huggingface:livecodebench/code_generation_lite",
+      "required": true,
+      "validation_rules": {
+        "kind": "huggingface_dataset",
+        "dataset_id": "livecodebench/code_generation_lite",
+        "config": "release_v5",
+        "split": "test"
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_clone"
+      },
+      {
+      "kind": "huggingface_dataset",
+      "dataset_id": "livecodebench/code_generation_lite",
+      "config": "release_v5",
+      "split": "test"
+      }
+    ]
+  }
+}

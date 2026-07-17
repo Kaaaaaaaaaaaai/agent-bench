@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.benchmark-config.v1",
-  "benchmark_id": "PB_024",
+  "benchmark_name": "LongBench",
   "benchmark_slug": "longbench",
   "display_name": "LongBench",
   "source_descriptor": "tasks/longbench/manifest.json",

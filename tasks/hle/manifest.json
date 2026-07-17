@@ -1,28 +1,27 @@
 {
   "version": "agent-bench.manifest.v1",
-  "id": "PB_023",
   "display_name": "Humanity's Last Exam",
   "task_group": "Knowledge",
-  "description": "Run Humanity's Last Exam locally through the Docker-backed public benchmark adapter.",
+  "description": "Run the no-tools Humanity's Last Exam condition reported by the NVIDIA Puzzle model card.",
   "homepage_url": "https://lastexam.ai",
   "official_leaderboard_url": "",
   "source": {
     "repository_url": "https://github.com/centerforaisafety/hle.git",
     "commit": "26dca2e253b405105b4c3d8c2f5af06f86f90c66",
-    "dataset_id": "",
-    "dataset_revision": "",
+    "dataset_id": "cais/hle",
+    "dataset_revision": "5a81a4c7271a2a2a312b9a690f0c2fde837e4c29",
     "subdir": ""
   },
   "license": "MIT",
   "credit": "Center for AI Safety Humanity's Last Exam authors",
   "citation": "https://github.com/centerforaisafety/hle/blob/main/citation.txt",
   "official_conditions": {
-    "official_split": "public HLE evaluation format",
-    "official_scoring_method": "agent-bench public adapter normalized score",
-    "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
-    "official_grader_command": "agent-bench-probe --benchmark \"Humanity's Last Exam\" --kind public-benchmark",
+    "official_split": "cais/hle test split; no tools; 1 repeat",
+    "official_scoring_method": "official HLE GPT-4o judge score",
+    "official_prompt_format": "NVIDIA HLE no-tools prompt; benchmark integrity fields withheld",
+    "official_grader_command": "nemo-evaluator-launcher run --config local_nemotron-3-super-120b-a12b.yaml -t ns_hle",
     "official_evaluation_config": "tasks/hle/configs/official.json",
-    "container_requirements": "agent-bench-external:python3.12 launcher image"
+    "container_requirements": "gated cais/hle fetch stage plus independent GPT-4o judge; missing access fails closed"
   },
   "assets": [
     {
@@ -38,6 +37,19 @@
           "hle_eval",
           "citation.txt"
         ]
+      }
+    },
+    {
+      "source": "https://huggingface.co/datasets/cais/hle",
+      "revision": "5a81a4c7271a2a2a312b9a690f0c2fde837e4c29",
+      "checksum": "",
+      "expected_local_path": "huggingface:cais/hle",
+      "required": true,
+      "validation_rules": {
+        "kind": "huggingface_dataset",
+        "dataset_id": "cais/hle",
+        "split": "test",
+        "gated": true
       }
     }
   ],
@@ -79,6 +91,7 @@
     "license": "MIT"
   },
   "capabilities": [
-    "chat_answer"
+    "chat_answer",
+    "external_judge"
   ]
 }

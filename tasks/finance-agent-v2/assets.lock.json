@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.assets-lock.v1",
-  "benchmark_id": "PB_015",
+  "benchmark_name": "Finance Agent v2",
   "benchmark_slug": "finance-agent-v2",
   "asset_root": "agent-bench-assets/finance-agent-v2",
   "source": {

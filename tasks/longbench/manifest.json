@@ -1,6 +1,5 @@
 {
   "version": "agent-bench.manifest.v1",
-  "id": "PB_024",
   "display_name": "LongBench",
   "task_group": "Long Context",
   "description": "Run LongBench locally through the Docker-backed public benchmark adapter.",

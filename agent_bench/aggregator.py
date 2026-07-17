@@ -323,21 +323,21 @@ def _excluded_suites(metadata: dict[str, Any]) -> list[dict[str, Any]]:
     for row in raw:
         if not isinstance(row, dict):
             continue
-        suite_id = row.get("suite_id")
+        benchmark_name = row.get("benchmark_name")
         name = row.get("name")
-        if not isinstance(suite_id, str) or not suite_id.strip():
+        if not isinstance(benchmark_name, str) or not benchmark_name.strip():
             continue
         rows.append(
             {
-                "suite_id": suite_id,
-                "name": str(name or suite_id),
+                "benchmark_name": benchmark_name,
+                "name": str(name or benchmark_name),
                 "lifecycle_status": str(row.get("lifecycle_status") or "removed"),
                 "exclusion_reason": str(row.get("exclusion_reason") or "removed_from_active_suite"),
                 "included_in_official_score": False,
                 "removal_reason": str(row.get("removal_reason") or ""),
             }
         )
-    return sorted(rows, key=lambda row: row["suite_id"])
+    return sorted(rows, key=lambda row: row["benchmark_name"])
 
 
 def _result_excluded_suites(results: list[GradeResult]) -> list[dict[str, Any]]:
@@ -348,7 +348,7 @@ def _result_excluded_suites(results: list[GradeResult]) -> list[dict[str, Any]]:
             continue
         rows.append(
             {
-                "suite_id": result.task_id,
+                "benchmark_name": result.task_id,
                 "name": _benchmark_name(result),
                 "lifecycle_status": "score_excluded",
                 "exclusion_reason": _blocker_type(result) or status,
@@ -365,12 +365,12 @@ def _merged_excluded_suites(*groups: list[dict[str, Any]]) -> list[dict[str, Any
     merged: dict[str, dict[str, Any]] = {}
     for group in groups:
         for row in group:
-            suite_id = row.get("suite_id")
-            if not isinstance(suite_id, str) or not suite_id:
+            benchmark_name = row.get("benchmark_name")
+            if not isinstance(benchmark_name, str) or not benchmark_name:
                 continue
-            existing = merged.get(suite_id, {})
-            merged[suite_id] = {**existing, **row}
-    return sorted(merged.values(), key=lambda row: str(row.get("suite_id", "")))
+            existing = merged.get(benchmark_name, {})
+            merged[benchmark_name] = {**existing, **row}
+    return sorted(merged.values(), key=lambda row: str(row.get("benchmark_name", "")))
 
 
 def _valid_items(items: list[GradeResult]) -> list[GradeResult]:
@@ -1048,7 +1048,7 @@ def _benchmark_results(results: list[GradeResult]) -> list[dict[str, Any]]:
             external_setup = {}
         rows.append(
             {
-                "suite_id": result.task_id,
+                "benchmark_name": result.task_id,
                 "task_id": result.task_id,
                 "group": group,
                 "benchmark": benchmark,

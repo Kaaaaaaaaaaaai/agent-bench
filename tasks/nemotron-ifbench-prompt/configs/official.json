@@ -1,0 +1,25 @@
+{
+  "schema_version": "agent-bench.benchmark-config.v1",
+  "benchmark_name": "IFBench (prompt)",
+  "benchmark_slug": "nemotron-ifbench-prompt",
+  "display_name": "IFBench (prompt)",
+  "source_descriptor": "tasks/nemotron-ifbench-prompt/manifest.json",
+  "nvidia_model_card_revision": "1d370e47fbc56d1019a471c2339663cdbbb5236f",
+  "nemo_task": "ns_ifbench",
+  "official_conditions": {
+    "official_split": "official prompt set; 8 repeats",
+    "official_scoring_method": "IFBench prompt-level instruction-following score",
+    "official_prompt_format": "official IFBench prompts",
+    "official_grader_command": "nemo-evaluator-launcher run --config local_nemotron-3-super-120b-a12b.yaml -t ns_ifbench",
+    "official_evaluation_config": "tasks/nemotron-ifbench-prompt/configs/official.json",
+    "container_requirements": "Pinned component environment; missing native grader, simulator, sandbox, package digest, or assets fails closed"
+  },
+  "provenance_blocker": "",
+  "access_policy": {
+    "fail_closed": true,
+    "official_score_requires_native_grader": true,
+    "smoke_score_is_official": false
+  },
+  "container_command": "bash /benchmark/task/harness/run.sh"
+}
+

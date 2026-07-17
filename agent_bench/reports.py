@@ -39,7 +39,7 @@ from agent_bench.statuses import (
 
 RESULT_FIELDS = [
     "task_id",
-    "suite_id",
+    "benchmark_name",
     "suite_name",
     "category",
     "task_group",
@@ -549,7 +549,7 @@ def _result_csv_row(result: GradeResult) -> dict[str, Any]:
     payload = details.get("result") if isinstance(details.get("result"), dict) else {}
     row["status"] = _result_status(result)
     row["answer"] = _csv_answer(result, payload)
-    row["suite_id"] = details.get("suite_id", result.task_id)
+    row["benchmark_name"] = details.get("benchmark_name", result.task_id)
     row["suite_name"] = _result_benchmark_name(result)
     row["task_group"] = details.get("group", result.category)
     row["run_status"] = _run_status(result)
@@ -764,7 +764,7 @@ def _excluded_suite_table(value: Any) -> str:
             continue
         rows.append(
             "<tr>"
-            f"<td>{html.escape(str(row.get('suite_id', '')))}</td>"
+            f"<td>{html.escape(str(row.get('benchmark_name', '')))}</td>"
             f"<td>{html.escape(str(row.get('name', '')))}</td>"
             f"<td>{html.escape(str(row.get('lifecycle_status', '')))}</td>"
             f"<td>{html.escape(str(row.get('exclusion_reason', '')))}</td>"

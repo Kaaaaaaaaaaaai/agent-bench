@@ -1,0 +1,56 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_name": "HMMT Feb25 (with tools)",
+  "benchmark_slug": "nemotron-hmmt-feb25-tools",
+  "asset_root": "agent-bench-assets/nemotron-hmmt-feb25-tools",
+  "source": {
+    "repository_url": "https://github.com/eth-sri/matharena.git",
+    "commit": "a11194deff8c67a232974a383795e8a2776b4c6f",
+    "dataset_id": "MathArena/hmmt_feb_2025",
+    "dataset_revision": "6fdc4277120810ff75aa22d2d5489b91f7a262a1",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/eth-sri/matharena.git",
+      "revision": "a11194deff8c67a232974a383795e8a2776b4c6f",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": ["README.md", "pyproject.toml", "scripts", "configs"]
+      }
+    },
+    {
+      "source": "https://huggingface.co/datasets/MathArena/hmmt_feb_2025",
+      "revision": "6fdc4277120810ff75aa22d2d5489b91f7a262a1",
+      "checksum": "",
+      "expected_local_path": "huggingface:MathArena/hmmt_feb_2025",
+      "required": true,
+      "validation_rules": {
+        "kind": "huggingface_dataset",
+        "dataset_id": "MathArena/hmmt_feb_2025",
+        "split": "train",
+        "expected_records": 30
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_paths",
+        "required_paths": ["README.md", "pyproject.toml", "scripts", "configs"]
+      },
+      {
+        "kind": "huggingface_dataset",
+        "dataset_id": "MathArena/hmmt_feb_2025",
+        "split": "train",
+        "expected_records": 30
+      }
+    ]
+  }
+}

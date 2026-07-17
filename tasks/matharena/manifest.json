@@ -1,6 +1,5 @@
 {
   "version": "agent-bench.manifest.v1",
-  "id": "PB_026",
   "display_name": "MathArena",
   "task_group": "Math",
   "description": "Run MathArena locally through the Docker-backed public benchmark adapter.",

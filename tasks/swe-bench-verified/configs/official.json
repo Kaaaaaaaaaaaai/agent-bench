@@ -1,0 +1,17 @@
+{
+  "schema_version": "agent-bench.benchmark-config.v1",
+  "benchmark_name": "SWE-bench Verified",
+  "benchmark_slug": "swe-bench-verified",
+  "display_name": "SWE-bench Verified",
+  "source_descriptor": "tasks/swe-bench-verified/manifest.json",
+  "legacy_adapter": "repo_patch",
+  "official_conditions": {
+    "official_split": "test",
+    "official_scoring_method": "SWE-bench resolved rate using repository-specific FAIL_TO_PASS and PASS_TO_PASS tests",
+    "official_prompt_format": "problem_statement only, with target repository at base_commit and grader-only oracle fields withheld",
+    "official_grader_command": "python -m swebench.harness.run_evaluation --dataset_name princeton-nlp/SWE-bench_Verified --split test",
+    "official_evaluation_config": "tasks/swe-bench-verified/configs/official.json",
+    "container_requirements": "isolated per-instance SWE-bench evaluation images"
+  },
+  "container_command": "bash /benchmark/task/harness/run.sh"
+}

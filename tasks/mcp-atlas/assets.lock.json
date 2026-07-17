@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.assets-lock.v1",
-  "benchmark_id": "PB_021",
+  "benchmark_name": "MCP Atlas",
   "benchmark_slug": "mcp-atlas",
   "asset_root": "agent-bench-assets/mcp-atlas",
   "source": {

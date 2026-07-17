@@ -1,0 +1,91 @@
+{
+  "version": "agent-bench.manifest.v1",
+  "display_name": "SciCode (subtask)",
+  "task_group": "Coding",
+  "description": "Run the SciCode (subtask) leaf condition reported by the NVIDIA Puzzle model card with pinned public assets and fail-closed native requirements.",
+  "homepage_url": "https://github.com/scicode-bench/SciCode",
+  "official_leaderboard_url": "",
+  "source": {
+    "repository_url": "https://github.com/scicode-bench/SciCode.git",
+    "commit": "e3158ea011d4235245a547460d3688d7ccbf9900",
+    "dataset_id": "SciCode1/SciCode",
+    "dataset_revision": "4510f6a6aa27c43fad7b43da2c59602a86e88480",
+    "subdir": ""
+  },
+  "license": "Apache-2.0",
+  "credit": "SciCode authors",
+  "citation": "https://github.com/scicode-bench/SciCode",
+  "official_conditions": {
+    "official_split": "public subtasks; 8 repeats",
+    "official_scoring_method": "subtask pass rate using numeric HDF5 tests",
+    "official_prompt_format": "NVIDIA SciCode subtask prompt",
+    "official_grader_command": "nemo-evaluator-launcher run --config local_nemotron-3-super-120b-a12b.yaml -t ns_scicode",
+    "official_evaluation_config": "tasks/nemotron-scicode-subtask/configs/official.json",
+    "container_requirements": "Pinned component environment; missing native grader, simulator, sandbox, package digest, or assets fails closed"
+  },
+  "assets": [
+    {
+      "source": "https://github.com/scicode-bench/SciCode.git",
+      "revision": "e3158ea011d4235245a547460d3688d7ccbf9900",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_clone"
+      }
+    },
+    {
+      "source": "https://huggingface.co/datasets/SciCode1/SciCode",
+      "revision": "4510f6a6aa27c43fad7b43da2c59602a86e88480",
+      "checksum": "",
+      "expected_local_path": "huggingface:SciCode1/SciCode",
+      "required": true,
+      "validation_rules": {
+        "kind": "huggingface_dataset",
+        "dataset_id": "SciCode1/SciCode"
+      }
+    }
+  ],
+  "container": {
+    "image": "agent-bench-external:python3.12",
+    "build_context": ".",
+    "dockerfile": "harness/Dockerfile",
+    "command": "bash /benchmark/task/harness/run.sh",
+    "environment_allowed": [],
+    "mounts": [],
+    "network": "model_proxy",
+    "cpus": 2,
+    "memory": "4g",
+    "pids_limit": 256,
+    "timeout_seconds": 21600,
+    "requires_nested_docker": false,
+    "requires_host_docker_socket": false,
+    "run_as_user": "10001:10001"
+  },
+  "adapter": {
+    "module": "",
+    "entry_point": "harness/run.sh",
+    "expected_output_files": [
+      "agent_bench_result.json"
+    ],
+    "result_parser": "agent_bench_result_json"
+  },
+  "scoring": {
+    "raw_score_field": "score",
+    "max_score": 1,
+    "normalization": "fraction_to_0_100",
+    "direction": "higher_is_better"
+  },
+  "reporting": {
+    "category_label": "Coding",
+    "display_order": 35,
+    "credit": "SciCode authors",
+    "citation": "https://github.com/scicode-bench/SciCode",
+    "license": "Apache-2.0"
+  },
+  "capabilities": [
+    "code_execution"
+  ],
+  "required_tools": []
+}
+

@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.benchmark-config.v1",
-  "benchmark_id": "PB_022",
+  "benchmark_name": "Toolathlon",
   "benchmark_slug": "toolathlon",
   "display_name": "Toolathlon",
   "source_descriptor": "tasks/toolathlon/manifest.json",

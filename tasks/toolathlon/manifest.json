@@ -1,6 +1,5 @@
 {
   "version": "agent-bench.manifest.v1",
-  "id": "PB_022",
   "display_name": "Toolathlon",
   "task_group": "Tool Use",
   "description": "Run Toolathlon locally through the Docker-backed public benchmark adapter.",

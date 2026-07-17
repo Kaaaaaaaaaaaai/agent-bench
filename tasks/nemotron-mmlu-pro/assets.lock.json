@@ -1,0 +1,54 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_name": "MMLU-Pro",
+  "benchmark_slug": "nemotron-mmlu-pro",
+  "asset_root": "agent-bench-assets/nemotron-mmlu-pro",
+  "source": {
+    "repository_url": "https://github.com/TIGER-AI-Lab/MMLU-Pro.git",
+    "commit": "f418b116db00b065c2aea046518d8fcf74d39872",
+    "dataset_id": "TIGER-Lab/MMLU-Pro",
+    "dataset_revision": "b189ec765aa7ed75c8acfea42df31fdae71f97be",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/TIGER-AI-Lab/MMLU-Pro.git",
+      "revision": "f418b116db00b065c2aea046518d8fcf74d39872",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": ["README.md", "evaluate_from_api.py", "compute_accuracy.py"]
+      }
+    },
+    {
+      "source": "https://huggingface.co/datasets/TIGER-Lab/MMLU-Pro",
+      "revision": "b189ec765aa7ed75c8acfea42df31fdae71f97be",
+      "checksum": "",
+      "expected_local_path": "huggingface:TIGER-Lab/MMLU-Pro",
+      "required": true,
+      "validation_rules": {
+        "kind": "huggingface_dataset",
+        "dataset_id": "TIGER-Lab/MMLU-Pro",
+        "split": "test"
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_paths",
+        "required_paths": ["README.md", "evaluate_from_api.py", "compute_accuracy.py"]
+      },
+      {
+        "kind": "huggingface_dataset",
+        "dataset_id": "TIGER-Lab/MMLU-Pro",
+        "split": "test"
+      }
+    ]
+  }
+}

@@ -1,6 +1,5 @@
 {
   "version": "agent-bench.manifest.v1",
-  "id": "PB_020",
   "display_name": "ProgramBench",
   "task_group": "Coding",
   "description": "Run ProgramBench locally through the Docker-backed public benchmark adapter.",

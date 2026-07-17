@@ -1,0 +1,25 @@
+{
+  "schema_version": "agent-bench.benchmark-config.v1",
+  "benchmark_name": "SciCode (subtask)",
+  "benchmark_slug": "nemotron-scicode-subtask",
+  "display_name": "SciCode (subtask)",
+  "source_descriptor": "tasks/nemotron-scicode-subtask/manifest.json",
+  "nvidia_model_card_revision": "1d370e47fbc56d1019a471c2339663cdbbb5236f",
+  "nemo_task": "ns_scicode",
+  "official_conditions": {
+    "official_split": "public subtasks; 8 repeats",
+    "official_scoring_method": "subtask pass rate using numeric HDF5 tests",
+    "official_prompt_format": "NVIDIA SciCode subtask prompt",
+    "official_grader_command": "nemo-evaluator-launcher run --config local_nemotron-3-super-120b-a12b.yaml -t ns_scicode",
+    "official_evaluation_config": "tasks/nemotron-scicode-subtask/configs/official.json",
+    "container_requirements": "Pinned component environment; missing native grader, simulator, sandbox, package digest, or assets fails closed"
+  },
+  "provenance_blocker": "",
+  "access_policy": {
+    "fail_closed": true,
+    "official_score_requires_native_grader": true,
+    "smoke_score_is_official": false
+  },
+  "container_command": "bash /benchmark/task/harness/run.sh"
+}
+

@@ -1,0 +1,52 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_name": "MMLU-ProX",
+  "benchmark_slug": "nemotron-mmlu-prox",
+  "asset_root": "agent-bench-assets/nemotron-mmlu-prox",
+  "source": {
+    "repository_url": "https://github.com/weihao1115/MMLU-ProX.git",
+    "commit": "e3f49f78074502422a5c9eb0306ff62c4c99d76d",
+    "dataset_id": "li-lab/MMLU-ProX",
+    "dataset_revision": "8e6106a6c6ce1c5027e66cc338143cf997b2aa09",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/weihao1115/MMLU-ProX.git",
+      "revision": "e3f49f78074502422a5c9eb0306ff62c4c99d76d",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": ["README.md"]
+      }
+    },
+    {
+      "source": "https://huggingface.co/datasets/li-lab/MMLU-ProX",
+      "revision": "8e6106a6c6ce1c5027e66cc338143cf997b2aa09",
+      "checksum": "",
+      "expected_local_path": "huggingface:li-lab/MMLU-ProX",
+      "required": true,
+      "validation_rules": {
+        "kind": "huggingface_dataset",
+        "dataset_id": "li-lab/MMLU-ProX"
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_paths",
+        "required_paths": ["README.md"]
+      },
+      {
+        "kind": "huggingface_dataset",
+        "dataset_id": "li-lab/MMLU-ProX"
+      }
+    ]
+  }
+}

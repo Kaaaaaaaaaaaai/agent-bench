@@ -1,13 +1,13 @@
 {
   "schema_version": "agent-bench.assets-lock.v1",
-  "benchmark_id": "PB_023",
+  "benchmark_name": "Humanity's Last Exam",
   "benchmark_slug": "hle",
   "asset_root": "agent-bench-assets/hle",
   "source": {
     "repository_url": "https://github.com/centerforaisafety/hle.git",
     "commit": "26dca2e253b405105b4c3d8c2f5af06f86f90c66",
-    "dataset_id": "",
-    "dataset_revision": "",
+    "dataset_id": "cais/hle",
+    "dataset_revision": "5a81a4c7271a2a2a312b9a690f0c2fde837e4c29",
     "subdir": ""
   },
   "assets": [
@@ -25,6 +25,19 @@
           "citation.txt"
         ]
       }
+    },
+    {
+      "source": "https://huggingface.co/datasets/cais/hle",
+      "revision": "5a81a4c7271a2a2a312b9a690f0c2fde837e4c29",
+      "checksum": "",
+      "expected_local_path": "huggingface:cais/hle",
+      "required": true,
+      "validation_rules": {
+        "kind": "huggingface_dataset",
+        "dataset_id": "cais/hle",
+        "split": "test",
+        "gated": true
+      }
     }
   ],
   "materialization": {
@@ -39,6 +52,12 @@
           "hle_eval",
           "citation.txt"
         ]
+      },
+      {
+        "kind": "huggingface_dataset",
+        "dataset_id": "cais/hle",
+        "split": "test",
+        "gated": true
       }
     ]
   }

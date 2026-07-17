@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.assets-lock.v1",
-  "benchmark_id": "PB_020",
+  "benchmark_name": "ProgramBench",
   "benchmark_slug": "programbench",
   "asset_root": "agent-bench-assets/programbench",
   "source": {

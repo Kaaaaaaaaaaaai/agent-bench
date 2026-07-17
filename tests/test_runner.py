@@ -108,7 +108,7 @@ def test_process_task_stops_after_three_empty_responses() -> None:
 
 
 def test_external_process_task_uses_request_semaphore(tmp_path) -> None:
-    tasks = [_external_task("PB_001"), _external_task("PB_002")]
+    tasks = [_external_task("SWE-bench Verified"), _external_task("ExampleBench Two")]
     runner = TrackingExternalRunner()
     raw_handle = io.StringIO()
     graded_handle = io.StringIO()

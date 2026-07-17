@@ -1,6 +1,5 @@
 {
   "version": "agent-bench.manifest.v1",
-  "id": "PB_018",
   "display_name": "NL2RepoBench",
   "task_group": "Coding",
   "description": "Run NL2RepoBench locally through the Docker-backed public benchmark adapter.",
