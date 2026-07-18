@@ -1,3 +1,4 @@
+import html as html_lib
 import json
 from pathlib import Path
 
@@ -73,32 +74,34 @@ def test_render_summary_html_contains_radar_svg():
         ],
     )
 
-    assert "Radar Chart" in html
-    assert "Benchmark Scores" in html
-    assert "Credits Citations Licenses" in html
+    citation_catalog = (Path(__file__).parents[1] / "tasks" / "benchmark_citations.bib").read_text(encoding="utf-8").rstrip()
+    assert "color-scheme: dark" in html
+    assert "Result Summary" in html
+    assert "Benchmark Coverage" in html
+    assert "Benchmark Score Breakdown" in html
+    assert "Run Metadata" in html
+    assert "Non-Model Run Errors" in html
+    assert "Benchmark Citations" in html
+    assert "Benchmark Scores" not in html
+    assert "Credits Citations Licenses" not in html
+    assert "Failures And Status" not in html
+    assert "Benchmark Manifests" not in html
+    assert "Commit:" not in html
+    assert "commit " not in html
     assert "Evaluation Methodology" not in html
     assert "ExampleBench" in html
-    assert "https://example.com/citation" in html
-    assert "<th>Status</th><th>Raw Score</th><th>Normalized 0-100</th>" in html
-    assert "<th>Image</th><th>Container</th><th>Network</th>" in html
-    assert "<th>Missing Tools</th><th>Missing Env</th><th>Missing Assets</th>" in html
-    assert "<th>Asset Cache</th><th>Setup Details</th>" in html
-    assert "<th>Benchmark</th><th>Status Code</th><th>Failure Class</th>" in html
-    assert "<th>Benchmark</th><th>Homepage</th><th>Repository/Dataset Ref</th>" in html
-    assert html.rfind("Credits Citations Licenses") > html.rfind("Failures And Status")
-    assert "<th>Benchmark</th><th>Category</th><th>Score</th>" not in html
-    assert "<th>Method</th><th>Status</th>" not in html
-    assert "<th>Method</th><th>Answer</th>" not in html
-    assert "<th>Method</th><th>Expected</th>" not in html
-    assert "<th>Kind</th>" not in html
-    assert "<h2>Metadata</h2>" in html
-    assert "Timing By Problem" not in html
-    assert "TTFT" not in html
-    assert "Tokens/s" not in html
-    assert "Output Tokens" not in html
-    assert "Scored-Suite Score" in html
-    assert "Conservative selected-suite" in html
-    assert "Overall Score" not in html
+    assert "<th>Benchmark</th><th>Profile</th><th>Normalized 0-100</th><th>Raw Score</th><th>Valid Score</th><th>Official Score</th><th>Status</th><th>Run</th><th>Score Status</th><th>Items</th>" in html
+    assert "<th>Capabilities</th>" not in html
+    assert "<th>Tools</th>" not in html
+    assert "<th>Artifacts</th>" not in html
+    assert "<th>Notes</th>" not in html
+    assert "<th>Container</th>" not in html
+    assert "<pre class=\"bibtex\"" in html
+    assert "max-height: 180px" in html
+    assert "overflow-y: auto" in html
+    assert html_lib.escape(citation_catalog) in html
+    assert html.count("@misc{") == citation_catalog.count("@misc{") == 40
+    assert html.rfind("Benchmark Citations") > html.rfind("Non-Model Run Errors")
     assert '<svg viewBox="0 0 320 260"' in html
     assert "alpha" in html
 
@@ -273,12 +276,16 @@ def test_cli_mock_smoke_runs_all_bundled_benchmarks(tmp_path, monkeypatch):
     assert summary["conservative_all_suite_score"] == pytest.approx(31 / 40)
     assert "public_benchmarks" not in html
     assert "SWE-bench" in html
-    assert "Failures And Status" in html
+    assert "Non-Model Run Errors" in html
     assert "Humanity&#x27;s Last Exam" in html
     assert "EDINET-Bench" not in html
     assert "MLE-bench" not in html
-    assert "Credits Citations Licenses" in html
-    assert "<th>Status</th><th>Raw Score</th><th>Normalized 0-100</th>" in html
+    assert "Benchmark Citations" in html
+    assert "color-scheme: dark" in html
+    assert "Commit:" not in html
+    assert "<th>Container</th>" not in html
+    assert html.count("@misc{") == 40
+    assert "<th>Benchmark</th><th>Profile</th><th>Normalized 0-100</th>" in html
 
 
 def test_aggregate_results_emits_timing_breakdowns():
