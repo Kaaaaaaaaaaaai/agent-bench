@@ -1,0 +1,36 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_name": "TauBench V2 Telecom",
+  "benchmark_slug": "nemotron-taubench-v2-telecom",
+  "asset_root": "agent-bench-assets/nemotron-taubench-v2-telecom",
+  "source": {
+    "repository_url": "https://github.com/sierra-research/tau2-bench.git",
+    "commit": "b51a6d69e26f0e94a9173e2e80fe8735a8dff650",
+    "dataset_id": "",
+    "dataset_revision": "",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/sierra-research/tau2-bench.git",
+      "revision": "b51a6d69e26f0e94a9173e2e80fe8735a8dff650",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_clone"
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_clone"
+      }
+    ]
+  }
+}
+

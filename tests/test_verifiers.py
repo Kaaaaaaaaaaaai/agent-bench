@@ -219,7 +219,7 @@ def test_grade_text_recall_uses_token_multiplicity_for_f1():
 
 def test_grade_external_benchmark_treats_unsupported_capability_as_coverage_gap():
     task = Task(
-        id="PB_001",
+        id="SWE-bench Verified",
         category="public_benchmarks",
         type="external_benchmark",
         question="Run benchmark",
@@ -279,7 +279,7 @@ def test_grade_external_benchmark_treats_unsupported_capability_as_coverage_gap(
 )
 def test_grade_external_benchmark_promotes_capability_failures(result_payload):
     task = Task(
-        id="PB_TOOL",
+        id="ToolBench",
         category="public_benchmarks",
         type="external_benchmark",
         question="Run benchmark",
@@ -310,7 +310,7 @@ def test_grade_external_benchmark_promotes_capability_failures(result_payload):
 
 def test_grade_external_benchmark_promotes_all_invalid_nested_status():
     task = Task(
-        id="PB_001",
+        id="SWE-bench Verified",
         category="public_benchmarks",
         type="external_benchmark",
         question="Run benchmark",
@@ -345,7 +345,7 @@ def test_grade_external_benchmark_promotes_all_invalid_nested_status():
 
 def test_grade_external_benchmark_preserves_exposed_tool_harness_failure():
     task = Task(
-        id="PB_015",
+        id="Finance Agent v2",
         category="Finance",
         type="external_benchmark",
         question="Run benchmark",
@@ -384,7 +384,7 @@ def test_grade_external_benchmark_preserves_exposed_tool_harness_failure():
 
 def test_grade_external_benchmark_preserves_timeout_before_missing_tool_heuristic():
     task = Task(
-        id="PB_015",
+        id="Finance Agent v2",
         category="Finance",
         type="external_benchmark",
         question="Run benchmark",
@@ -423,7 +423,7 @@ def test_grade_external_benchmark_preserves_timeout_before_missing_tool_heuristi
 
 def test_grade_external_benchmark_marks_nested_timeout_as_timed_out():
     task = Task(
-        id="PB_001",
+        id="SWE-bench Verified",
         category="public_benchmarks",
         type="external_benchmark",
         question="Run benchmark",
@@ -458,7 +458,7 @@ def test_grade_external_benchmark_marks_nested_timeout_as_timed_out():
 
 def test_grade_external_benchmark_maps_completed_zero_score_to_failed_model_answer():
     task = Task(
-        id="PB_001",
+        id="SWE-bench Verified",
         category="public_benchmarks",
         type="external_benchmark",
         question="Run benchmark",
@@ -492,7 +492,7 @@ def test_grade_external_benchmark_maps_completed_zero_score_to_failed_model_answ
 
 def test_grade_external_benchmark_preserves_primary_item_model_failure_status():
     task = Task(
-        id="PB_TOOL",
+        id="ToolBench",
         category="public_benchmarks",
         type="external_benchmark",
         question="Run benchmark",

@@ -1,30 +1,29 @@
 [
   {
-    "id": "PB_001",
     "type": "external_benchmark",
-    "question": "Run SWE-bench locally through the Docker-backed public benchmark adapter.",
+    "question": "Run the 500-instance SWE-bench Verified test split through the isolated repository-patch adapter.",
     "benchmark": {
-      "name": "SWE-bench",
+      "name": "SWE-bench Verified",
       "group": "Coding",
       "capabilities": [
         "repo_patch"
       ],
-      "homepage": "https://github.com/SWE-bench/SWE-bench",
+      "homepage": "https://www.swebench.com/verified.html",
       "repository": "https://github.com/SWE-bench/SWE-bench.git",
-      "dataset_id": "princeton-nlp/SWE-bench",
-      "dataset_revision": "e48e2bd1e9fecd5bbd641e9414ac59da9f2e69f6",
+      "dataset_id": "princeton-nlp/SWE-bench_Verified",
+      "dataset_revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
       "ref": "f7bbbb2ccdf479001d6467c9e34af59e44a840f9",
       "subdir": "",
-      "license": "MIT",
-      "credit": "SWE-bench authors",
-      "citation": "https://github.com/SWE-bench/SWE-bench#citation--license",
+      "license": "Mixed/unspecified dataset terms; MIT harness",
+      "credit": "SWE-bench Verified authors and human validators",
+      "citation": "https://www.swebench.com/verified.html",
       "adapter": "repo_patch",
       "official_conditions": {
         "official_split": "test",
-        "official_scoring_method": "agent-bench public adapter normalized score",
-        "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
-        "official_grader_command": "agent-bench-probe --benchmark \"SWE-bench\" --kind public-benchmark",
-        "official_evaluation_config": "tasks/public_benchmarks.json#PB_001",
+        "official_scoring_method": "SWE-bench resolved rate using FAIL_TO_PASS and PASS_TO_PASS tests",
+        "official_prompt_format": "problem_statement with target repository at base_commit; grader-only oracle fields withheld",
+        "official_grader_command": "python -m swebench.harness.run_evaluation --dataset_name princeton-nlp/SWE-bench_Verified --split test",
+        "official_evaluation_config": "tasks/public_benchmarks.json#SWE-bench Verified",
         "container_requirements": "agent-bench-external:python3.12 launcher image"
       },
       "assets": [
@@ -37,75 +36,29 @@
           }
         },
         {
-          "source": "https://huggingface.co/datasets/princeton-nlp/SWE-bench",
-          "revision": "e48e2bd1e9fecd5bbd641e9414ac59da9f2e69f6",
-          "expected_local_path": "huggingface:princeton-nlp/SWE-bench",
+          "source": "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified",
+          "revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+          "checksum": "sha256:a45b1fe4e2f0c8390b2b2938ac83e92ed5979000856808f3679c07812e9e6dcd",
+          "expected_local_path": "huggingface:princeton-nlp/SWE-bench_Verified",
           "validation_rules": {
             "kind": "huggingface_dataset",
-            "dataset_id": "princeton-nlp/SWE-bench"
+            "dataset_id": "princeton-nlp/SWE-bench_Verified",
+            "split": "test",
+            "expected_records": 500,
+            "sensitive_fields": ["patch", "test_patch", "FAIL_TO_PASS", "PASS_TO_PASS"]
           }
         }
       ],
       "docker": {
         "image": "agent-bench-external:python3.12",
         "setup": [],
-        "command": "agent-bench-probe --benchmark \"SWE-bench\" --kind public-benchmark",
+        "command": "agent-bench-probe --benchmark \"SWE-bench Verified\" --kind public-benchmark",
         "environment": [],
         "volumes": []
       }
     }
   },
   {
-    "id": "PB_004",
-    "type": "external_benchmark",
-    "question": "Run SWE-Lancer locally through the Docker-backed public benchmark adapter.",
-    "benchmark": {
-      "name": "SWE-Lancer",
-      "group": "Coding",
-      "capabilities": [
-        "repo_patch"
-      ],
-      "homepage": "https://github.com/openai/frontier-evals/tree/main/project/swelancer",
-      "repository": "https://github.com/openai/frontier-evals.git",
-      "ref": "51052cede8cc608f95bb00346635e03759013e5a",
-      "subdir": "project/swelancer",
-      "license": "MIT",
-      "credit": "OpenAI Frontier Evals SWE-Lancer authors",
-      "citation": "https://github.com/openai/frontier-evals/tree/main/project/swelancer",
-      "adapter": "repo_patch",
-      "official_conditions": {
-        "official_split": "public task set",
-        "official_scoring_method": "agent-bench public adapter normalized score",
-        "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
-        "official_grader_command": "agent-bench-probe --benchmark \"SWE-Lancer\" --kind public-benchmark",
-        "official_evaluation_config": "tasks/public_benchmarks.json#PB_004",
-        "container_requirements": "agent-bench-external:python3.12 launcher image"
-      },
-      "assets": [
-        {
-          "source": "https://github.com/openai/frontier-evals.git",
-          "revision": "51052cede8cc608f95bb00346635e03759013e5a",
-          "expected_local_path": "project/swelancer",
-          "validation_rules": {
-            "kind": "repository_paths",
-            "required_paths": [
-              "project/swelancer/all_swelancer_tasks.csv",
-              "project/swelancer/issues"
-            ]
-          }
-        }
-      ],
-      "docker": {
-        "image": "agent-bench-external:python3.12",
-        "setup": [],
-        "command": "agent-bench-probe --benchmark \"SWE-Lancer\" --kind public-benchmark",
-        "environment": [],
-        "volumes": []
-      }
-    }
-  },
-  {
-    "id": "PB_009",
     "type": "external_benchmark",
     "question": "Run codeneedle locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
@@ -127,7 +80,7 @@
         "official_scoring_method": "agent-bench public adapter normalized score",
         "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
         "official_grader_command": "agent-bench-probe --benchmark \"codeneedle\" --kind public-benchmark",
-        "official_evaluation_config": "tasks/public_benchmarks.json#PB_009",
+        "official_evaluation_config": "tasks/public_benchmarks.json#codeneedle",
         "container_requirements": "agent-bench-external:python3.12 launcher image"
       },
       "assets": [
@@ -153,7 +106,6 @@
     }
   },
   {
-    "id": "PB_010",
     "type": "external_benchmark",
     "question": "Run StockBench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
@@ -176,7 +128,7 @@
         "official_scoring_method": "agent-bench public adapter normalized score",
         "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
         "official_grader_command": "agent-bench-probe --benchmark \"StockBench\" --kind public-benchmark",
-        "official_evaluation_config": "tasks/public_benchmarks.json#PB_010",
+        "official_evaluation_config": "tasks/public_benchmarks.json#StockBench",
         "container_requirements": "agent-bench-external:python3.12 launcher image"
       },
       "assets": [
@@ -202,7 +154,6 @@
     }
   },
   {
-    "id": "PB_011",
     "type": "external_benchmark",
     "question": "Run InvestorBench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
@@ -225,7 +176,7 @@
         "official_scoring_method": "agent-bench public adapter normalized score",
         "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
         "official_grader_command": "agent-bench-probe --benchmark \"InvestorBench\" --kind public-benchmark",
-        "official_evaluation_config": "tasks/public_benchmarks.json#PB_011",
+        "official_evaluation_config": "tasks/public_benchmarks.json#InvestorBench",
         "container_requirements": "agent-bench-external:python3.12 launcher image"
       },
       "assets": [
@@ -251,7 +202,6 @@
     }
   },
   {
-    "id": "PB_012",
     "type": "external_benchmark",
     "question": "Run QuantCode-Bench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
@@ -273,7 +223,7 @@
         "official_scoring_method": "agent-bench public adapter normalized score",
         "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
         "official_grader_command": "agent-bench-probe --benchmark \"QuantCode-Bench\" --kind public-benchmark",
-        "official_evaluation_config": "tasks/public_benchmarks.json#PB_012",
+        "official_evaluation_config": "tasks/public_benchmarks.json#QuantCode-Bench",
         "container_requirements": "agent-bench-external:python3.12 launcher image"
       },
       "assets": [
@@ -299,7 +249,6 @@
     }
   },
   {
-    "id": "PB_013",
     "type": "external_benchmark",
     "question": "Run FinMCP-Bench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
@@ -323,7 +272,7 @@
         "official_scoring_method": "agent-bench public adapter normalized score",
         "official_prompt_format": "static transcript reasoning records extracted from the pinned public dataset",
         "official_grader_command": "agent-bench-probe --benchmark \"FinMCP-Bench\" --kind public-benchmark",
-        "official_evaluation_config": "tasks/public_benchmarks.json#PB_013",
+        "official_evaluation_config": "tasks/public_benchmarks.json#FinMCP-Bench",
         "container_requirements": "agent-bench-external:python3.12 launcher image"
       },
       "assets": [
@@ -352,7 +301,6 @@
     }
   },
   {
-    "id": "PB_015",
     "type": "external_benchmark",
     "question": "Run Finance Agent v2 locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
@@ -375,7 +323,7 @@
         "official_scoring_method": "agent-bench public adapter normalized score",
         "official_prompt_format": "finance-agent prompts with deterministic CRWD fixture-backed web_search, edgar_search, parse_html_page, retrieve_information, and price_history exposed when fixture canaries pass",
         "official_grader_command": "agent-bench-probe --benchmark \"Finance Agent v2\" --kind public-benchmark",
-        "official_evaluation_config": "tasks/public_benchmarks.json#PB_015",
+        "official_evaluation_config": "tasks/public_benchmarks.json#Finance Agent v2",
         "container_requirements": "agent-bench-external:python3.12 launcher image"
       },
       "assets": [
@@ -418,7 +366,6 @@
     }
   },
   {
-    "id": "PB_016",
     "type": "external_benchmark",
     "question": "Run FinanceMath locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
@@ -440,7 +387,7 @@
         "official_scoring_method": "agent-bench public adapter normalized score",
         "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
         "official_grader_command": "agent-bench-probe --benchmark \"FinanceMath\" --kind public-benchmark",
-        "official_evaluation_config": "tasks/public_benchmarks.json#PB_016",
+        "official_evaluation_config": "tasks/public_benchmarks.json#FinanceMath",
         "container_requirements": "agent-bench-external:python3.12 launcher image"
       },
       "assets": [
@@ -463,7 +410,6 @@
     }
   },
   {
-    "id": "PB_017",
     "type": "external_benchmark",
     "question": "Run Terminal-Bench 2.0 locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
@@ -485,7 +431,7 @@
         "official_scoring_method": "agent-bench public adapter normalized score",
         "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
         "official_grader_command": "agent-bench-probe --benchmark \"Terminal-Bench 2.0\" --kind public-benchmark",
-        "official_evaluation_config": "tasks/public_benchmarks.json#PB_017",
+        "official_evaluation_config": "tasks/public_benchmarks.json#Terminal-Bench 2.0",
         "container_requirements": "agent-bench-external:python3.12 launcher image"
       },
       "assets": [
@@ -513,7 +459,6 @@
     }
   },
   {
-    "id": "PB_018",
     "type": "external_benchmark",
     "question": "Run NL2RepoBench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
@@ -535,7 +480,7 @@
         "official_scoring_method": "agent-bench public adapter normalized score",
         "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
         "official_grader_command": "agent-bench-probe --benchmark \"NL2RepoBench\" --kind public-benchmark",
-        "official_evaluation_config": "tasks/public_benchmarks.json#PB_018",
+        "official_evaluation_config": "tasks/public_benchmarks.json#NL2RepoBench",
         "container_requirements": "agent-bench-external:python3.12 launcher image"
       },
       "assets": [
@@ -563,7 +508,6 @@
     }
   },
   {
-    "id": "PB_019",
     "type": "external_benchmark",
     "question": "Run DeepSWE locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
@@ -585,7 +529,7 @@
         "official_scoring_method": "agent-bench public adapter normalized score",
         "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
         "official_grader_command": "agent-bench-probe --benchmark \"DeepSWE\" --kind public-benchmark",
-        "official_evaluation_config": "tasks/public_benchmarks.json#PB_019",
+        "official_evaluation_config": "tasks/public_benchmarks.json#DeepSWE",
         "container_requirements": "agent-bench-external:python3.12 launcher image"
       },
       "assets": [
@@ -612,7 +556,6 @@
     }
   },
   {
-    "id": "PB_020",
     "type": "external_benchmark",
     "question": "Run ProgramBench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
@@ -634,7 +577,7 @@
         "official_scoring_method": "agent-bench public adapter normalized score",
         "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
         "official_grader_command": "agent-bench-probe --benchmark \"ProgramBench\" --kind public-benchmark",
-        "official_evaluation_config": "tasks/public_benchmarks.json#PB_020",
+        "official_evaluation_config": "tasks/public_benchmarks.json#ProgramBench",
         "container_requirements": "agent-bench-external:python3.12 launcher image"
       },
       "assets": [
@@ -662,7 +605,6 @@
     }
   },
   {
-    "id": "PB_021",
     "type": "external_benchmark",
     "question": "Run MCP Atlas locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
@@ -684,7 +626,7 @@
         "official_scoring_method": "agent-bench public adapter normalized score",
         "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
         "official_grader_command": "agent-bench-probe --benchmark \"MCP Atlas\" --kind public-benchmark",
-        "official_evaluation_config": "tasks/public_benchmarks.json#PB_021",
+        "official_evaluation_config": "tasks/public_benchmarks.json#MCP Atlas",
         "container_requirements": "agent-bench-external:python3.12 launcher image"
       },
       "assets": [
@@ -713,7 +655,6 @@
     }
   },
   {
-    "id": "PB_022",
     "type": "external_benchmark",
     "question": "Run Toolathlon locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
@@ -735,7 +676,7 @@
         "official_scoring_method": "agent-bench public adapter normalized score",
         "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
         "official_grader_command": "agent-bench-probe --benchmark \"Toolathlon\" --kind public-benchmark",
-        "official_evaluation_config": "tasks/public_benchmarks.json#PB_022",
+        "official_evaluation_config": "tasks/public_benchmarks.json#Toolathlon",
         "container_requirements": "agent-bench-external:python3.12 launcher image"
       },
       "assets": [
@@ -763,17 +704,19 @@
     }
   },
   {
-    "id": "PB_023",
     "type": "external_benchmark",
     "question": "Run Humanity's Last Exam locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
       "name": "Humanity's Last Exam",
       "group": "Knowledge",
       "capabilities": [
-        "chat_answer"
+        "chat_answer",
+        "external_judge"
       ],
       "homepage": "https://lastexam.ai",
       "repository": "https://github.com/centerforaisafety/hle.git",
+      "dataset_id": "cais/hle",
+      "dataset_revision": "5a81a4c7271a2a2a312b9a690f0c2fde837e4c29",
       "ref": "26dca2e253b405105b4c3d8c2f5af06f86f90c66",
       "subdir": "",
       "license": "MIT",
@@ -781,12 +724,12 @@
       "citation": "https://github.com/centerforaisafety/hle/blob/main/citation.txt",
       "adapter": "chat_answer",
       "official_conditions": {
-        "official_split": "public HLE evaluation format",
-        "official_scoring_method": "agent-bench public adapter normalized score",
-        "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
-        "official_grader_command": "agent-bench-probe --benchmark \"Humanity's Last Exam\" --kind public-benchmark",
-        "official_evaluation_config": "tasks/public_benchmarks.json#PB_023",
-        "container_requirements": "agent-bench-external:python3.12 launcher image"
+        "official_split": "cais/hle test split; no tools; 1 repeat",
+        "official_scoring_method": "official HLE GPT-4o judge score",
+        "official_prompt_format": "NVIDIA HLE no-tools prompt; benchmark integrity fields withheld",
+        "official_grader_command": "nemo-evaluator-launcher run --config local_nemotron-3-super-120b-a12b.yaml -t ns_hle",
+        "official_evaluation_config": "tasks/hle/configs/official.json",
+        "container_requirements": "gated cais/hle fetch stage plus independent GPT-4o judge; missing access fails closed"
       },
       "assets": [
         {
@@ -801,6 +744,17 @@
               "citation.txt"
             ]
           }
+        },
+        {
+          "source": "https://huggingface.co/datasets/cais/hle",
+          "revision": "5a81a4c7271a2a2a312b9a690f0c2fde837e4c29",
+          "expected_local_path": "huggingface:cais/hle",
+          "validation_rules": {
+            "kind": "huggingface_dataset",
+            "dataset_id": "cais/hle",
+            "split": "test",
+            "gated": true
+          }
         }
       ],
       "docker": {
@@ -813,7 +767,6 @@
     }
   },
   {
-    "id": "PB_024",
     "type": "external_benchmark",
     "question": "Run LongBench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
@@ -835,7 +788,7 @@
         "official_scoring_method": "agent-bench public adapter normalized score",
         "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
         "official_grader_command": "agent-bench-probe --benchmark \"LongBench\" --kind public-benchmark",
-        "official_evaluation_config": "tasks/public_benchmarks.json#PB_024",
+        "official_evaluation_config": "tasks/public_benchmarks.json#LongBench",
         "container_requirements": "agent-bench-external:python3.12 launcher image"
       },
       "assets": [
@@ -863,7 +816,6 @@
     }
   },
   {
-    "id": "PB_025",
     "type": "external_benchmark",
     "question": "Run BigCodeBench locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
@@ -885,7 +837,7 @@
         "official_scoring_method": "agent-bench public adapter normalized score",
         "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
         "official_grader_command": "agent-bench-probe --benchmark \"BigCodeBench\" --kind public-benchmark",
-        "official_evaluation_config": "tasks/public_benchmarks.json#PB_025",
+        "official_evaluation_config": "tasks/public_benchmarks.json#BigCodeBench",
         "container_requirements": "agent-bench-external:python3.12 launcher image"
       },
       "assets": [
@@ -913,7 +865,6 @@
     }
   },
   {
-    "id": "PB_026",
     "type": "external_benchmark",
     "question": "Run MathArena locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
@@ -935,7 +886,7 @@
         "official_scoring_method": "agent-bench public adapter normalized score",
         "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
         "official_grader_command": "agent-bench-probe --benchmark \"MathArena\" --kind public-benchmark",
-        "official_evaluation_config": "tasks/public_benchmarks.json#PB_026",
+        "official_evaluation_config": "tasks/public_benchmarks.json#MathArena",
         "container_requirements": "agent-bench-external:python3.12 launcher image"
       },
       "assets": [
@@ -963,7 +914,6 @@
     }
   },
   {
-    "id": "PB_027",
     "type": "external_benchmark",
     "question": "Run CLAW-Eval locally through the Docker-backed public benchmark adapter.",
     "benchmark": {
@@ -985,7 +935,7 @@
         "official_scoring_method": "agent-bench public adapter normalized score",
         "official_prompt_format": "public benchmark records extracted from the pinned upstream repository or dataset",
         "official_grader_command": "agent-bench-probe --benchmark \"CLAW-Eval\" --kind public-benchmark",
-        "official_evaluation_config": "tasks/public_benchmarks.json#PB_027",
+        "official_evaluation_config": "tasks/public_benchmarks.json#CLAW-Eval",
         "container_requirements": "agent-bench-external:python3.12 launcher image"
       },
       "assets": [
@@ -1011,6 +961,301 @@
         "environment": [],
         "volumes": []
       }
+    }
+  },
+  {
+    "type": "external_benchmark",
+    "question": "Run the MMLU-Pro NVIDIA model-card leaf condition.",
+    "benchmark": {
+      "name": "MMLU-Pro",
+      "group": "General Knowledge",
+      "capabilities": ["chat_answer"],
+      "homepage": "https://github.com/TIGER-AI-Lab/MMLU-Pro",
+      "repository": "https://github.com/TIGER-AI-Lab/MMLU-Pro.git",
+      "dataset_id": "TIGER-Lab/MMLU-Pro",
+      "dataset_revision": "b189ec765aa7ed75c8acfea42df31fdae71f97be",
+      "ref": "f418b116db00b065c2aea046518d8fcf74d39872",
+      "subdir": "",
+      "license": "MIT dataset; Apache-2.0 evaluation code",
+      "credit": "MMLU-Pro authors",
+      "citation": "https://huggingface.co/datasets/TIGER-Lab/MMLU-Pro",
+      "adapter": "chat_answer",
+      "official_conditions": {
+        "official_split": "test; 10-choice boxed prompt; 1 repeat",
+        "official_scoring_method": "exact multiple-choice accuracy",
+        "official_prompt_format": "NVIDIA mcq-10choices-boxed prompt",
+        "official_grader_command": "nemo-evaluator-launcher run --config local_nemotron-3-super-120b-a12b.yaml -t nemo_skills.ns_mmlu_pro",
+        "official_evaluation_config": "tasks/public_benchmarks.json#MMLU-Pro",
+        "container_requirements": "NVIDIA NeMo Evaluator component containers"
+      },
+      "assets": [
+        {
+          "source": "https://github.com/TIGER-AI-Lab/MMLU-Pro.git",
+          "revision": "f418b116db00b065c2aea046518d8fcf74d39872",
+          "expected_local_path": ".",
+          "validation_rules": {
+            "kind": "repository_paths",
+            "required_paths": ["README.md", "evaluate_from_api.py", "compute_accuracy.py"]
+          }
+        },
+        {
+          "source": "https://huggingface.co/datasets/TIGER-Lab/MMLU-Pro",
+          "revision": "b189ec765aa7ed75c8acfea42df31fdae71f97be",
+          "expected_local_path": "huggingface:TIGER-Lab/MMLU-Pro",
+          "validation_rules": {
+            "kind": "huggingface_dataset",
+            "dataset_id": "TIGER-Lab/MMLU-Pro",
+            "split": "test"
+          }
+        }
+      ],
+      "docker": {
+        "image": "agent-bench-external:python3.12",
+        "setup": [],
+        "command": "agent-bench-probe --benchmark \"MMLU-Pro\" --kind public-benchmark",
+        "environment": [],
+        "volumes": []
+      }
+    }
+  },
+  {
+    "type": "external_benchmark",
+    "question": "Run the AIME25 (no tools) NVIDIA model-card leaf condition.",
+    "benchmark": {
+      "name": "AIME25 (no tools)",
+      "group": "Math",
+      "homepage": "https://matharena.ai",
+      "license": "CC-BY-NC-SA-4.0 dataset; MIT evaluation code",
+      "credit": "AIME and MathArena authors",
+      "citation": "https://huggingface.co/datasets/MathArena/aime_2025"
+    }
+  },
+  {
+    "type": "external_benchmark",
+    "question": "Run the HMMT Feb25 (no tools) NVIDIA model-card leaf condition.",
+    "benchmark": {
+      "name": "HMMT Feb25 (no tools)",
+      "group": "Math",
+      "homepage": "https://huggingface.co/datasets/MathArena/hmmt_feb_2025",
+      "license": "CC-BY-NC-SA-4.0",
+      "credit": "HMMT and MathArena authors",
+      "citation": "https://huggingface.co/datasets/MathArena/hmmt_feb_2025"
+    }
+  },
+  {
+    "type": "external_benchmark",
+    "question": "Run the HMMT Feb25 (with tools) NVIDIA model-card leaf condition.",
+    "benchmark": {
+      "name": "HMMT Feb25 (with tools)",
+      "group": "Math",
+      "homepage": "https://huggingface.co/datasets/MathArena/hmmt_feb_2025",
+      "license": "CC-BY-NC-SA-4.0",
+      "credit": "HMMT and MathArena authors",
+      "citation": "https://huggingface.co/datasets/MathArena/hmmt_feb_2025"
+    }
+  },
+  {
+    "type": "external_benchmark",
+    "question": "Run the GPQA Diamond (no tools) NVIDIA model-card leaf condition.",
+    "benchmark": {
+      "name": "GPQA Diamond (no tools)",
+      "group": "Reasoning",
+      "homepage": "https://huggingface.co/datasets/Idavidrein/gpqa",
+      "license": "CC-BY-4.0; gated access terms",
+      "credit": "GPQA authors",
+      "citation": "https://huggingface.co/datasets/Idavidrein/gpqa"
+    }
+  },
+  {
+    "type": "external_benchmark",
+    "question": "Run the GPQA Diamond (with tools) NVIDIA model-card leaf condition.",
+    "benchmark": {
+      "name": "GPQA Diamond (with tools)",
+      "group": "Reasoning",
+      "homepage": "https://huggingface.co/datasets/Idavidrein/gpqa",
+      "license": "CC-BY-4.0; gated access terms",
+      "credit": "GPQA authors",
+      "citation": "https://huggingface.co/datasets/Idavidrein/gpqa"
+    }
+  },
+  {
+    "type": "external_benchmark",
+    "question": "Run the LiveCodeBench v5 (2024-07 to 2024-12) NVIDIA model-card leaf condition.",
+    "benchmark": {
+      "name": "LiveCodeBench v5 (2024-07 to 2024-12)",
+      "group": "Coding",
+      "homepage": "https://github.com/LiveCodeBench/LiveCodeBench",
+      "license": "MIT harness; mixed competition-content terms",
+      "credit": "LiveCodeBench authors",
+      "citation": "https://github.com/LiveCodeBench/LiveCodeBench"
+    }
+  },
+  {
+    "type": "external_benchmark",
+    "question": "Run the SciCode (subtask) NVIDIA model-card leaf condition.",
+    "benchmark": {
+      "name": "SciCode (subtask)",
+      "group": "Coding",
+      "homepage": "https://github.com/scicode-bench/SciCode",
+      "license": "Apache-2.0",
+      "credit": "SciCode authors",
+      "citation": "https://github.com/scicode-bench/SciCode"
+    }
+  },
+  {
+    "type": "external_benchmark",
+    "question": "Run the Terminal-Bench Hard (NVIDIA 48-task subset) NVIDIA model-card leaf condition.",
+    "benchmark": {
+      "name": "Terminal-Bench Hard (NVIDIA 48-task subset)",
+      "group": "Agentic",
+      "homepage": "https://github.com/laude-institute/terminal-bench",
+      "license": "Apache-2.0; exact NVIDIA subset undisclosed",
+      "credit": "Terminal-Bench authors and NVIDIA packagers",
+      "citation": "https://github.com/laude-institute/terminal-bench"
+    }
+  },
+  {
+    "type": "external_benchmark",
+    "question": "Run the TauBench V2 Airline NVIDIA model-card leaf condition.",
+    "benchmark": {
+      "name": "TauBench V2 Airline",
+      "group": "Agentic",
+      "homepage": "https://github.com/sierra-research/tau2-bench",
+      "license": "MIT; exact NVIDIA package revision undisclosed",
+      "credit": "TauBench V2 authors",
+      "citation": "https://github.com/sierra-research/tau2-bench"
+    }
+  },
+  {
+    "type": "external_benchmark",
+    "question": "Run the TauBench V2 Retail NVIDIA model-card leaf condition.",
+    "benchmark": {
+      "name": "TauBench V2 Retail",
+      "group": "Agentic",
+      "homepage": "https://github.com/sierra-research/tau2-bench",
+      "license": "MIT; exact NVIDIA package revision undisclosed",
+      "credit": "TauBench V2 authors",
+      "citation": "https://github.com/sierra-research/tau2-bench"
+    }
+  },
+  {
+    "type": "external_benchmark",
+    "question": "Run the TauBench V2 Telecom NVIDIA model-card leaf condition.",
+    "benchmark": {
+      "name": "TauBench V2 Telecom",
+      "group": "Agentic",
+      "homepage": "https://github.com/sierra-research/tau2-bench",
+      "license": "MIT; exact NVIDIA package revision undisclosed",
+      "credit": "TauBench V2 authors",
+      "citation": "https://github.com/sierra-research/tau2-bench"
+    }
+  },
+  {
+    "type": "external_benchmark",
+    "question": "Run the IFBench (prompt) NVIDIA model-card leaf condition.",
+    "benchmark": {
+      "name": "IFBench (prompt)",
+      "group": "Instruction Following",
+      "homepage": "https://github.com/allenai/IFBench",
+      "license": "Apache-2.0 code; ODC-BY-1.0 data",
+      "credit": "IFBench authors",
+      "citation": "https://github.com/allenai/IFBench"
+    }
+  },
+  {
+    "type": "external_benchmark",
+    "question": "Run the Scale AI MultiChallenge NVIDIA model-card leaf condition.",
+    "benchmark": {
+      "name": "Scale AI MultiChallenge",
+      "group": "Instruction Following",
+      "homepage": "https://huggingface.co/datasets/ScaleAI/MultiChallenge",
+      "license": "CC-BY-4.0",
+      "credit": "Scale AI MultiChallenge authors",
+      "citation": "https://huggingface.co/datasets/ScaleAI/MultiChallenge"
+    }
+  },
+  {
+    "type": "external_benchmark",
+    "question": "Run the Arena-Hard-V2 NVIDIA model-card leaf condition.",
+    "benchmark": {
+      "name": "Arena-Hard-V2",
+      "group": "Chat",
+      "homepage": "https://github.com/lmarena/arena-hard-auto",
+      "license": "Apache-2.0",
+      "credit": "LMSYS Chatbot Arena authors",
+      "citation": "https://github.com/lmarena/arena-hard-auto"
+    }
+  },
+  {
+    "type": "external_benchmark",
+    "question": "Run the AA-LCR NVIDIA model-card leaf condition.",
+    "benchmark": {
+      "name": "AA-LCR",
+      "group": "Long Context",
+      "homepage": "https://huggingface.co/datasets/ArtificialAnalysis/AA-LCR",
+      "license": "Apache-2.0 metadata; third-party document rights",
+      "credit": "Artificial Analysis authors",
+      "citation": "https://huggingface.co/datasets/ArtificialAnalysis/AA-LCR"
+    }
+  },
+  {
+    "type": "external_benchmark",
+    "question": "Run the RULER 256k NVIDIA model-card leaf condition.",
+    "benchmark": {
+      "name": "RULER 256k",
+      "group": "Long Context",
+      "homepage": "https://github.com/NVIDIA/RULER",
+      "license": "Apache-2.0 harness; source terms retained",
+      "credit": "NVIDIA RULER authors",
+      "citation": "https://github.com/NVIDIA/RULER"
+    }
+  },
+  {
+    "type": "external_benchmark",
+    "question": "Run the RULER 512k NVIDIA model-card leaf condition.",
+    "benchmark": {
+      "name": "RULER 512k",
+      "group": "Long Context",
+      "homepage": "https://github.com/NVIDIA/RULER",
+      "license": "Apache-2.0 harness; source terms retained",
+      "credit": "NVIDIA RULER authors",
+      "citation": "https://github.com/NVIDIA/RULER"
+    }
+  },
+  {
+    "type": "external_benchmark",
+    "question": "Run the RULER 1M NVIDIA model-card leaf condition.",
+    "benchmark": {
+      "name": "RULER 1M",
+      "group": "Long Context",
+      "homepage": "https://github.com/NVIDIA/RULER",
+      "license": "Apache-2.0 harness; source terms retained",
+      "credit": "NVIDIA RULER authors",
+      "citation": "https://github.com/NVIDIA/RULER"
+    }
+  },
+  {
+    "type": "external_benchmark",
+    "question": "Run the MMLU-ProX NVIDIA model-card leaf condition.",
+    "benchmark": {
+      "name": "MMLU-ProX",
+      "group": "Multilingual",
+      "homepage": "https://huggingface.co/datasets/li-lab/MMLU-ProX",
+      "license": "MIT",
+      "credit": "MMLU-ProX authors",
+      "citation": "https://huggingface.co/datasets/li-lab/MMLU-ProX"
+    }
+  },
+  {
+    "type": "external_benchmark",
+    "question": "Run the WMT24++ (en-to-xx) NVIDIA model-card leaf condition.",
+    "benchmark": {
+      "name": "WMT24++ (en-to-xx)",
+      "group": "Multilingual",
+      "homepage": "https://huggingface.co/datasets/google/wmt24pp",
+      "license": "Apache-2.0 data; gated noncommercial scorer",
+      "credit": "WMT24++ and XCOMET authors",
+      "citation": "https://huggingface.co/datasets/google/wmt24pp"
     }
   }
 ]

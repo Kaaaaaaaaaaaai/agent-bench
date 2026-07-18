@@ -1,6 +1,5 @@
 {
   "version": "agent-bench.manifest.v1",
-  "id": "PB_012",
   "display_name": "QuantCode-Bench",
   "task_group": "Finance",
   "description": "Run QuantCode-Bench locally through the Docker-backed public benchmark adapter.",

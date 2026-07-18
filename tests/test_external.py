@@ -5,14 +5,21 @@ from subprocess import CompletedProcess
 from agent_bench.external import (
     ExternalBenchmarkConfig,
     ExternalBenchmarkRunner,
+    _asset_cache_recipe,
+    _benchmark_asset_cache_dir,
+    _docker_env,
+    _huggingface_asset_download_script,
+    _huggingface_asset_recipe,
+    _huggingface_model_asset_recipe,
+    _huggingface_model_download_script,
     _prepare_benchmark_asset_cache,
 )
+from agent_bench.manifest import manifest_from_task
 from agent_bench.models import Task
 
 
 def _manifest_task(capabilities: list[str] | None = None) -> Task:
     manifest = {
-        "id": "PB_001",
         "display_name": "ExampleBench",
         "task_group": "Coding",
         "description": "Run ExampleBench under official conditions.",
@@ -68,7 +75,7 @@ def _manifest_task(capabilities: list[str] | None = None) -> Task:
         "capabilities": capabilities or ["repo_patch", "chat_answer"],
     }
     return Task(
-        id="PB_001",
+        id="ExampleBench",
         category="Coding",
         type="external_benchmark",
         question="Run benchmark",
@@ -414,7 +421,7 @@ def test_external_runner_fails_when_result_file_missing(monkeypatch, tmp_path):
     assert result.score == 0.0
     assert result.passed is False
     assert result.error == "External benchmark did not produce agent_bench_result.json"
-    result_file = tmp_path / "external" / "PB_001" / "agent_bench_result.json"
+    result_file = tmp_path / "external" / "ExampleBench" / "agent_bench_result.json"
     payload = json.loads(result_file.read_text(encoding="utf-8"))
     assert payload["status"] == "failed_harness_setup"
     assert payload["error"] == "External benchmark did not produce agent_bench_result.json"
@@ -424,7 +431,7 @@ def test_external_runner_fails_when_result_file_missing(monkeypatch, tmp_path):
 
 def test_external_runner_rejects_incomplete_legacy_descriptor(tmp_path):
     task = Task(
-        id="PB_001",
+        id="ExampleBench",
         category="public_benchmarks",
         type="external_benchmark",
         question="Run benchmark",
@@ -500,7 +507,7 @@ def test_external_runner_reports_container_startup_stderr(monkeypatch, tmp_path)
     assert result.passed is False
     assert "External benchmark exited with code 125" in result.error
     assert "invalid mount config" in result.error
-    payload = json.loads((tmp_path / "external" / "PB_001" / "agent_bench_result.json").read_text(encoding="utf-8"))
+    payload = json.loads((tmp_path / "external" / "ExampleBench" / "agent_bench_result.json").read_text(encoding="utf-8"))
     assert payload["error"] == result.error
 
 
@@ -579,7 +586,7 @@ def test_external_runner_prepares_paperbench_asset_cache(monkeypatch, tmp_path):
     monkeypatch.setattr("agent_bench.external.shutil.which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr("agent_bench.external.subprocess.run", fake_run)
     task = Task(
-        id="PB_003",
+        id="ExampleBench Three",
         category="public_benchmarks",
         type="external_benchmark",
         question="Run PaperBench",
@@ -665,7 +672,7 @@ def test_external_runner_prepares_swelancer_asset_cache_without_lfs(monkeypatch,
     monkeypatch.setattr("agent_bench.external.shutil.which", fake_which)
     monkeypatch.setattr("agent_bench.external.subprocess.run", fake_run)
     task = Task(
-        id="PB_004",
+        id="ExampleBench Four",
         category="public_benchmarks",
         type="external_benchmark",
         question="Run SWE-Lancer",
@@ -742,7 +749,7 @@ def test_external_runner_prepares_gdpval_asset_cache(monkeypatch, tmp_path):
     monkeypatch.setattr("agent_bench.external.shutil.which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr("agent_bench.external.subprocess.run", fake_run)
     task = Task(
-        id="PB_002",
+        id="ExampleBench Two",
         category="public_benchmarks",
         type="external_benchmark",
         question="Run GDPval",
@@ -821,13 +828,17 @@ def test_external_runner_uses_docker_asset_downloader_when_git_lfs_missing(monke
                 '{"downloaded":true}\n',
                 encoding="utf-8",
             )
+            (host_asset_root / "gdpval" / ".agent-bench-repository-ready.json").write_text(
+                '{"downloaded":true,"kind":"repository"}\n',
+                encoding="utf-8",
+            )
             return CompletedProcess(command, 0, "", "")
         return CompletedProcess(command, 0, "", "")
 
     monkeypatch.setattr("agent_bench.external.shutil.which", fake_which)
     monkeypatch.setattr("agent_bench.external.subprocess.run", fake_run)
     task = Task(
-        id="PB_002",
+        id="ExampleBench Two",
         category="public_benchmarks",
         type="external_benchmark",
         question="Run GDPval",
@@ -872,5 +883,230 @@ def test_external_runner_uses_docker_asset_downloader_when_git_lfs_missing(monke
 
     assert error is None
     assert commands[0][:2] == ["docker", "run"]
+    assert commands[0][commands[0].index("--network") + 1] == "bridge"
+    assert "--cap-drop" in commands[0]
+    assert "no-new-privileges" in commands[0]
+    assert "--pids-limit" in commands[0]
+    assert "--memory" in commands[0]
+    assert "--cpus" in commands[0]
     assert "--entrypoint" in commands[0]
     assert "agent-bench-external:python3.12" in commands[0]
+
+
+def test_repository_asset_recipe_is_inferred_for_delegated_fetch(tmp_path):
+    task = _manifest_task()
+    task.source = "tasks/example/manifest.json"
+    task_dir = tmp_path / "tasks" / "example"
+    task_dir.mkdir(parents=True)
+    (task_dir / "manifest.json").write_text("{}\n", encoding="utf-8")
+    revision = "0123456789abcdef0123456789abcdef01234567"
+    (task_dir / "assets.lock.json").write_text(
+        json.dumps(
+            {
+                "benchmark_slug": "example",
+                "assets": [
+                    {
+                        "source": "https://example.com/example.git",
+                        "revision": revision,
+                        "validation_rules": {
+                            "kind": "repository_paths",
+                            "required_paths": ["README.md", "tests"],
+                        },
+                    }
+                ],
+                "materialization": {"mode": "repository_or_dataset_cache"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = ExternalBenchmarkConfig(
+        provider="openai-compatible",
+        base_url="http://localhost:8000/v1",
+        model="example-model",
+        api_key_env="",
+        output_dir=tmp_path / "runs",
+        timeout=5.0,
+        source_root=tmp_path,
+    )
+
+    recipe = _asset_cache_recipe(task, config)
+
+    assert recipe is not None
+    assert recipe["delegated_only"] is True
+    assert recipe["ref"] == revision
+    assert recipe["subpaths"] == ("README.md", "tests")
+
+
+def test_huggingface_asset_recipe_is_revision_pinned_and_secret_free(tmp_path):
+    task = _manifest_task()
+    task.source = "tasks/example/manifest.json"
+    task_dir = tmp_path / "tasks" / "example"
+    task_dir.mkdir(parents=True)
+    (task_dir / "manifest.json").write_text("{}\n", encoding="utf-8")
+    revision = "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+    (task_dir / "assets.lock.json").write_text(
+        json.dumps(
+            {
+                "benchmark_slug": "swe-bench-verified",
+                "assets": [
+                    {
+                        "source": "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified",
+                        "revision": revision,
+                        "expected_local_path": "huggingface:princeton-nlp/SWE-bench_Verified",
+                        "required": True,
+                        "validation_rules": {
+                            "kind": "huggingface_dataset",
+                            "dataset_id": "princeton-nlp/SWE-bench_Verified",
+                            "split": "test",
+                            "expected_records": 500,
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = ExternalBenchmarkConfig(
+        provider="openai-compatible",
+        base_url="http://localhost:8000/v1",
+        model="example-model",
+        api_key_env="",
+        output_dir=tmp_path / "runs",
+        timeout=5.0,
+        source_root=tmp_path,
+    )
+
+    recipe = _huggingface_asset_recipe(task, config)
+
+    assert recipe is not None
+    assert recipe["revision"] == revision
+    assert recipe["expected_records"] == 500
+    script = _huggingface_asset_download_script(recipe)
+    assert revision in script
+    assert "HF_TOKEN" in script
+    assert "api_key" not in script.lower()
+
+
+def test_huggingface_expected_path_matches_materialized_cache_layout(tmp_path):
+    from agent_bench.external import _asset_validation_details, _materialized_asset_path
+
+    cache_dir = tmp_path / "assets"
+    dataset_dir = cache_dir / "huggingface" / "princeton-nlp-swe-bench-verified"
+    dataset_dir.mkdir(parents=True)
+    (dataset_dir / "state.json").write_text("{}\n", encoding="utf-8")
+    (cache_dir / ".agent-bench-assets-ready.json").write_text("{}\n", encoding="utf-8")
+
+    path = _materialized_asset_path("huggingface:princeton-nlp/SWE-bench_Verified")
+    validation = _asset_validation_details(cache_dir, [path], None, cache_required=True)
+
+    assert path == "huggingface/princeton-nlp-swe-bench-verified"
+    assert validation["ok"] is True
+    assert validation["missing_required_asset_paths"] == []
+
+
+def test_runtime_mount_uses_the_same_slug_as_delegated_asset_fetch(tmp_path):
+    task = _manifest_task(["chat_answer"])
+    task.source = "tasks/source-slug/manifest.json"
+    task.benchmark["dataset_id"] = "publisher/example-dataset"
+    task_dir = tmp_path / "tasks" / "source-slug"
+    task_dir.mkdir(parents=True)
+    (task_dir / "manifest.json").write_text("{}\n", encoding="utf-8")
+    revision = "0123456789abcdef0123456789abcdef01234567"
+    (task_dir / "assets.lock.json").write_text(
+        json.dumps(
+            {
+                "benchmark_slug": "source-slug",
+                "assets": [
+                    {
+                        "source": "https://example.com/example.git",
+                        "revision": revision,
+                        "validation_rules": {
+                            "kind": "repository_paths",
+                            "required_paths": ["README.md"],
+                        },
+                    },
+                    {
+                        "source": "https://huggingface.co/datasets/publisher/example-dataset",
+                        "revision": revision,
+                        "validation_rules": {
+                            "kind": "huggingface_dataset",
+                            "dataset_id": "publisher/example-dataset",
+                            "split": "test",
+                        },
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = ExternalBenchmarkConfig(
+        provider="openai-compatible",
+        base_url="http://localhost:8000/v1",
+        model="example-model",
+        api_key_env="",
+        output_dir=tmp_path / "runs",
+        timeout=5.0,
+        asset_root=tmp_path / "assets",
+        source_root=tmp_path,
+    )
+    manifest = manifest_from_task(task)
+
+    env = _docker_env(
+        task,
+        task.benchmark,
+        task.benchmark["docker"],
+        config,
+        manifest,
+    )
+    mount_dir = _benchmark_asset_cache_dir(task, config, manifest)
+
+    assert env["AGENT_BENCH_ASSET_CACHE_KEY"] == "source-slug"
+    assert mount_dir == config.asset_root / "source-slug"
+
+
+def test_huggingface_model_asset_recipe_is_revision_pinned_and_secret_free(tmp_path):
+    task = _manifest_task()
+    task.source = "tasks/example/manifest.json"
+    task_dir = tmp_path / "tasks" / "example"
+    task_dir.mkdir(parents=True)
+    (task_dir / "manifest.json").write_text("{}\n", encoding="utf-8")
+    revision = "873bac1b1c461e410c4a6e379f6790d3d1c7c214"
+    (task_dir / "assets.lock.json").write_text(
+        json.dumps(
+            {
+                "benchmark_slug": "wmt24pp",
+                "assets": [
+                    {
+                        "source": "https://huggingface.co/Unbabel/XCOMET-XXL",
+                        "revision": revision,
+                        "validation_rules": {
+                            "kind": "huggingface_model",
+                            "model_id": "Unbabel/XCOMET-XXL",
+                            "gated": True,
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = ExternalBenchmarkConfig(
+        provider="openai-compatible",
+        base_url="http://localhost:8000/v1",
+        model="example-model",
+        api_key_env="",
+        output_dir=tmp_path / "runs",
+        timeout=5.0,
+        source_root=tmp_path,
+    )
+
+    recipe = _huggingface_model_asset_recipe(task, config)
+
+    assert recipe is not None
+    assert recipe["revision"] == revision
+    assert recipe["gated"] is True
+    script = _huggingface_model_download_script(recipe)
+    assert revision in script
+    assert "snapshot_download" in script
+    assert "HF_TOKEN" in script
+    assert "api_key" not in script.lower()

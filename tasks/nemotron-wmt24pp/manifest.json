@@ -1,0 +1,104 @@
+{
+  "version": "agent-bench.manifest.v1",
+  "display_name": "WMT24++ (en-to-xx)",
+  "task_group": "Multilingual",
+  "description": "Run the WMT24++ (en-to-xx) leaf condition reported by the NVIDIA Puzzle model card with pinned public assets and fail-closed native requirements.",
+  "homepage_url": "https://huggingface.co/datasets/google/wmt24pp",
+  "official_leaderboard_url": "",
+  "source": {
+    "repository_url": "https://github.com/google-research/mt-metrics-eval.git",
+    "commit": "68a481aea1a787392d55af8f76ac8ef40c5f4664",
+    "dataset_id": "google/wmt24pp",
+    "dataset_revision": "e65f5856b1de3319c748c15e5aec0bc2336ec3b0",
+    "subdir": ""
+  },
+  "license": "Apache-2.0 data; XCOMET-XXL CC-BY-NC-SA-4.0 gated scorer",
+  "credit": "WMT24++, Google, and Unbabel XCOMET authors",
+  "citation": "https://huggingface.co/datasets/google/wmt24pp",
+  "official_conditions": {
+    "official_split": "English-to-target-language directions",
+    "official_scoring_method": "XCOMET-XXL translation score",
+    "official_prompt_format": "official WMT24++ translation prompt",
+    "official_grader_command": "nemo-evaluator-launcher run --config local_nemotron-3-super-120b-a12b-base.yaml -t ns_wmt24pp_comet",
+    "official_evaluation_config": "tasks/nemotron-wmt24pp/configs/official.json",
+    "hardware_requirements": "",
+    "container_requirements": "Pinned component environment; missing native grader, long-context capacity, judge, gated scorer, or source assets fails closed"
+  },
+  "assets": [
+    {
+      "source": "https://github.com/google-research/mt-metrics-eval.git",
+      "revision": "68a481aea1a787392d55af8f76ac8ef40c5f4664",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": ["README.md", "setup.py", "mt_metrics_eval"]
+      }
+    },
+    {
+      "source": "https://huggingface.co/datasets/google/wmt24pp",
+      "revision": "e65f5856b1de3319c748c15e5aec0bc2336ec3b0",
+      "checksum": "",
+      "expected_local_path": "huggingface:google/wmt24pp",
+      "required": true,
+      "validation_rules": {
+        "kind": "huggingface_dataset",
+        "dataset_id": "google/wmt24pp"
+      }
+    },
+    {
+      "source": "https://huggingface.co/Unbabel/XCOMET-XXL",
+      "revision": "873bac1b1c461e410c4a6e379f6790d3d1c7c214",
+      "checksum": "",
+      "expected_local_path": "huggingface:Unbabel/XCOMET-XXL",
+      "required": true,
+      "validation_rules": {
+        "kind": "huggingface_model",
+        "model_id": "Unbabel/XCOMET-XXL",
+        "gated": true
+      }
+    }
+  ],
+  "container": {
+    "image": "agent-bench-external:python3.12",
+    "build_context": ".",
+    "dockerfile": "harness/Dockerfile",
+    "command": "bash /benchmark/task/harness/run.sh",
+    "environment_allowed": [],
+    "mounts": [],
+    "network": "model_proxy",
+    "cpus": 2,
+    "memory": "4g",
+    "pids_limit": 256,
+    "timeout_seconds": 21600,
+    "requires_nested_docker": false,
+    "requires_host_docker_socket": false,
+    "run_as_user": "10001:10001"
+  },
+  "adapter": {
+    "module": "",
+    "entry_point": "harness/run.sh",
+    "expected_output_files": [
+      "agent_bench_result.json"
+    ],
+    "result_parser": "agent_bench_result_json"
+  },
+  "scoring": {
+    "raw_score_field": "score",
+    "max_score": 1,
+    "normalization": "fraction_to_0_100",
+    "direction": "higher_is_better"
+  },
+  "reporting": {
+    "category_label": "Multilingual",
+    "display_order": 48,
+    "credit": "WMT24++, Google, and Unbabel XCOMET authors",
+    "citation": "https://huggingface.co/datasets/google/wmt24pp",
+    "license": "Apache-2.0 data; XCOMET-XXL CC-BY-NC-SA-4.0 gated scorer"
+  },
+  "capabilities": [
+    "translation_scoring"
+  ],
+  "required_tools": []
+}

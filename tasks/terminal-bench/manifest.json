@@ -1,6 +1,5 @@
 {
   "version": "agent-bench.manifest.v1",
-  "id": "PB_017",
   "display_name": "Terminal-Bench 2.0",
   "task_group": "Terminal",
   "description": "Run Terminal-Bench 2.0 locally through the Docker-backed public benchmark adapter.",

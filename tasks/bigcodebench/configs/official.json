@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.benchmark-config.v1",
-  "benchmark_id": "PB_025",
+  "benchmark_name": "BigCodeBench",
   "benchmark_slug": "bigcodebench",
   "display_name": "BigCodeBench",
   "source_descriptor": "tasks/bigcodebench/manifest.json",

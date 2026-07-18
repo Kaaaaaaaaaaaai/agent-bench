@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.benchmark-config.v1",
-  "benchmark_id": "PB_020",
+  "benchmark_name": "ProgramBench",
   "benchmark_slug": "programbench",
   "display_name": "ProgramBench",
   "source_descriptor": "tasks/programbench/manifest.json",

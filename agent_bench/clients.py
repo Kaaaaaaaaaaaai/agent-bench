@@ -264,7 +264,7 @@ class MockClient(ModelClient):
                 "details": {
                     "benchmark": benchmark.get("name"),
                     "group": benchmark.get("group", task.category),
-                    "suite_id": task.id,
+                    "benchmark_name": task.id,
                     "required_capabilities": benchmark.get("capabilities", []),
                     "homepage": benchmark.get("homepage", ""),
                     "license": benchmark.get("license", ""),

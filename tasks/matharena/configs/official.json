@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.benchmark-config.v1",
-  "benchmark_id": "PB_026",
+  "benchmark_name": "MathArena",
   "benchmark_slug": "matharena",
   "display_name": "MathArena",
   "source_descriptor": "tasks/matharena/manifest.json",

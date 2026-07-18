@@ -137,7 +137,7 @@ class ExternalBenchmarkRunner:
         task_mount_dir = _benchmark_task_mount_dir(config, task)
         asset_mount_dir = _benchmark_asset_cache_dir(task, config, manifest)
         asset_mount_dir.mkdir(parents=True, exist_ok=True)
-        container_name = f"agent-bench-{task.id.lower()}-{uuid.uuid4().hex[:12]}"
+        container_name = f"agent-bench-{_asset_cache_key(task.id)}-{uuid.uuid4().hex[:12]}"
         command = _docker_run_command(
             config,
             manifest,
@@ -220,7 +220,7 @@ class ExternalBenchmarkRunner:
         _attach_external_setup_details(payload, setup_details)
         _write_result_payload(result_file, payload)
         details = {
-            "suite_id": task.id,
+            "benchmark_name": task.id,
             "benchmark": benchmark.get("name", manifest.display_name),
             "group": benchmark.get("group", task.category),
             "required_capabilities": benchmark.get("capabilities", []),
@@ -296,7 +296,7 @@ def _benchmark_details(
 ) -> dict[str, Any]:
     benchmark = task.benchmark if isinstance(task.benchmark, dict) else {}
     return {
-        "suite_id": task.id,
+        "benchmark_name": task.id,
         "benchmark": benchmark.get("name", manifest.display_name),
         "group": benchmark.get("group", manifest.task_group),
         "required_capabilities": benchmark.get("capabilities", manifest.capabilities),
@@ -525,9 +525,21 @@ def _benchmark_asset_cache_dir(
     config: ExternalBenchmarkConfig,
     manifest: BenchmarkManifest,
 ) -> Path:
-    benchmark = task.benchmark if isinstance(task.benchmark, dict) else {}
-    key = _asset_cache_key(str(benchmark.get("name") or manifest.display_name or task.id))
+    key = _benchmark_asset_cache_key(task, config)
     return config.asset_root / key
+
+
+def _benchmark_asset_cache_key(task: Task, config: ExternalBenchmarkConfig) -> str:
+    for recipe_factory in (
+        _asset_cache_recipe,
+        _huggingface_asset_recipe,
+        _huggingface_model_asset_recipe,
+    ):
+        recipe = recipe_factory(task, config)
+        if isinstance(recipe, dict) and str(recipe.get("key") or "").strip():
+            return _asset_cache_key(str(recipe["key"]))
+    benchmark = task.benchmark if isinstance(task.benchmark, dict) else {}
+    return _asset_cache_key(str(benchmark.get("name") or task.id))
 
 
 def _task_bind_mount_enabled(config: ExternalBenchmarkConfig) -> bool:
@@ -576,15 +588,18 @@ def _docker_env(
     config: ExternalBenchmarkConfig,
     manifest: BenchmarkManifest,
 ) -> dict[str, str]:
+    asset_cache_key = _benchmark_asset_cache_key(task, config)
     env = {
         "AGENT_BENCH_TASK_ID": task.id,
-        "AGENT_BENCH_BENCHMARK_ID": task.id,
         "AGENT_BENCH_BENCHMARK_NAME": benchmark.get("name", manifest.display_name),
         "AGENT_BENCH_BENCHMARK_GROUP": benchmark.get("group", task.category),
         "AGENT_BENCH_REPOSITORY": benchmark.get("repository", manifest.source.repository_url or benchmark.get("homepage", "")),
         "AGENT_BENCH_REPOSITORY_REF": benchmark.get("ref", manifest.source.commit or manifest.source.dataset_revision),
         "AGENT_BENCH_SUBDIR": benchmark.get("subdir", ""),
         "AGENT_BENCH_DATASET_ID": benchmark.get("dataset_id", manifest.source.dataset_id),
+        "AGENT_BENCH_DATASET_REVISION": benchmark.get(
+            "dataset_revision", manifest.source.dataset_revision
+        ),
         "AGENT_BENCH_BENCHMARK_HOMEPAGE": benchmark.get("homepage", manifest.homepage_url),
         "AGENT_BENCH_BENCHMARK_LICENSE": benchmark.get("license", manifest.license),
         "AGENT_BENCH_BENCHMARK_CREDIT": benchmark.get("credit", manifest.credit),
@@ -603,7 +618,7 @@ def _docker_env(
         "AGENT_BENCH_OUTPUT_DIR": CONTAINER_OUTPUT_DIR,
         "AGENT_BENCH_TASK_DIR": CONTAINER_BENCHMARK_TASK_DIR,
         "AGENT_BENCH_ASSET_ROOT": CONTAINER_BENCHMARK_ASSET_DIR,
-        "AGENT_BENCH_ASSET_CACHE_KEY": _asset_cache_key(str(benchmark.get("name") or manifest.display_name)),
+        "AGENT_BENCH_ASSET_CACHE_KEY": asset_cache_key,
         "AGENT_BENCH_MANIFEST_JSON": json.dumps(manifest.to_dict(), sort_keys=True),
         "AGENT_BENCH_BENCHMARK_JSON": json.dumps(benchmark, sort_keys=True),
         "AGENT_BENCH_JUDGE_BASE_URL": config.judge_base_url,
@@ -625,6 +640,12 @@ def _docker_env(
         env["AGENT_BENCH_STOP"] = json.dumps(config.stop)
     if "repo_patch" in _benchmark_capabilities(benchmark):
         env.setdefault("AGENT_BENCH_ALLOW_TARGET_CHECKOUT", "1")
+    dataset_id = str(benchmark.get("dataset_id") or manifest.source.dataset_id).strip()
+    if dataset_id:
+        env["AGENT_BENCH_DATASET_CACHE_PATH"] = (
+            f"{CONTAINER_BENCHMARK_ASSET_DIR}/huggingface/{_safe_slug(dataset_id)}"
+        )
+        env["AGENT_BENCH_REQUIRE_MATERIALIZED_DATASET"] = "1"
     if config.pass_api_key_to_container and config.api_key_env:
         env["AGENT_BENCH_API_KEY_ENV"] = config.api_key_env
         env["AGENT_BENCH_API_KEY"] = os.environ.get(config.api_key_env, "")
@@ -672,11 +693,15 @@ def _external_setup_details(
         for asset in manifest.assets
         if asset.required and asset.expected_local_path
     ]
-    cache_required_paths = [path for path in required_asset_paths if path not in {".", ""}]
+    cache_required_paths = [
+        _materialized_asset_path(path)
+        for path in required_asset_paths
+        if path not in {".", ""}
+    ]
     cache_recipe = _asset_cache_recipe(task, config)
     validation = _asset_validation_details(
         cache_dir,
-        required_asset_paths,
+        cache_required_paths,
         asset_cache_error,
         cache_required=bool(cache_recipe),
     )
@@ -764,7 +789,7 @@ def _relative_file_sample(root: Path, *, limit: int = 100) -> list[str]:
     for path in sorted(root.rglob("*")):
         if len(paths) >= limit:
             break
-        if path.is_file() and path.name != ".agent-bench-assets-ready.json":
+        if path.is_file() and not path.name.startswith(".agent-bench-"):
             paths.append(str(path.relative_to(root)))
     return paths
 
@@ -812,6 +837,14 @@ def _asset_validation_details(
     }
 
 
+def _materialized_asset_path(expected_local_path: str) -> str:
+    prefix = "huggingface:"
+    if expected_local_path.startswith(prefix):
+        dataset_id = expected_local_path[len(prefix) :].strip()
+        return f"huggingface/{_safe_slug(dataset_id)}"
+    return expected_local_path
+
+
 def _prepare_benchmark_asset_cache(
     task: Task,
     config: ExternalBenchmarkConfig,
@@ -820,13 +853,18 @@ def _prepare_benchmark_asset_cache(
 ) -> str | None:
     recipe = _asset_cache_recipe(task, config)
     if recipe is None:
-        return None
-    invalid_subpaths = recipe.get("invalid_subpaths", ())
-    if invalid_subpaths:
-        return (
-            "asset cache download skipped: cache recipe contains unsafe subpaths: "
-            + ", ".join(str(path) for path in invalid_subpaths)
+        return _prepare_huggingface_assets_with_docker(
+            task, config, launcher_image or config.launcher_image
         )
+    if recipe.get("delegated_only"):
+        if not launcher_image:
+            return "required repository asset fetch skipped: delegated launcher image was unavailable"
+        repository_error = _prepare_benchmark_asset_cache_with_docker(
+            recipe, config, launcher_image
+        )
+        if repository_error:
+            return repository_error
+        return _prepare_huggingface_assets_with_docker(task, config, launcher_image)
     cache_dir = config.asset_root / recipe["key"]
     sentinel = cache_dir / ".agent-bench-assets-ready.json"
     if sentinel.is_file() and _cache_has_materialized_files(cache_dir):
@@ -947,6 +985,9 @@ def _prepare_benchmark_asset_cache_with_docker(
         return "asset cache download skipped: git-lfs was not found and Docker was unavailable"
     key = str(recipe["key"])
     cache_dir = config.asset_root / key
+    repository_sentinel = cache_dir / ".agent-bench-repository-ready.json"
+    if repository_sentinel.is_file() and _cache_has_materialized_files(cache_dir):
+        return None
     cache_dir.mkdir(parents=True, exist_ok=True)
     script = _docker_asset_download_script(recipe)
     completed = subprocess.run(
@@ -955,7 +996,19 @@ def _prepare_benchmark_asset_cache_with_docker(
             "run",
             "--rm",
             "--network",
-            "host",
+            "bridge",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--pids-limit",
+            "256",
+            "--memory",
+            "4g",
+            "--cpus",
+            "2",
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev,noexec,size=1g",
             "-v",
             f"{config.asset_root.resolve()}:{CONTAINER_ASSET_DOWNLOAD_ROOT}",
             "--entrypoint",
@@ -971,7 +1024,7 @@ def _prepare_benchmark_asset_cache_with_docker(
     if completed.returncode != 0:
         output = (completed.stderr or completed.stdout or "").strip()
         return f"asset cache download skipped: {(output[-1000:] or 'Docker downloader failed')}"
-    if _cache_has_materialized_files(cache_dir):
+    if repository_sentinel.is_file() and _cache_has_materialized_files(cache_dir):
         return None
     return "asset cache download skipped: Docker downloader did not materialize requested files"
 
@@ -985,6 +1038,12 @@ def _docker_asset_download_script(recipe: dict[str, Any]) -> str:
     copy_commands = []
     for subpath in recipe["subpaths"]:
         quoted = shlex.quote(str(subpath))
+        if str(subpath) == ".":
+            copy_commands.append(
+                'find "$cache" -mindepth 1 -maxdepth 1 ! -name huggingface '
+                '-exec rm -rf -- {} +; cp -a "$tmp/." "$cache/"'
+            )
+            continue
         copy_commands.append(
             f'if [[ -e "$tmp/{quoted}" ]]; then '
             f'mkdir -p "$cache/$(dirname {quoted})"; '
@@ -1009,7 +1068,8 @@ def _docker_asset_download_script(recipe: dict[str, Any]) -> str:
             'git clone --depth 1 --branch "$ref" "$repository" "$tmp" || { rm -rf "$tmp"; git clone --depth 1 "$repository" "$tmp"; git -C "$tmp" fetch --depth 1 origin "$ref"; git -C "$tmp" checkout --detach "$ref"; }',
             'if [[ "$requires_lfs" == "1" ]]; then git -C "$tmp" lfs install --local || true; git -C "$tmp" lfs pull --include "$includes" --exclude ""; fi',
             copy_script,
-            """printf '{"downloaded":true}\\n' > "$cache/.agent-bench-assets-ready.json" """,
+            """printf '{"downloaded":true,"kind":"repository"}\\n' > "$cache/.agent-bench-repository-ready.json" """,
+            """cp "$cache/.agent-bench-repository-ready.json" "$cache/.agent-bench-assets-ready.json" """,
         ]
     )
 
@@ -1025,10 +1085,10 @@ def _asset_cache_recipe(task: Task, config: ExternalBenchmarkConfig) -> dict[str
     if not isinstance(raw, dict):
         return None
     materialization = raw.get("materialization")
-    if not isinstance(materialization, dict):
-        return None
-    recipe = materialization.get("cache_recipe")
-    if not isinstance(recipe, dict) or recipe.get("enabled", True) is False:
+    recipe = materialization.get("cache_recipe") if isinstance(materialization, dict) else None
+    if not isinstance(recipe, dict):
+        return _inferred_repository_asset_recipe(raw, task)
+    if recipe.get("enabled", True) is False:
         return None
     source = raw.get("source") if isinstance(raw.get("source"), dict) else {}
     benchmark = task.benchmark if isinstance(task.benchmark, dict) else {}
@@ -1050,6 +1110,316 @@ def _asset_cache_recipe(task: Task, config: ExternalBenchmarkConfig) -> dict[str
         "subpaths": subpaths,
         "invalid_subpaths": tuple(invalid_subpaths),
     }
+
+
+def _inferred_repository_asset_recipe(raw: dict[str, Any], task: Task) -> dict[str, Any] | None:
+    assets = raw.get("assets")
+    if not isinstance(assets, list):
+        return None
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        rules = asset.get("validation_rules")
+        rules = rules if isinstance(rules, dict) else {}
+        kind = rules.get("kind")
+        if kind not in {"repository_clone", "repository_paths"}:
+            continue
+        repository = str(asset.get("source") or "").strip()
+        revision = str(asset.get("revision") or "").strip()
+        if not repository or not revision:
+            continue
+        required_paths = rules.get("required_paths")
+        if kind == "repository_paths" and isinstance(required_paths, list):
+            subpaths = tuple(
+                str(item).strip("/") for item in required_paths if str(item).strip("/")
+            )
+        else:
+            subpaths = (".",)
+        if not subpaths:
+            return None
+        return {
+            "key": _asset_cache_key(str(raw.get("benchmark_slug") or task.id)),
+            "repository": repository,
+            "ref": revision,
+            "requires_git_lfs": False,
+            "includes": (),
+            "subpaths": subpaths,
+            "delegated_only": True,
+        }
+    return None
+
+
+def _huggingface_asset_recipe(task: Task, config: ExternalBenchmarkConfig) -> dict[str, Any] | None:
+    lock_path = _benchmark_task_mount_dir(config, task) / "assets.lock.json"
+    if not lock_path.is_file():
+        return None
+    try:
+        raw = json.loads(lock_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    assets = raw.get("assets") if isinstance(raw, dict) else None
+    if not isinstance(assets, list):
+        return None
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        rules = asset.get("validation_rules") if isinstance(asset.get("validation_rules"), dict) else {}
+        if rules.get("kind") != "huggingface_dataset":
+            continue
+        dataset_id = str(rules.get("dataset_id") or "").strip()
+        revision = str(asset.get("revision") or "").strip()
+        if not dataset_id or not revision:
+            continue
+        return {
+            "key": _asset_cache_key(str(raw.get("benchmark_slug") or task.id)),
+            "dataset_id": dataset_id,
+            "revision": revision,
+            "config": str(rules.get("config") or "").strip(),
+            "split": str(rules.get("split") or "").strip(),
+            "expected_records": rules.get("expected_records"),
+            "gated": bool(rules.get("gated", False)),
+        }
+    return None
+
+
+def _huggingface_model_asset_recipe(
+    task: Task,
+    config: ExternalBenchmarkConfig,
+) -> dict[str, Any] | None:
+    lock_path = _benchmark_task_mount_dir(config, task) / "assets.lock.json"
+    if not lock_path.is_file():
+        return None
+    try:
+        raw = json.loads(lock_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    assets = raw.get("assets") if isinstance(raw, dict) else None
+    if not isinstance(assets, list):
+        return None
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        rules = asset.get("validation_rules") if isinstance(asset.get("validation_rules"), dict) else {}
+        if rules.get("kind") != "huggingface_model":
+            continue
+        model_id = str(rules.get("model_id") or "").strip()
+        revision = str(asset.get("revision") or "").strip()
+        if model_id and revision:
+            return {
+                "key": _asset_cache_key(str(raw.get("benchmark_slug") or task.id)),
+                "model_id": model_id,
+                "revision": revision,
+                "gated": bool(rules.get("gated", False)),
+            }
+    return None
+
+
+def _prepare_huggingface_assets_with_docker(
+    task: Task,
+    config: ExternalBenchmarkConfig,
+    launcher_image: str,
+) -> str | None:
+    dataset_recipe = _huggingface_asset_recipe(task, config)
+    model_recipe = _huggingface_model_asset_recipe(task, config)
+    if dataset_recipe is None and model_recipe is None:
+        return None
+    if dataset_recipe is not None:
+        error = _prepare_huggingface_asset_cache_with_docker(
+            dataset_recipe, config, launcher_image
+        )
+        if error:
+            return error
+    if model_recipe is not None:
+        return _prepare_huggingface_model_cache_with_docker(
+            model_recipe, config, launcher_image
+        )
+    return None
+
+
+def _prepare_huggingface_asset_cache_with_docker(
+    recipe: dict[str, Any],
+    config: ExternalBenchmarkConfig,
+    launcher_image: str,
+) -> str | None:
+    if shutil.which(config.docker_bin) is None:
+        return "required Hugging Face asset fetch skipped: Docker was unavailable"
+    key = str(recipe["key"])
+    cache_dir = config.asset_root / key
+    dataset_dir = cache_dir / "huggingface" / _safe_slug(str(recipe["dataset_id"]))
+    dataset_sentinel = cache_dir / ".agent-bench-dataset-ready.json"
+    if dataset_sentinel.is_file() and dataset_dir.is_dir() and _cache_has_materialized_files(dataset_dir):
+        return None
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    script = _huggingface_asset_download_script(recipe)
+    command = [
+        config.docker_bin,
+        "run",
+        "--rm",
+        "--network",
+        "bridge",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
+        "--pids-limit",
+        "256",
+        "--memory",
+        "4g",
+        "--cpus",
+        "2",
+        "--tmpfs",
+        "/tmp:rw,nosuid,nodev,noexec,size=1g",
+        "-v",
+        f"{config.asset_root.resolve()}:{CONTAINER_ASSET_DOWNLOAD_ROOT}",
+    ]
+    if os.environ.get("HF_TOKEN"):
+        command.extend(["-e", "HF_TOKEN"])
+    command.extend(["--entrypoint", "python", launcher_image, "-c", script])
+    completed = subprocess.run(command, text=True, capture_output=True, check=False)
+    if completed.returncode != 0:
+        output = (completed.stderr or completed.stdout or "").strip()
+        return f"required Hugging Face asset fetch failed: {(output[-1000:] or 'fetch container failed')}"
+    if not dataset_sentinel.is_file() or not _cache_has_materialized_files(dataset_dir):
+        return "required Hugging Face asset fetch failed: fetch container produced no validated dataset"
+    return None
+
+
+def _huggingface_asset_download_script(recipe: dict[str, Any]) -> str:
+    payload = json.dumps(
+        {
+            "key": str(recipe["key"]),
+            "dataset_id": str(recipe["dataset_id"]),
+            "revision": str(recipe["revision"]),
+            "config": str(recipe.get("config") or ""),
+            "split": str(recipe.get("split") or ""),
+            "expected_records": recipe.get("expected_records"),
+            "root": CONTAINER_ASSET_DOWNLOAD_ROOT,
+        },
+        sort_keys=True,
+    )
+    return "\n".join(
+        [
+            "import hashlib, json, os, shutil",
+            "from pathlib import Path",
+            "from datasets import load_dataset",
+            f"cfg = json.loads({payload!r})",
+            "root = Path(cfg['root']) / cfg['key']",
+            "out = root / 'huggingface' / ''.join(c.lower() if c.isalnum() else '-' for c in cfg['dataset_id']).strip('-')",
+            "if out.exists(): shutil.rmtree(out)",
+            "kwargs = {'path': cfg['dataset_id'], 'revision': cfg['revision']}",
+            "if cfg['config']: kwargs['name'] = cfg['config']",
+            "if os.environ.get('HF_TOKEN'): kwargs['token'] = os.environ['HF_TOKEN']",
+            "if cfg['split']:",
+            "    kwargs['split'] = cfg['split']",
+            "    dataset = load_dataset(**kwargs)",
+            "else:",
+            "    last_error = None",
+            "    for candidate in ('test', 'validation', 'dev', 'train'):",
+            "        try:",
+            "            dataset = load_dataset(**kwargs, split=candidate)",
+            "            cfg['split'] = candidate",
+            "            break",
+            "        except Exception as exc:",
+            "            last_error = exc",
+            "    else: raise RuntimeError(f'no supported split could be loaded: {last_error}')",
+            "expected = cfg.get('expected_records')",
+            "if expected is not None and len(dataset) != int(expected): raise RuntimeError(f\"expected {expected} records, got {len(dataset)}\")",
+            "out.parent.mkdir(parents=True, exist_ok=True)",
+            "dataset.save_to_disk(str(out))",
+            "files = []",
+            "for path in sorted(p for p in out.rglob('*') if p.is_file()):",
+            "    files.append({'path': str(path.relative_to(out)), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'size': path.stat().st_size})",
+            "if not files: raise RuntimeError('dataset save produced no files')",
+            "sentinel = {'dataset_id': cfg['dataset_id'], 'revision': cfg['revision'], 'split': cfg['split'], 'record_count': len(dataset), 'files': files}",
+            "encoded = json.dumps(sentinel, sort_keys=True) + '\\n'",
+            "(root / '.agent-bench-dataset-ready.json').write_text(encoded)",
+            "(root / '.agent-bench-assets-ready.json').write_text(encoded)",
+        ]
+    )
+
+
+def _prepare_huggingface_model_cache_with_docker(
+    recipe: dict[str, Any],
+    config: ExternalBenchmarkConfig,
+    launcher_image: str,
+) -> str | None:
+    if shutil.which(config.docker_bin) is None:
+        return "required Hugging Face model fetch skipped: Docker was unavailable"
+    key = str(recipe["key"])
+    cache_dir = config.asset_root / key
+    model_slug = _safe_slug(str(recipe["model_id"]))
+    model_dir = cache_dir / "huggingface" / model_slug
+    model_sentinel = cache_dir / f".agent-bench-model-{model_slug}-ready.json"
+    if model_sentinel.is_file() and model_dir.is_dir() and _cache_has_materialized_files(model_dir):
+        return None
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    script = _huggingface_model_download_script(recipe)
+    command = [
+        config.docker_bin,
+        "run",
+        "--rm",
+        "--network",
+        "bridge",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
+        "--pids-limit",
+        "256",
+        "--memory",
+        "4g",
+        "--cpus",
+        "2",
+        "--tmpfs",
+        "/tmp:rw,nosuid,nodev,noexec,size=1g",
+        "-v",
+        f"{config.asset_root.resolve()}:{CONTAINER_ASSET_DOWNLOAD_ROOT}",
+    ]
+    if os.environ.get("HF_TOKEN"):
+        command.extend(["-e", "HF_TOKEN"])
+    command.extend(["--entrypoint", "python", launcher_image, "-c", script])
+    completed = subprocess.run(command, text=True, capture_output=True, check=False)
+    if completed.returncode != 0:
+        output = (completed.stderr or completed.stdout or "").strip()
+        return f"required Hugging Face model fetch failed: {(output[-1000:] or 'fetch container failed')}"
+    if not model_sentinel.is_file() or not _cache_has_materialized_files(model_dir):
+        return "required Hugging Face model fetch failed: fetch container produced no validated model"
+    return None
+
+
+def _huggingface_model_download_script(recipe: dict[str, Any]) -> str:
+    payload = json.dumps(
+        {
+            "key": str(recipe["key"]),
+            "model_id": str(recipe["model_id"]),
+            "revision": str(recipe["revision"]),
+            "root": CONTAINER_ASSET_DOWNLOAD_ROOT,
+        },
+        sort_keys=True,
+    )
+    return "\n".join(
+        [
+            "import hashlib, json, os, shutil",
+            "from pathlib import Path",
+            "from huggingface_hub import snapshot_download",
+            f"cfg = json.loads({payload!r})",
+            "root = Path(cfg['root']) / cfg['key']",
+            "slug = ''.join(c.lower() if c.isalnum() else '-' for c in cfg['model_id']).strip('-')",
+            "out = root / 'huggingface' / slug",
+            "if out.exists(): shutil.rmtree(out)",
+            "kwargs = {'repo_id': cfg['model_id'], 'repo_type': 'model', 'revision': cfg['revision'], 'local_dir': str(out)}",
+            "if os.environ.get('HF_TOKEN'): kwargs['token'] = os.environ['HF_TOKEN']",
+            "snapshot_download(**kwargs)",
+            "files = []",
+            "for path in sorted(p for p in out.rglob('*') if p.is_file()):",
+            "    files.append({'path': str(path.relative_to(out)), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'size': path.stat().st_size})",
+            "if not files: raise RuntimeError('model snapshot produced no files')",
+            "sentinel = {'model_id': cfg['model_id'], 'revision': cfg['revision'], 'files': files}",
+            "encoded = json.dumps(sentinel, sort_keys=True) + '\\n'",
+            "(root / f'.agent-bench-model-{slug}-ready.json').write_text(encoded)",
+            "(root / '.agent-bench-assets-ready.json').write_text(encoded)",
+        ]
+    )
 
 
 def _asset_cache_key(value: str) -> str:
@@ -1084,7 +1454,7 @@ def _safe_slug(value: str) -> str:
 
 def _cache_has_materialized_files(path: Path) -> bool:
     try:
-        return any(child.is_file() for child in path.rglob("*") if child.name != ".agent-bench-assets-ready.json")
+        return any(child.is_file() for child in path.rglob("*") if not child.name.startswith(".agent-bench-"))
     except OSError:
         return False
 

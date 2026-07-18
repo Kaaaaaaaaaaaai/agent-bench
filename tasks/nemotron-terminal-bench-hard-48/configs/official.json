@@ -1,0 +1,25 @@
+{
+  "schema_version": "agent-bench.benchmark-config.v1",
+  "benchmark_name": "Terminal-Bench Hard (NVIDIA 48-task subset)",
+  "benchmark_slug": "nemotron-terminal-bench-hard-48",
+  "display_name": "Terminal-Bench Hard (NVIDIA 48-task subset)",
+  "source_descriptor": "tasks/nemotron-terminal-bench-hard-48/manifest.json",
+  "nvidia_model_card_revision": "1d370e47fbc56d1019a471c2339663cdbbb5236f",
+  "nemo_task": "terminal-bench-hard",
+  "official_conditions": {
+    "official_split": "NVIDIA dedicated 48-task hard subset; exact list/digest not publicly resolved",
+    "official_scoring_method": "task test-harness success rate",
+    "official_prompt_format": "Terminus-2 terminal agent prompt",
+    "official_grader_command": "nemo-evaluator-launcher run --config local_nemotron-3-super-120b-a12b.yaml -t terminal-bench-hard",
+    "official_evaluation_config": "tasks/nemotron-terminal-bench-hard-48/configs/official.json",
+    "container_requirements": "Pinned component environment; missing native grader, simulator, sandbox, package digest, or assets fails closed"
+  },
+  "provenance_blocker": "NVIDIA publishes neither the 48-task list, source revision, nor container digest; current Evaluator defines 47 and is not substituted.",
+  "access_policy": {
+    "fail_closed": true,
+    "official_score_requires_native_grader": true,
+    "smoke_score_is_official": false
+  },
+  "container_command": "bash /benchmark/task/harness/run.sh"
+}
+

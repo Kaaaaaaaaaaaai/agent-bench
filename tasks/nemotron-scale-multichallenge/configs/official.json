@@ -1,0 +1,25 @@
+{
+  "schema_version": "agent-bench.benchmark-config.v1",
+  "benchmark_name": "Scale AI MultiChallenge",
+  "benchmark_slug": "nemotron-scale-multichallenge",
+  "display_name": "Scale AI MultiChallenge",
+  "source_descriptor": "tasks/nemotron-scale-multichallenge/manifest.json",
+  "nvidia_model_card_revision": "1d370e47fbc56d1019a471c2339663cdbbb5236f",
+  "nemo_task": "scale_ai_multichallenge",
+  "official_conditions": {
+    "official_split": "dedicated packaged multi-turn evaluation",
+    "official_scoring_method": "official MultiChallenge judge score",
+    "official_prompt_format": "official multi-turn instruction-following prompt",
+    "official_grader_command": "nemo-evaluator-launcher run --config local_nemotron-3-super-120b-a12b.yaml -t scale_ai_multichallenge",
+    "official_evaluation_config": "tasks/nemotron-scale-multichallenge/configs/official.json",
+    "container_requirements": "Pinned component environment; missing native grader, simulator, sandbox, package digest, or assets fails closed"
+  },
+  "provenance_blocker": "The model card discloses no packaged-container revision or digest.",
+  "access_policy": {
+    "fail_closed": true,
+    "official_score_requires_native_grader": true,
+    "smoke_score_is_official": false
+  },
+  "container_command": "bash /benchmark/task/harness/run.sh"
+}
+

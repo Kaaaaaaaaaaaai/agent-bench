@@ -40,7 +40,7 @@ from agent_bench.statuses import (
 
 RESULT_FIELDS = [
     "task_id",
-    "suite_id",
+    "benchmark_name",
     "suite_name",
     "category",
     "task_group",
@@ -132,13 +132,10 @@ def update_latest(timestamp_dir: Path, latest_dir: Path) -> None:
 
 
 def render_summary_html(summary: dict[str, Any], results: list[GradeResult]) -> str:
-    metadata = summary.get("metadata") if isinstance(summary.get("metadata"), dict) else {}
-    benchmark_results = _report_rows(summary, results)
-    coverage = summary.get("coverage_summary") if isinstance(summary.get("coverage_summary"), dict) else {}
-    if not coverage:
-        coverage = summary.get("coverage") if isinstance(summary.get("coverage"), dict) else {}
-    target = _target_metadata(metadata)
-    judge = _judge_metadata(metadata)
+    metadata = summary.get("metadata", {})
+    benchmark_results = summary.get("benchmark_results", [])
+    coverage = summary.get("coverage_summary", summary.get("coverage", {}))
+    target = metadata.get("target_model") if isinstance(metadata.get("target_model"), dict) else {}
     run_id = metadata.get("run_id") or metadata.get("output_dir") or "agent-bench-run"
     created_at = metadata.get("created_at_utc") or ""
     target_model = target.get("model") or metadata.get("model") or "unknown model"
@@ -158,498 +155,305 @@ def render_summary_html(summary: dict[str, Any], results: list[GradeResult]) -> 
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Agent Bench Report - {html.escape(str(target_model))}</title>
-  <style>{_report_css()}</style>
+  <title>Agent Bench Report</title>
+  <style>
+    :root {{
+      color-scheme: dark;
+      --bg: #090d13;
+      --surface: #111821;
+      --surface-2: #17212d;
+      --ink: #e8edf4;
+      --muted: #98a7ba;
+      --line: #293646;
+      --blue: #6ea8fe;
+      --cyan: #55d6be;
+      --green: #59d499;
+      --amber: #f0bd63;
+      --red: #ff7d86;
+    }}
+    * {{ box-sizing: border-box; }}
+    html {{ background: var(--bg); }}
+    body {{ margin: 0; font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--ink); background: var(--bg); }}
+    header {{ border-bottom: 1px solid var(--line); background: #0d131c; }}
+    .header-inner, main {{ width: min(1480px, 100%); margin: 0 auto; }}
+    .header-inner {{ display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px; align-items: end; padding: 30px 32px 24px; }}
+    h1 {{ margin: 0 0 8px; font-size: 30px; letter-spacing: 0; }}
+    h2 {{ margin: 0 0 14px; font-size: 19px; letter-spacing: 0; }}
+    main {{ padding: 26px 32px 52px; }}
+    section {{ margin-top: 32px; }}
+    a {{ color: var(--blue); }}
+    .muted {{ color: var(--muted); }}
+    .eyebrow {{ color: var(--cyan); font-size: 12px; font-weight: 700; text-transform: uppercase; }}
+    .run-line {{ display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); }}
+    .headline-score {{ text-align: right; }}
+    .headline-score strong {{ display: block; color: var(--cyan); font-size: 36px; line-height: 1.1; }}
+    .summary-layout {{ display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 460px); gap: 20px; align-items: stretch; }}
+    .cards {{ display: grid; grid-template-columns: repeat(3, minmax(130px, 1fr)); gap: 10px; }}
+    .card, .radar, .coverage-card {{ border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }}
+    .card {{ min-height: 100px; padding: 16px; }}
+    .card span {{ display: block; color: var(--muted); font-size: 12px; }}
+    .card strong {{ display: block; margin-top: 9px; font-size: 23px; font-weight: 650; }}
+    .radar {{ display: grid; place-items: center; min-height: 320px; padding: 12px; }}
+    .radar svg {{ width: 100%; max-width: 430px; height: auto; }}
+    .coverage-overview {{ display: grid; grid-template-columns: repeat(4, minmax(140px, 1fr)); gap: 10px; margin-bottom: 12px; }}
+    .coverage-card {{ padding: 13px 15px; }}
+    .coverage-card span {{ display: block; color: var(--muted); font-size: 12px; }}
+    .coverage-card strong {{ display: block; margin-top: 4px; font-size: 20px; }}
+    table {{ width: 100%; border-collapse: collapse; border: 1px solid var(--line); background: var(--surface); }}
+    th, td {{ padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }}
+    th {{ background: var(--surface-2); color: #bdc9d8; font-size: 11px; text-transform: uppercase; white-space: nowrap; }}
+    td {{ overflow-wrap: anywhere; }}
+    tbody tr:hover {{ background: #151e29; }}
+    .table-wrap {{ overflow-x: auto; border-radius: 8px; }}
+    .score-bar {{ display: grid; grid-template-columns: minmax(74px, 1fr) 52px; gap: 9px; align-items: center; min-width: 138px; }}
+    .score-track {{ height: 6px; overflow: hidden; border-radius: 3px; background: #273343; }}
+    .score-fill {{ display: block; height: 100%; background: var(--cyan); }}
+    .pill {{ display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; white-space: nowrap; }}
+    .pill.good {{ color: var(--green); border-color: #276149; background: #10271f; }}
+    .pill.warn {{ color: var(--amber); border-color: #6b5129; background: #2a2113; }}
+    .pill.bad {{ color: var(--red); border-color: #71343b; background: #2b171b; }}
+    .metadata {{ display: grid; grid-template-columns: minmax(160px, 220px) minmax(0, 1fr); gap: 0; margin: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }}
+    .metadata dt {{ color: var(--muted); }}
+    .metadata dt, .metadata dd {{ padding: 10px 14px; border-bottom: 1px solid var(--line); }}
+    .metadata dd {{ margin: 0; overflow-wrap: anywhere; }}
+    .error-list {{ display: grid; gap: 8px; }}
+    .error-row {{ display: grid; grid-template-columns: minmax(180px, 0.8fr) minmax(170px, 0.7fr) minmax(260px, 2fr); gap: 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }}
+    .error-row strong {{ color: var(--red); }}
+    pre.bibtex {{ max-height: 180px; margin: 0; overflow-y: auto; overflow-x: auto; padding: 16px; border: 1px solid var(--line); border-radius: 8px; color: #c9d5e3; background: #070a0f; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; }}
+    @media (max-width: 1180px) {{ .summary-layout {{ grid-template-columns: 1fr; }} .radar {{ min-height: 280px; }} }}
+    @media (max-width: 900px) {{ .cards {{ grid-template-columns: repeat(2, minmax(130px, 1fr)); }} .coverage-overview {{ grid-template-columns: repeat(2, minmax(140px, 1fr)); }} }}
+    @media (max-width: 760px) {{
+      .header-inner {{ grid-template-columns: 1fr; padding: 24px 18px 20px; }} .headline-score {{ text-align: left; }} main {{ padding: 20px 14px 40px; }}
+      .score-table table, .score-table tbody, .score-table tr, .score-table td {{ display: block; }} .score-table thead {{ display: none; }} .score-table table {{ border: 0; background: transparent; }}
+      .score-table tr {{ margin-bottom: 10px; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }}
+      .score-table td {{ display: grid; grid-template-columns: 124px minmax(0, 1fr); gap: 10px; min-height: 40px; padding: 9px 12px; }}
+      .score-table td::before {{ content: attr(data-label); color: var(--muted); font-size: 11px; text-transform: uppercase; }}
+      .error-row {{ grid-template-columns: 1fr; gap: 6px; }}
+    }}
+    @media (max-width: 560px) {{ h1 {{ font-size: 25px; }} .cards, .coverage-overview {{ grid-template-columns: 1fr; }} .metadata {{ grid-template-columns: 1fr; }} .metadata dt {{ padding-bottom: 2px; border-bottom: 0; }} .metadata dd {{ padding-top: 2px; }} }}
+  </style>
 </head>
 <body>
-  <div class="shell">
-    <header class="report-header">
-      <div class="header-copy">
-        <p class="eyebrow">Agent Bench Report</p>
-        <h1>{html.escape(str(target_model))}</h1>
-        <p class="run-line">{html.escape(str(run_id))} · {html.escape(str(created_at))}</p>
-        <p class="run-line">{html.escape(_join_if([target_provider, target_base_url], " · "))}</p>
+  <header>
+    <div class="header-inner">
+      <div>
+        <div class="eyebrow">Evaluation report</div>
+        <h1>Agent Bench Report</h1>
+        <div class="run-line"><span>{html.escape(str(target.get("model") or metadata.get("model", "unknown model")))}</span><span>Run {html.escape(str(run_id))}</span><span>{html.escape(str(metadata.get("created_at_utc", "")))}</span></div>
       </div>
-      <div class="headline-panel">
-        <span>Scored-Suite Score</span>
-        <strong>{html.escape(_headline_score(summary))}</strong>
-        <small>{html.escape(_coverage_label(coverage))}</small>
+      <div class="headline-score">
+        <span class="muted">Scored-suite score</span>
+        <strong>{_format_percent(summary.get("score_valid_tasks_only", summary.get("total_score")))}</strong>
+        <span class="muted">{html.escape(_coverage_label(coverage))}</span>
       </div>
-    </header>
-
-    <main>
-      <section id="result-summary" class="report-section">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Result Summary</p>
-            <h2>Result Summary</h2>
-          </div>
-          <p>{html.escape(judge_label or "No judge metadata recorded")}</p>
-        </div>
-        {_report_metric_cards(summary, coverage)}
-        <div class="summary-grid">
-          <div class="radar-panel">
-            <h3>Capability Radar</h3>
-            {_radar_svg(radar_scores)}
-          </div>
-          <div class="summary-panel">
-            <h3>Score Context</h3>
-            {_score_context(summary, coverage)}
-          </div>
-        </div>
-      </section>
-
-      <section id="benchmark-coverage" class="report-section">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Benchmark Coverage</p>
-            <h2>Benchmark Coverage</h2>
-          </div>
-          <p>{html.escape(_coverage_label(coverage))}</p>
-        </div>
-        {_coverage_section(summary, coverage)}
-      </section>
-
-      <section id="benchmark-score-breakdown" class="report-section">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Benchmark Score Breakdown</p>
-            <h2>Benchmark Score Breakdown</h2>
-          </div>
-          <p>{len(benchmark_results)} benchmark rows</p>
-        </div>
-        {_score_breakdown_table(benchmark_results)}
-      </section>
-
-      <section id="run-metadata" class="report-section">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Run Metadata</p>
-            <h2>Run Metadata</h2>
-          </div>
-        </div>
-        {_report_metadata_section(summary, metadata)}
-      </section>
-
-      <section id="non-model-errors" class="report-section">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Run Errors</p>
-            <h2>Non-Model Run Errors</h2>
-          </div>
-        </div>
-        {_non_model_error_section(benchmark_results)}
-      </section>
-
-      <section id="benchmark-citations" class="report-section citations-section">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Benchmark Citations</p>
-            <h2>Benchmark Citations</h2>
-          </div>
-        </div>
-        {_citation_section(benchmark_results)}
-      </section>
-    </main>
-  </div>
+    </div>
+  </header>
+  <main>
+    <section>
+      <h2>Result Summary</h2>
+      <div class="summary-layout">
+        {_final_metric_cards(summary)}
+        <div class="radar">{_radar_svg(_final_radar_scores(summary, benchmark_results))}</div>
+      </div>
+    </section>
+    <section>
+      <h2>Benchmark Coverage</h2>
+      {_final_coverage(coverage)}
+    </section>
+    <section>
+      <h2>Benchmark Score Breakdown</h2>
+      {_final_score_table(benchmark_results)}
+    </section>
+    <section>
+      <h2>Run Metadata</h2>
+      {_final_metadata(metadata)}
+    </section>
+    <section>
+      <h2>Non-Model Run Errors</h2>
+      {_final_errors(benchmark_results)}
+    </section>
+    <section>
+      <h2>Benchmark Citations</h2>
+      <pre class="bibtex" tabindex="0" aria-label="BibTeX citations">{html.escape(_citation_catalog())}</pre>
+    </section>
+  </main>
 </body>
 </html>
 """
 
 
-def _report_css() -> str:
-    return """
-    :root {
-      color-scheme: dark;
-      --bg: #080d14;
-      --bg-soft: #0d141f;
-      --panel: #111a27;
-      --panel-2: #162233;
-      --panel-3: #1c2a3e;
-      --line: #2c3b50;
-      --line-strong: #3e536c;
-      --text: #edf4ff;
-      --muted: #9fb0c7;
-      --subtle: #6f829c;
-      --blue: #63a7ff;
-      --green: #45d09a;
-      --amber: #f4c15d;
-      --red: #ff7f7f;
-      --cyan: #67d7e8;
-    }
-    * { box-sizing: border-box; }
-    html { background: var(--bg); }
-    body {
-      margin: 0;
-      min-width: 320px;
-      font: 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      color: var(--text);
-      background:
-        radial-gradient(circle at 18% 0%, rgba(99, 167, 255, 0.18), transparent 34rem),
-        linear-gradient(180deg, #0a1019 0%, var(--bg) 46rem);
-    }
-    a { color: var(--blue); }
-    h1, h2, h3, p { margin: 0; }
-    .shell { width: min(100%, 1440px); margin: 0 auto; padding: 24px clamp(14px, 3vw, 40px) 56px; }
-    .report-header {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
-      gap: 20px;
-      align-items: stretch;
-      padding: clamp(22px, 4vw, 40px);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: linear-gradient(135deg, rgba(17, 26, 39, 0.96), rgba(22, 34, 51, 0.88));
-      box-shadow: 0 22px 70px rgba(0, 0, 0, 0.38);
-    }
-    .eyebrow {
-      margin-bottom: 7px;
-      color: var(--cyan);
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-    }
-    h1 { font-size: clamp(28px, 4vw, 48px); line-height: 1.05; letter-spacing: 0; }
-    h2 { font-size: clamp(22px, 2.2vw, 30px); line-height: 1.12; letter-spacing: 0; }
-    h3 { font-size: 16px; line-height: 1.2; letter-spacing: 0; }
-    .run-line { margin-top: 9px; color: var(--muted); overflow-wrap: anywhere; }
-    .headline-panel {
-      display: grid;
-      align-content: center;
-      gap: 8px;
-      min-height: 170px;
-      padding: 22px;
-      border: 1px solid var(--line-strong);
-      border-radius: 8px;
-      background: #0b121d;
-    }
-    .headline-panel span,
-    .headline-panel small { color: var(--muted); }
-    .headline-panel strong { font-size: clamp(40px, 7vw, 68px); line-height: 0.95; letter-spacing: 0; color: var(--green); }
-    main { display: grid; gap: 22px; margin-top: 22px; }
-    .report-section {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: rgba(17, 26, 39, 0.92);
-      overflow: hidden;
-    }
-    .section-heading {
-      display: flex;
-      justify-content: space-between;
-      gap: 16px;
-      align-items: end;
-      padding: 22px 24px 16px;
-      border-bottom: 1px solid var(--line);
-    }
-    .section-heading > p { max-width: 560px; color: var(--muted); text-align: right; }
-    .cards {
-      display: grid;
-      grid-template-columns: repeat(6, minmax(0, 1fr));
-      gap: 10px;
-      padding: 20px 24px 0;
-    }
-    .card {
-      min-width: 0;
-      min-height: 110px;
-      padding: 16px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--panel-2);
-    }
-    .card span { display: block; color: var(--muted); font-size: 12px; }
-    .card strong { display: block; margin-top: 8px; font-size: clamp(20px, 2vw, 29px); line-height: 1.06; overflow-wrap: anywhere; }
-    .summary-grid,
-    .coverage-grid {
-      display: grid;
-      grid-template-columns: minmax(320px, 0.92fr) minmax(0, 1.38fr);
-      gap: 16px;
-      padding: 20px 24px 24px;
-    }
-    .radar-panel,
-    .summary-panel,
-    .coverage-panel {
-      min-width: 0;
-      padding: 18px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #0d1521;
-    }
-    .radar-panel svg { display: block; width: 100%; max-width: 440px; height: auto; margin: 10px auto 0; }
-    .score-context { display: grid; gap: 12px; margin-top: 14px; }
-    .context-row { display: grid; grid-template-columns: minmax(160px, 0.9fr) minmax(0, 1.2fr) auto; gap: 14px; align-items: center; }
-    .context-row span { color: var(--muted); }
-    .context-row strong { text-align: right; white-space: nowrap; }
-    .bar {
-      position: relative;
-      height: 9px;
-      overflow: hidden;
-      border-radius: 999px;
-      background: #233146;
-    }
-    .bar i { display: block; height: 100%; width: var(--value, 0%); border-radius: inherit; background: linear-gradient(90deg, var(--blue), var(--green)); }
-    .coverage-grid { grid-template-columns: minmax(0, 1fr); }
-    .coverage-cards {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 10px;
-      padding: 20px 24px 0;
-    }
-    .coverage-card {
-      min-height: 92px;
-      padding: 15px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--panel-2);
-    }
-    .coverage-card span { color: var(--muted); font-size: 12px; }
-    .coverage-card strong { display: block; margin-top: 7px; font-size: 24px; line-height: 1; }
-    .table-wrap { width: 100%; overflow-x: auto; padding: 0 24px 24px; }
-    table { width: 100%; border-collapse: collapse; min-width: 760px; }
-    th, td { padding: 11px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
-    th {
-      position: sticky;
-      top: 0;
-      z-index: 1;
-      color: var(--muted);
-      background: var(--panel-3);
-      font-size: 11px;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      white-space: nowrap;
-    }
-    td { color: #dce8f7; overflow-wrap: anywhere; }
-    tr:hover td { background: rgba(99, 167, 255, 0.06); }
-    .score-breakdown { min-width: 1040px; }
-    .score-value { display: grid; gap: 6px; min-width: 120px; }
-    .score-value strong { font-size: 15px; color: var(--text); }
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      min-height: 24px;
-      max-width: 100%;
-      padding: 2px 8px;
-      border: 1px solid var(--line-strong);
-      border-radius: 999px;
-      background: #0b121d;
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 700;
-      white-space: normal;
-    }
-    .pill.pass { border-color: rgba(69, 208, 154, 0.52); color: var(--green); }
-    .pill.warn { border-color: rgba(244, 193, 93, 0.55); color: var(--amber); }
-    .pill.fail { border-color: rgba(255, 127, 127, 0.58); color: var(--red); }
-    .official.included { color: var(--green); font-weight: 700; }
-    .official.excluded { color: var(--amber); font-weight: 700; }
-    .metadata {
-      display: grid;
-      grid-template-columns: minmax(180px, 0.28fr) minmax(0, 1fr);
-      gap: 0;
-      padding: 0 24px 24px;
-      margin: 0;
-    }
-    .metadata dt,
-    .metadata dd {
-      min-width: 0;
-      margin: 0;
-      padding: 11px 12px;
-      border-bottom: 1px solid var(--line);
-      overflow-wrap: anywhere;
-    }
-    .metadata dt { color: var(--muted); background: #0d1521; }
-    .metadata dd { color: var(--text); }
-    .empty-state {
-      margin: 0 24px 24px;
-      padding: 18px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      color: var(--muted);
-      background: #0d1521;
-    }
-    .citations-section { margin-bottom: 6px; }
-    .bibtex {
-      max-height: 180px;
-      margin: 0 24px 24px;
-      padding: 16px;
-      overflow-y: auto;
-      overflow-x: auto;
-      scrollbar-gutter: stable;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #050912;
-      color: #d8e7ff;
-      font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-      white-space: pre;
-    }
-    .bibtex code { font: inherit; }
-    @media (max-width: 1180px) {
-      .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-      .coverage-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .summary-grid { grid-template-columns: 1fr; }
-    }
-    @media (max-width: 900px) {
-      .shell { padding: 14px 10px 36px; }
-      .report-header { grid-template-columns: 1fr; padding: 22px; }
-      .headline-panel { min-height: 130px; }
-      .section-heading { display: grid; align-items: start; padding: 20px 16px 14px; }
-      .section-heading > p { text-align: left; }
-      .cards, .coverage-cards { padding: 16px 16px 0; }
-      .summary-grid, .coverage-grid { padding: 16px; }
-      .table-wrap { padding: 0 16px 20px; }
-      .metadata { grid-template-columns: 1fr; padding: 0 16px 20px; }
-      .metadata dt { padding-bottom: 3px; border-bottom: 0; }
-      .metadata dd { padding-top: 0; }
-      .bibtex { margin: 0 16px 20px; }
-    }
-    @media (max-width: 760px) {
-      .cards, .coverage-cards { grid-template-columns: 1fr 1fr; }
-      .score-breakdown { min-width: 0; }
-      .score-breakdown thead { display: none; }
-      .score-breakdown,
-      .score-breakdown tbody,
-      .score-breakdown tr,
-      .score-breakdown td { display: block; width: 100%; }
-      .score-breakdown tr {
-        margin-bottom: 12px;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        background: #0d1521;
-        overflow: hidden;
-      }
-      .score-breakdown td {
-        display: grid;
-        grid-template-columns: minmax(118px, 0.42fr) minmax(0, 1fr);
-        gap: 12px;
-        border-bottom: 1px solid var(--line);
-      }
-      .score-breakdown td::before {
-        content: attr(data-label);
-        color: var(--muted);
-        font-size: 11px;
-        font-weight: 700;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-      }
-    }
-    @media (max-width: 560px) {
-      .cards, .coverage-cards { grid-template-columns: 1fr; }
-      .context-row { grid-template-columns: 1fr; gap: 6px; }
-      .context-row strong { text-align: left; }
-      .score-breakdown td { grid-template-columns: 1fr; gap: 6px; }
-      h1 { font-size: 30px; }
-    }
-    """
-
-
-def _report_rows(summary: dict[str, Any], results: list[GradeResult]) -> list[dict[str, Any]]:
-    rows = summary.get("benchmark_results")
-    if isinstance(rows, list) and rows:
-        return [row for row in rows if isinstance(row, dict)]
-    return _fallback_benchmark_rows(results)
-
-
-def _fallback_benchmark_rows(results: list[GradeResult]) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for result in results:
-        details = result.details if isinstance(result.details, dict) else {}
-        payload = details.get("result") if isinstance(details.get("result"), dict) else {}
-        score = (float(result.score) / float(result.max_score) * 100.0) if result.max_score else 0.0
-        rows.append(
-            {
-                "benchmark": _result_benchmark_name(result),
-                "group": details.get("group", result.category),
-                "profile": details.get("profile", result.category),
-                "score": round(score, 4),
-                "raw_score": _unit_to_percent(payload.get("raw_score")),
-                "valid_score": _unit_to_percent(payload.get("valid_score")),
-                "status": _result_status(result),
-                "run_status": _run_status(result),
-                "score_status": _score_status(result),
-                "included_in_official_score": _included_in_official_score(result),
-                "evaluated_task_count": payload.get("evaluated_task_count"),
-                "evaluation_passed_count": payload.get("evaluation_passed_count"),
-                "duration_seconds": result.task_duration_seconds,
-                "error": result.error,
-                "error_details": _result_error_reason(result),
-                "blocker_type": _blocker_type(result),
-                "homepage": details.get("homepage"),
-                "license": details.get("license"),
-                "credit": details.get("credit"),
-                "citation": details.get("citation", details.get("homepage")),
-            }
-        )
-    return rows
-
-
-def _target_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
-    target = metadata.get("target_model")
-    return target if isinstance(target, dict) else {}
-
-
-def _judge_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
-    judge = metadata.get("judge")
-    return judge if isinstance(judge, dict) else {}
-
-
-def _headline_score(summary: dict[str, Any]) -> str:
-    for key in ("score_valid_tasks_only", "valid_judged_score", "total_score", "benchmark_level_mean_score"):
-        if summary.get(key) is not None:
-            return _format_percent_display(summary.get(key))
-    return "n/a"
-
-
-def _report_metric_cards(summary: dict[str, Any], coverage: dict[str, Any]) -> str:
+def _final_metric_cards(summary: dict[str, Any]) -> str:
+    coverage = summary.get("coverage_summary") if isinstance(summary.get("coverage_summary"), dict) else {}
     cards = [
-        ("Scored Suite", _headline_score(summary)),
-        ("Conservative", _format_rate_auto(summary.get("conservative_all_suite_score"))),
-        ("Suite Coverage", _format_rate_auto(coverage.get("coverage_rate", summary.get("suite_coverage_rate")))),
-        ("Valid Suites", _coverage_value(coverage, "successfully_scored_benchmarks", "valid_judged_suite_count")),
-        ("Items Passed", _format_integer_safe(summary.get("item_passed_count", summary.get("passed_count")))),
-        ("Run Time", _format_seconds_safe(summary.get("total_run_duration_seconds", summary.get("run_duration_seconds")))),
+        ("Scored-suite score", _format_percent(summary.get("score_valid_tasks_only", summary.get("total_score")))),
+        ("Conservative score", _format_rate(summary.get("conservative_all_suite_score"))),
+        ("Suite coverage", _format_rate(coverage.get("coverage_rate", summary.get("suite_coverage_rate")))),
+        ("Item coverage", _format_rate(summary.get("item_coverage_rate"))),
+        ("Benchmarks scored", f"{coverage.get('successfully_scored_benchmarks', 0)} / {coverage.get('total_configured_benchmarks', 0)}"),
+        ("Run duration", _format_seconds(summary.get("total_run_duration_seconds"))),
     ]
-    return '<div class="cards">' + "".join(_summary_card(label, value) for label, value in cards) + "</div>"
+    return '<div class="cards">' + "".join(
+        f'<div class="card"><span>{html.escape(label)}</span><strong>{html.escape(value)}</strong></div>'
+        for label, value in cards
+    ) + "</div>"
 
 
-def _summary_card(label: str, value: str) -> str:
-    return f'<div class="card"><span>{html.escape(label)}</span><strong>{html.escape(value)}</strong></div>'
-
-
-def _summary_radar_scores(summary: dict[str, Any], benchmark_results: list[dict[str, Any]]) -> dict[str, float]:
+def _final_radar_scores(summary: dict[str, Any], benchmark_results: Any) -> dict[str, float]:
     scores = summary.get("category_scores")
     if isinstance(scores, dict) and scores:
-        return {str(key): _percent_number(value) for key, value in scores.items()}
+        return scores
     grouped: dict[str, list[float]] = {}
-    for row in benchmark_results:
-        group = str(row.get("group") or row.get("profile") or "Benchmarks")
-        grouped.setdefault(group, []).append(_percent_number(row.get("score")))
+    if isinstance(benchmark_results, list):
+        for row in benchmark_results:
+            if not isinstance(row, dict) or not row.get("included_in_official_score"):
+                continue
+            group = str(row.get("group") or "Other")
+            try:
+                grouped.setdefault(group, []).append(float(row.get("score") or 0.0))
+            except (TypeError, ValueError):
+                continue
     return {group: sum(values) / len(values) for group, values in grouped.items() if values}
 
 
-def _score_context(summary: dict[str, Any], coverage: dict[str, Any]) -> str:
-    rows = [
-        ("Benchmark Level Mean", summary.get("benchmark_level_mean_score")),
-        ("Model Valid Tasks", summary.get("model_score_valid_tasks_only")),
-        ("Raw All Tasks", summary.get("raw_score_all_tasks", summary.get("raw_score"))),
-        ("Item Coverage", summary.get("item_coverage_rate", coverage.get("item_coverage_rate"))),
-        ("JSON Validity", summary.get("json_validity_rate")),
+def _final_coverage(coverage: Any) -> str:
+    if not isinstance(coverage, dict):
+        return '<div class="coverage-card">No coverage data recorded.</div>'
+    overview = [
+        ("Configured", coverage.get("total_configured_benchmarks", 0)),
+        ("Attempted", coverage.get("attempted_benchmarks", 0)),
+        ("Scored", coverage.get("successfully_scored_benchmarks", 0)),
+        ("Excluded", coverage.get("excluded_from_score_benchmarks", coverage.get("failed_benchmarks", 0))),
     ]
-    rendered = []
-    for label, value in rows:
-        display = _format_rate_auto(value) if "Coverage" in label else _format_percent_display(value)
-        rendered.append(
-            '<div class="context-row">'
-            f"<span>{html.escape(label)}</span>"
-            f"{_progress_bar(value)}"
-            f"<strong>{html.escape(display)}</strong>"
-            "</div>"
-        )
-    return '<div class="score-context">' + "".join(rendered) + "</div>"
+    cards = '<div class="coverage-overview">' + "".join(
+        f'<div class="coverage-card"><span>{html.escape(label)}</span><strong>{html.escape(str(value))}</strong></div>'
+        for label, value in overview
+    ) + "</div>"
+    per_category = coverage.get("per_category")
+    rows = []
+    if isinstance(per_category, dict):
+        for category, data in sorted(per_category.items()):
+            if not isinstance(data, dict):
+                continue
+            rows.append(
+                "<tr>"
+                f"<td>{html.escape(str(category))}</td>"
+                f"<td>{int(data.get('total_configured_benchmarks', 0))}</td>"
+                f"<td>{int(data.get('attempted_benchmarks', 0))}</td>"
+                f"<td>{int(data.get('successfully_scored_benchmarks', 0))}</td>"
+                f"<td>{int(data.get('failed_benchmarks', 0))}</td>"
+                f"<td>{_format_rate(data.get('coverage_rate'))}</td>"
+                "</tr>"
+            )
+    body = "".join(rows) or '<tr><td colspan="6">No category coverage data recorded.</td></tr>'
+    return cards + '<div class="table-wrap"><table><thead><tr><th>Category</th><th>Configured</th><th>Attempted</th><th>Scored</th><th>Excluded</th><th>Coverage</th></tr></thead>' + f"<tbody>{body}</tbody></table></div>"
 
 
-def _progress_bar(value: Any) -> str:
-    width = max(0.0, min(100.0, _percent_number(value)))
-    return f'<div class="bar" aria-hidden="true" style="--value: {width:.4f}%"><i></i></div>'
+def _final_score_table(benchmark_results: Any) -> str:
+    if not isinstance(benchmark_results, list) or not benchmark_results:
+        return '<div class="coverage-card">No benchmark rows were recorded.</div>'
+    rows = []
+    columns = ["Benchmark", "Profile", "Normalized 0-100", "Raw Score", "Valid Score", "Official Score", "Status", "Run", "Score Status", "Items"]
+    for row in benchmark_results:
+        if not isinstance(row, dict):
+            continue
+        score = _number(row.get("score"))
+        values = [
+            html.escape(str(row.get("benchmark") or row.get("task_id") or "")),
+            html.escape(str(row.get("profile") or "")),
+            _score_bar(score),
+            html.escape(_format_percent(row.get("raw_score"))),
+            html.escape(_format_percent(row.get("valid_score"))),
+            "yes" if row.get("included_in_official_score") else "no",
+            _status_pill(str(row.get("status") or "")),
+            html.escape(str(row.get("run_status") or "")),
+            html.escape(str(row.get("score_status") or "")),
+            html.escape(_item_count(row)),
+        ]
+        rows.append("<tr>" + "".join(f'<td data-label="{html.escape(label, quote=True)}">{value}</td>' for label, value in zip(columns, values)) + "</tr>")
+    headers = "".join(f"<th>{html.escape(column)}</th>" for column in columns)
+    return f'<div class="table-wrap score-table"><table><thead><tr>{headers}</tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
+
+
+def _number(value: Any) -> float:
+    try:
+        return max(0.0, min(100.0, float(value)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _score_bar(score: float) -> str:
+    return f'<div class="score-bar"><span class="score-track"><span class="score-fill" style="width:{score:.2f}%"></span></span><strong>{score:.2f}</strong></div>'
+
+
+def _status_pill(status: str) -> str:
+    info = status_info(status)
+    tone = "good" if info.failure_class == "none" else "bad" if info.failure_class == "infrastructure" else "warn"
+    return f'<span class="pill {tone}">{html.escape(status or "unknown")}</span>'
+
+
+def _item_count(row: dict[str, Any]) -> str:
+    for key in ("task_count", "attempted_task_count", "valid_evaluated_task_count"):
+        value = row.get(key)
+        if isinstance(value, (int, float)):
+            return str(int(value))
+    counts = row.get("status_counts")
+    if isinstance(counts, dict):
+        return str(sum(int(value) for value in counts.values() if isinstance(value, (int, float))))
+    return "n/a"
+
+
+def _final_metadata(metadata: dict[str, Any]) -> str:
+    target = metadata.get("target_model") if isinstance(metadata.get("target_model"), dict) else {}
+    judge = metadata.get("judge") if isinstance(metadata.get("judge"), dict) else {}
+    host = metadata.get("host") if isinstance(metadata.get("host"), dict) else {}
+    values = {
+        "Run ID": metadata.get("run_id"),
+        "Created (UTC)": metadata.get("created_at_utc"),
+        "Profile": metadata.get("selected_profile"),
+        "Provider": target.get("provider_type", metadata.get("provider")),
+        "Model": target.get("model", metadata.get("model")),
+        "Base URL": target.get("base_url", metadata.get("base_url")),
+        "Temperature": target.get("temperature", metadata.get("temperature")),
+        "Max tokens": target.get("max_tokens", metadata.get("max_tokens")),
+        "Request concurrency": target.get("concurrency", metadata.get("request_concurrency")),
+        "Evaluation concurrency": metadata.get("eval_concurrency"),
+        "Judge": judge.get("model") or judge.get("provider") or "none",
+        "Judge fallback used": judge.get("fallback_used"),
+        "Host platform": host.get("platform"),
+        "Python": host.get("python_version"),
+        "Output directory": metadata.get("output_dir"),
+    }
+    return _metadata_definition_list(values)
+
+
+def _final_errors(benchmark_results: Any) -> str:
+    rows = []
+    if isinstance(benchmark_results, list):
+        for row in benchmark_results:
+            if not isinstance(row, dict):
+                continue
+            status = str(row.get("status") or "")
+            info = status_info(status)
+            if info.failure_class in {"none", "model"}:
+                continue
+            explanation = _display_error(str(row.get("error_details") or row.get("error") or info.explanation))
+            rows.append(
+                '<div class="error-row">'
+                f'<div>{html.escape(str(row.get("benchmark") or row.get("task_id") or ""))}</div>'
+                f'<div><strong>{html.escape(status)}</strong><br><span class="muted">{html.escape(info.failure_class)}</span></div>'
+                f'<div>{html.escape(explanation)}</div>'
+                "</div>"
+            )
+    if not rows:
+        return '<div class="coverage-card">No non-model errors were recorded.</div>'
+    return '<div class="error-list">' + "".join(rows) + "</div>"
+
+
+def _citation_catalog() -> str:
+    try:
+        return BENCHMARK_CITATIONS_PATH.read_text(encoding="utf-8").rstrip()
+    except OSError:
+        return "% Citation catalog unavailable: tasks/benchmark_citations.bib was not found."
 
 
 def _coverage_label(coverage: Any) -> str:
@@ -1037,7 +841,7 @@ def _result_csv_row(result: GradeResult) -> dict[str, Any]:
     payload = details.get("result") if isinstance(details.get("result"), dict) else {}
     row["status"] = _result_status(result)
     row["answer"] = _csv_answer(result, payload)
-    row["suite_id"] = details.get("suite_id", result.task_id)
+    row["benchmark_name"] = details.get("benchmark_name", result.task_id)
     row["suite_name"] = _result_benchmark_name(result)
     row["task_group"] = details.get("group", result.category)
     row["run_status"] = _run_status(result)
@@ -1252,7 +1056,7 @@ def _excluded_suite_table(value: Any) -> str:
             continue
         rows.append(
             "<tr>"
-            f"<td>{html.escape(str(row.get('suite_id', '')))}</td>"
+            f"<td>{html.escape(str(row.get('benchmark_name', '')))}</td>"
             f"<td>{html.escape(str(row.get('name', '')))}</td>"
             f"<td>{html.escape(str(row.get('lifecycle_status', '')))}</td>"
             f"<td>{html.escape(str(row.get('exclusion_reason', '')))}</td>"
@@ -1323,7 +1127,7 @@ def _radar_svg(scores: dict[str, float]) -> str:
     for fraction in (0.25, 0.5, 0.75, 1.0):
         points = [_point(cx, cy, radius * fraction, index, axes) for index in range(axes)]
         grid_polygons.append(
-            f'<polygon points="{_points(points)}" fill="none" stroke="#33445c" stroke-width="1" />'
+            f'<polygon points="{_points(points)}" fill="none" stroke="#344457" stroke-width="1" />'
         )
 
     axis_lines = []
@@ -1332,10 +1136,10 @@ def _radar_svg(scores: dict[str, float]) -> str:
         end = _point(cx, cy, radius, index, axes)
         label_point = _point(cx, cy, radius + 28.0, index, axes)
         axis_lines.append(
-            f'<line x1="{cx:.1f}" y1="{cy:.1f}" x2="{end[0]:.1f}" y2="{end[1]:.1f}" stroke="#506783" />'
+            f'<line x1="{cx:.1f}" y1="{cy:.1f}" x2="{end[0]:.1f}" y2="{end[1]:.1f}" stroke="#405168" />'
         )
         label_nodes.append(
-            f'<text x="{label_point[0]:.1f}" y="{label_point[1]:.1f}" text-anchor="middle" dominant-baseline="middle" font-size="10" fill="#c8d6e8">{html.escape(label)}</text>'
+            f'<text x="{label_point[0]:.1f}" y="{label_point[1]:.1f}" text-anchor="middle" dominant-baseline="middle" font-size="10" fill="#c3cfdd">{html.escape(label)}</text>'
         )
 
     value_points = [_point(cx, cy, radius * (value / 100.0), index, axes) for index, value in enumerate(values)]
@@ -1343,9 +1147,9 @@ def _radar_svg(scores: dict[str, float]) -> str:
         '<svg viewBox="0 0 320 260" role="img" aria-label="Radar chart of category scores">'
         + "".join(grid_polygons)
         + "".join(axis_lines)
-        + f'<polygon points="{_points(value_points)}" fill="#63a7ff" fill-opacity="0.24" stroke="#63a7ff" stroke-width="2" />'
+        + f'<polygon points="{_points(value_points)}" fill="#55d6be" fill-opacity="0.20" stroke="#55d6be" stroke-width="2" />'
         + "".join(
-            f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3" fill="#45d09a" />' for x, y in value_points
+            f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3" fill="#6ea8fe" />' for x, y in value_points
         )
         + "".join(label_nodes)
         + "</svg>"

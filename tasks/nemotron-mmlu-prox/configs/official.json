@@ -1,0 +1,27 @@
+{
+  "schema_version": "agent-bench.benchmark-config.v1",
+  "benchmark_name": "MMLU-ProX",
+  "benchmark_slug": "nemotron-mmlu-prox",
+  "display_name": "MMLU-ProX",
+  "source_descriptor": "tasks/nemotron-mmlu-prox/manifest.json",
+  "nvidia_model_card_revision": "1d370e47fbc56d1019a471c2339663cdbbb5236f",
+  "nemo_task": "ns_mmlu_prox",
+  "required_context_tokens": null,
+  "official_conditions": {
+    "official_split": "full multilingual evaluation; average over languages; 1 repeat",
+    "official_scoring_method": "average multilingual multiple-choice accuracy",
+    "official_prompt_format": "official language-specific MMLU-ProX prompt",
+    "official_grader_command": "nemo-evaluator-launcher run --config local_nemotron-3-super-120b-a12b-base.yaml -t ns_mmlu_prox",
+    "official_evaluation_config": "tasks/nemotron-mmlu-prox/configs/official.json",
+    "hardware_requirements": "",
+    "container_requirements": "Pinned component environment; missing native grader, long-context capacity, judge, gated scorer, or source assets fails closed"
+  },
+  "provenance_blocker": "",
+  "access_policy": {
+    "fail_closed": true,
+    "official_score_requires_native_grader": true,
+    "smoke_score_is_official": false
+  },
+  "container_command": "bash /benchmark/task/harness/run.sh"
+}
+

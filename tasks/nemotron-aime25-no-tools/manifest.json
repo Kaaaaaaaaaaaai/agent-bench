@@ -1,0 +1,93 @@
+{
+  "version": "agent-bench.manifest.v1",
+  "display_name": "AIME25 (no tools)",
+  "task_group": "Math",
+  "description": "Run the AIME25 (no tools) condition reported by NVIDIA-Nemotron-Labs-3-Puzzle-75B-A9B using pinned upstream assets and fail-closed official requirements.",
+  "homepage_url": "https://matharena.ai",
+  "official_leaderboard_url": "",
+  "source": {
+    "repository_url": "https://github.com/eth-sri/matharena.git",
+    "commit": "a11194deff8c67a232974a383795e8a2776b4c6f",
+    "dataset_id": "MathArena/aime_2025",
+    "dataset_revision": "c94da77eb22bbd6439e62a323bec18493a421302",
+    "subdir": ""
+  },
+  "license": "CC-BY-NC-SA-4.0 dataset; MIT evaluation code",
+  "credit": "AIME and MathArena authors",
+  "citation": "https://huggingface.co/datasets/MathArena/aime_2025",
+  "official_conditions": {
+    "official_split": "30-problem AIME 2025 evaluation set (original dataset train split); 64 repeats; no tools",
+    "official_scoring_method": "AIME exact-answer accuracy",
+    "official_prompt_format": "math-oai prompt, no tools",
+    "official_grader_command": "nemo-evaluator-launcher run --config local_nemotron-3-super-120b-a12b.yaml -t nemo_skills.ns_aime2025",
+    "official_evaluation_config": "tasks/nemotron-aime25-no-tools/configs/official.json",
+    "container_requirements": "Pinned NeMo component environment; missing gated assets, native grader, sandbox, judge, or simulator fails closed"
+  },
+  "assets": [
+    {
+      "source": "https://github.com/eth-sri/matharena.git",
+      "revision": "a11194deff8c67a232974a383795e8a2776b4c6f",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": ["README.md", "pyproject.toml", "scripts", "configs"]
+      }
+    },
+    {
+      "source": "https://huggingface.co/datasets/MathArena/aime_2025",
+      "revision": "c94da77eb22bbd6439e62a323bec18493a421302",
+      "checksum": "",
+      "expected_local_path": "huggingface:MathArena/aime_2025",
+      "required": true,
+      "validation_rules": {
+        "kind": "huggingface_dataset",
+        "dataset_id": "MathArena/aime_2025",
+        "split": "train",
+        "expected_records": 30
+      }
+    }
+  ],
+  "container": {
+    "image": "agent-bench-external:python3.12",
+    "build_context": ".",
+    "dockerfile": "harness/Dockerfile",
+    "command": "bash /benchmark/task/harness/run.sh",
+    "environment_allowed": [],
+    "mounts": [],
+    "network": "model_proxy",
+    "cpus": 2,
+    "memory": "4g",
+    "pids_limit": 256,
+    "timeout_seconds": 21600,
+    "requires_nested_docker": false,
+    "requires_host_docker_socket": false,
+    "run_as_user": "10001:10001"
+  },
+  "adapter": {
+    "module": "",
+    "entry_point": "harness/run.sh",
+    "expected_output_files": [
+      "agent_bench_result.json"
+    ],
+    "result_parser": "agent_bench_result_json"
+  },
+  "scoring": {
+    "raw_score_field": "score",
+    "max_score": 1,
+    "normalization": "fraction_to_0_100",
+    "direction": "higher_is_better"
+  },
+  "reporting": {
+    "category_label": "Math",
+    "display_order": 29,
+    "credit": "AIME and MathArena authors",
+    "citation": "https://huggingface.co/datasets/MathArena/aime_2025",
+    "license": "CC-BY-NC-SA-4.0 dataset; MIT evaluation code"
+  },
+  "capabilities": [
+    "chat_answer"
+  ],
+  "required_tools": []
+}

@@ -1,0 +1,25 @@
+{
+  "schema_version": "agent-bench.benchmark-config.v1",
+  "benchmark_name": "TauBench V2 Retail",
+  "benchmark_slug": "nemotron-taubench-v2-retail",
+  "display_name": "TauBench V2 Retail",
+  "source_descriptor": "tasks/nemotron-taubench-v2-retail/manifest.json",
+  "nvidia_model_card_revision": "1d370e47fbc56d1019a471c2339663cdbbb5236f",
+  "nemo_task": "tau2_bench_retail",
+  "official_conditions": {
+    "official_split": "retail domain; 8 samples; separate non-reasoning user simulator",
+    "official_scoring_method": "TauBench reward/pass rate",
+    "official_prompt_format": "default TauBench V2 prompt with reasoning target",
+    "official_grader_command": "nemo-evaluator-launcher run --config local_nemotron-3-super-120b-a12b.yaml -t tau2_bench_retail",
+    "official_evaluation_config": "tasks/nemotron-taubench-v2-retail/configs/official.json",
+    "container_requirements": "Pinned component environment; missing native grader, simulator, sandbox, package digest, or assets fails closed"
+  },
+  "provenance_blocker": "",
+  "access_policy": {
+    "fail_closed": true,
+    "official_score_requires_native_grader": true,
+    "smoke_score_is_official": false
+  },
+  "container_command": "bash /benchmark/task/harness/run.sh"
+}
+

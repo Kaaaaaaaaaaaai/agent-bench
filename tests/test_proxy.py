@@ -29,8 +29,8 @@ def test_openai_recording_proxy_forwards_and_records_redacted_jsonl(tmp_path):
         fake_client = _FakeClient()
         proxy._client = fake_client
         handler = _FakeHandler(
-            path=f"{proxy._url_prefix}/v1/chat/completions",
-            headers={"Content-Length": "106", "X-Agent-Bench-Benchmark-Id": "bench_1"},
+            path="/v1/chat/completions",
+            headers={"Content-Length": "106", "X-Agent-Bench-Benchmark-Name": "bench_1"},
             body={
                 "model": "example-model",
                 "messages": [{"role": "user", "content": "hello"}],
@@ -45,7 +45,7 @@ def test_openai_recording_proxy_forwards_and_records_redacted_jsonl(tmp_path):
     assert fake_client.headers["Authorization"] == "Bearer secret-key"
     assert fake_client.url == "http://upstream.test/v1/chat/completions"
     records = [json.loads(line) for line in raw_path.read_text(encoding="utf-8").splitlines()]
-    assert records[0]["benchmark_id"] == "bench_1"
+    assert records[0]["benchmark_name"] == "bench_1"
     assert records[0]["request"]["api_key"] == "<redacted>"
     assert records[0]["raw_response"]["choices"][0]["message"]["content"] == "ok"
 
@@ -82,8 +82,8 @@ def test_openai_recording_proxy_uses_curl_fallback(tmp_path, monkeypatch):
         )
         proxy._client = _FailingClient()
         handler = _FakeHandler(
-            path=f"{proxy._url_prefix}/v1/chat/completions",
-            headers={"Content-Length": "84", "X-Agent-Bench-Benchmark-Id": "bench_1"},
+            path="/v1/chat/completions",
+            headers={"Content-Length": "84", "X-Agent-Bench-Benchmark-Name": "bench_1"},
             body={"model": "example-model", "messages": [{"role": "user", "content": "hello"}]},
         )
 
@@ -92,7 +92,7 @@ def test_openai_recording_proxy_uses_curl_fallback(tmp_path, monkeypatch):
     assert handler.status == 200
     assert json.loads(handler.wfile.getvalue().decode("utf-8"))["choices"][0]["message"]["content"] == "curl-ok"
     records = [json.loads(line) for line in raw_path.read_text(encoding="utf-8").splitlines()]
-    assert records[0]["benchmark_id"] == "bench_1"
+    assert records[0]["benchmark_name"] == "bench_1"
     assert records[0]["raw_response"]["choices"][0]["message"]["content"] == "curl-ok"
 
 
@@ -108,8 +108,8 @@ def test_openai_recording_proxy_ignores_downstream_disconnect_after_recording(tm
         )
         proxy._client = _FakeClient()
         handler = _FakeHandler(
-            path=f"{proxy._url_prefix}/v1/chat/completions",
-            headers={"Content-Length": "84", "X-Agent-Bench-Benchmark-Id": "bench_1"},
+            path="/v1/chat/completions",
+            headers={"Content-Length": "84", "X-Agent-Bench-Benchmark-Name": "bench_1"},
             body={"model": "example-model", "messages": [{"role": "user", "content": "hello"}]},
             wfile=_BrokenPipeWriter(),
         )
@@ -118,7 +118,7 @@ def test_openai_recording_proxy_ignores_downstream_disconnect_after_recording(tm
 
     assert handler.status == 200
     records = [json.loads(line) for line in raw_path.read_text(encoding="utf-8").splitlines()]
-    assert records[0]["benchmark_id"] == "bench_1"
+    assert records[0]["benchmark_name"] == "bench_1"
     assert records[0]["raw_response"]["choices"][0]["message"]["content"] == "ok"
 
 

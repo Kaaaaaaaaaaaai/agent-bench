@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.assets-lock.v1",
-  "benchmark_id": "PB_024",
+  "benchmark_name": "LongBench",
   "benchmark_slug": "longbench",
   "asset_root": "agent-bench-assets/longbench",
   "source": {

@@ -73,8 +73,7 @@ class OpenAIProxyConfig:
     label: str = "target"
     timeout_seconds: float = 1800.0
     tool_parser: str = "auto"
-    default_benchmark_id: str = ""
-    max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES
+    default_benchmark_name: str = ""
 
 
 class OpenAIRecordingProxy:
@@ -166,9 +165,9 @@ class OpenAIRecordingProxy:
             self._send_json(handler, 404, {"error": {"message": "not found"}})
             return
         request_id = handler.headers.get("X-Request-Id") or f"req_{uuid.uuid4().hex}"
-        benchmark_id = (
-            handler.headers.get("X-Agent-Bench-Benchmark-Id")
-            or self.config.default_benchmark_id
+        benchmark_name = (
+            handler.headers.get("X-Agent-Bench-Benchmark-Name")
+            or self.config.default_benchmark_name
             or "unknown"
         )
         task_id = handler.headers.get("X-Agent-Bench-Task-Id")
@@ -191,7 +190,7 @@ class OpenAIRecordingProxy:
         if request_body is None:
             self._record(
                 request_id=request_id,
-                benchmark_id=benchmark_id,
+                benchmark_name=benchmark_name,
                 task_id=task_id,
                 request={},
                 response=None,
@@ -221,7 +220,7 @@ class OpenAIRecordingProxy:
                     error_message = f"{error_message}; curl fallback failed or returned no response"
                 self._record(
                     request_id=request_id,
-                    benchmark_id=benchmark_id,
+                    benchmark_name=benchmark_name,
                     task_id=task_id,
                     request=request_body,
                     response=None,
@@ -255,7 +254,7 @@ class OpenAIRecordingProxy:
         )
         self._record(
             request_id=request_id,
-            benchmark_id=benchmark_id,
+            benchmark_name=benchmark_name,
             task_id=task_id,
             request=request_body,
             response=response_payload,
@@ -337,7 +336,7 @@ class OpenAIRecordingProxy:
         self,
         *,
         request_id: str,
-        benchmark_id: str,
+        benchmark_name: str,
         task_id: str | None,
         request: dict[str, Any],
         response: dict[str, Any] | str | None,
@@ -351,7 +350,7 @@ class OpenAIRecordingProxy:
             {
                 "record_type": "model_proxy_response",
                 "proxy": self.config.label,
-                "benchmark_id": benchmark_id,
+                "benchmark_name": benchmark_name,
                 "task_id": task_id,
                 "request_id": request_id,
                 "timestamp": datetime.now(UTC).isoformat(),

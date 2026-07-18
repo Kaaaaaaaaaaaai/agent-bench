@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.benchmark-config.v1",
-  "benchmark_id": "PB_015",
+  "benchmark_name": "Finance Agent v2",
   "benchmark_slug": "finance-agent-v2",
   "display_name": "Finance Agent v2",
   "source_descriptor": "tasks/finance-agent-v2/manifest.json",

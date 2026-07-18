@@ -1,0 +1,36 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_name": "RULER 512k",
+  "benchmark_slug": "nemotron-ruler-512k",
+  "asset_root": "agent-bench-assets/nemotron-ruler-512k",
+  "source": {
+    "repository_url": "https://github.com/NVIDIA/RULER.git",
+    "commit": "38da79d79519ef87aa46ae804f838e1eab7f86d7",
+    "dataset_id": "",
+    "dataset_revision": "",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/NVIDIA/RULER.git",
+      "revision": "38da79d79519ef87aa46ae804f838e1eab7f86d7",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_clone"
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_clone"
+      }
+    ]
+  }
+}
+

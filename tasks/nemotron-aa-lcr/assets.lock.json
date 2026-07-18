@@ -1,0 +1,37 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_name": "AA-LCR",
+  "benchmark_slug": "nemotron-aa-lcr",
+  "asset_root": "agent-bench-assets/nemotron-aa-lcr",
+  "source": {
+    "repository_url": "",
+    "commit": "",
+    "dataset_id": "ArtificialAnalysis/AA-LCR",
+    "dataset_revision": "bdae010bbce259820c0e34c1d7cce210d966fb75",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://huggingface.co/datasets/ArtificialAnalysis/AA-LCR",
+      "revision": "bdae010bbce259820c0e34c1d7cce210d966fb75",
+      "checksum": "",
+      "expected_local_path": "huggingface:ArtificialAnalysis/AA-LCR",
+      "required": true,
+      "validation_rules": {
+        "kind": "huggingface_dataset",
+        "dataset_id": "ArtificialAnalysis/AA-LCR"
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "huggingface_dataset",
+        "dataset_id": "ArtificialAnalysis/AA-LCR"
+      }
+    ]
+  }
+}

@@ -186,7 +186,7 @@ class BenchmarkRunContext:
 
 @dataclass(slots=True)
 class BenchmarkRunResult:
-    benchmark_id: str
+    benchmark_name: str
     status: str
     output_dir: Path
     duration_seconds: float
@@ -204,7 +204,7 @@ class BenchmarkRunResult:
 
 @dataclass(slots=True)
 class NormalizedBenchmarkResult:
-    benchmark_id: str
+    benchmark_name: str
     display_name: str
     task_group: str
     status: str
@@ -221,7 +221,7 @@ class NormalizedBenchmarkResult:
 
 @dataclass(slots=True)
 class RawResponseRecord:
-    benchmark_id: str
+    benchmark_name: str
     task_id: str | None
     request_id: str
     timestamp: str
@@ -239,7 +239,7 @@ class RawResponseRecord:
 
 @dataclass(slots=True)
 class GradedResultRecord:
-    benchmark_id: str
+    benchmark_name: str
     task_id: str | None
     raw_score: float | None
     normalized_score: float | None
@@ -308,7 +308,7 @@ class BenchmarkManifest:
         name = str(benchmark.get("name") or task.id)
         group = str(benchmark.get("group") or task.category)
         return cls(
-            id=task.id,
+            id=name,
             display_name=name,
             task_group=group,
             description=str(task.question or f"Run {name}"),
@@ -379,9 +379,10 @@ class BenchmarkManifest:
         reporting = _dict(raw.get("reporting"))
         official = _dict(raw.get("official_conditions"))
         assets = raw.get("assets") if isinstance(raw.get("assets"), list) else []
+        display_name = str(raw.get("display_name") or raw.get("name") or raw.get("id") or "")
         return cls(
-            id=str(raw.get("id") or ""),
-            display_name=str(raw.get("display_name") or raw.get("name") or ""),
+            id=display_name,
+            display_name=display_name,
             task_group=str(raw.get("task_group") or reporting.get("category_label") or "Other"),
             description=str(raw.get("description") or ""),
             homepage_url=str(raw.get("homepage_url") or raw.get("homepage") or ""),
@@ -461,14 +462,6 @@ class BenchmarkManifest:
 
     def validate(self, *, allow_host_docker_socket: bool = False) -> ValidationResult:
         issues: list[ValidationIssue] = []
-        _require_text(issues, "id", self.id)
-        if self.id and not MANIFEST_ID_RE.fullmatch(self.id):
-            issues.append(
-                ValidationIssue(
-                    "id",
-                    "must use 1-128 letters, numbers, dots, underscores, or hyphens and start with a letter or number",
-                )
-            )
         _require_text(issues, "display_name", self.display_name)
         _require_text(issues, "task_group", self.task_group)
         _require_text(issues, "description", self.description)
@@ -632,7 +625,6 @@ class BenchmarkManifest:
 
     def to_legacy_benchmark(self) -> dict[str, Any]:
         return {
-            "id": self.id,
             "name": self.display_name,
             "group": self.task_group,
             "capabilities": list(self.capabilities),
@@ -662,7 +654,6 @@ class BenchmarkManifest:
     def to_dict(self) -> dict[str, Any]:
         return {
             "version": self.version,
-            "id": self.id,
             "display_name": self.display_name,
             "task_group": self.task_group,
             "description": self.description,

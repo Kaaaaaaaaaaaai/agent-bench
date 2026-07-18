@@ -1,0 +1,36 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_name": "Terminal-Bench Hard (NVIDIA 48-task subset)",
+  "benchmark_slug": "nemotron-terminal-bench-hard-48",
+  "asset_root": "agent-bench-assets/nemotron-terminal-bench-hard-48",
+  "source": {
+    "repository_url": "https://github.com/laude-institute/terminal-bench.git",
+    "commit": "d28711d0da2675d0bb1d56de45ae5df6082438a3",
+    "dataset_id": "",
+    "dataset_revision": "",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/laude-institute/terminal-bench.git",
+      "revision": "d28711d0da2675d0bb1d56de45ae5df6082438a3",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_clone"
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_clone"
+      }
+    ]
+  }
+}
+

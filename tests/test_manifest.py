@@ -6,7 +6,6 @@ from agent_bench.models import Task
 
 def _manifest_payload() -> dict:
     return {
-        "id": "official_example",
         "display_name": "Official Example",
         "task_group": "Reasoning",
         "description": "Run the official example benchmark.",
@@ -99,7 +98,7 @@ def test_manifest_validation_rejects_unsafe_ids_paths_and_container_values():
 
 def test_legacy_descriptor_without_official_fields_fails_validation():
     task = Task(
-        id="PB_001",
+        id="LegacyBench",
         category="Coding",
         type="external_benchmark",
         question="Run legacy descriptor",
@@ -130,5 +129,5 @@ def test_load_manifest_tasks_discovers_benchmark_manifests(tmp_path):
     tasks = load_manifest_tasks(tmp_path / "benchmarks")
 
     assert len(tasks) == 1
-    assert tasks[0].id == "official_example"
+    assert tasks[0].id == "Official Example"
     assert tasks[0].benchmark["manifest"]["display_name"] == "Official Example"

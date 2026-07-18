@@ -1,6 +1,5 @@
 {
   "version": "agent-bench.manifest.v1",
-  "id": "PB_019",
   "display_name": "DeepSWE",
   "task_group": "Coding",
   "description": "Run DeepSWE locally through the Docker-backed public benchmark adapter.",

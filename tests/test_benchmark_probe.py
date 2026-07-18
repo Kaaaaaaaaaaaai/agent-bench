@@ -422,6 +422,59 @@ def test_probe_reads_explicit_huggingface_dataset_id(monkeypatch):
     assert probe._huggingface_dataset_ids() == ["princeton-nlp/SWE-bench"]
 
 
+def test_probe_pins_huggingface_dataset_revision(monkeypatch):
+    probe = _load_probe_module()
+    revision = "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+    calls = []
+
+    def fake_load_dataset(dataset_id, **kwargs):
+        calls.append((dataset_id, kwargs))
+        if kwargs.get("split") != "test":
+            raise ValueError("unexpected split")
+        return [{"problem_statement": "Fix the public bug.", "patch": "hidden gold patch"}]
+
+    monkeypatch.setenv("AGENT_BENCH_DATASET_REVISION", revision)
+    items, _ = probe._extract_huggingface_dataset_items(
+        fake_load_dataset,
+        "princeton-nlp/SWE-bench_Verified",
+        1,
+    )
+
+    assert len(items) == 1
+    assert calls[0][1]["revision"] == revision
+    assert calls[0][1]["streaming"] is True
+    assert "hidden gold patch" not in items[0].expected
+
+
+def test_probe_uses_only_materialized_huggingface_dataset(monkeypatch, tmp_path):
+    probe = _load_probe_module()
+    cache_path = tmp_path / "materialized"
+    cache_path.mkdir()
+    calls = []
+
+    class FakeDatasets:
+        @staticmethod
+        def load_from_disk(path):
+            calls.append(("local", path))
+            return [{"question": "Pinned question?", "answer": "Pinned answer"}]
+
+        @staticmethod
+        def load_dataset(*args, **kwargs):
+            raise AssertionError("runtime network dataset loading must not be used")
+
+    monkeypatch.setitem(sys.modules, "datasets", FakeDatasets)
+    monkeypatch.setenv("AGENT_BENCH_DATASET_ID", "example/pinned")
+    monkeypatch.setenv("AGENT_BENCH_DATASET_CACHE_PATH", str(cache_path))
+    monkeypatch.setenv("AGENT_BENCH_REQUIRE_MATERIALIZED_DATASET", "1")
+
+    items, errors = probe.extract_huggingface_items(1)
+
+    assert errors == []
+    assert len(items) == 1
+    assert items[0].question == "Pinned question?"
+    assert calls == [("local", str(cache_path))]
+
+
 def test_probe_uses_configurable_model_request_timeout(monkeypatch):
     probe = _load_probe_module()
 
@@ -449,6 +502,12 @@ def test_probe_uses_configurable_agent_max_tokens(monkeypatch):
             probe.BenchmarkItem("write report", "must be correct", "source", metadata={"grading": "rubric"})
         )
         == 2048
+    )
+    assert (
+        probe._max_answer_tokens(
+            probe.BenchmarkItem("choose", "A", "source", choices={"A": "yes", "B": "no"})
+        )
+        == 4096
     )
 
 
@@ -648,17 +707,104 @@ def test_static_finance_contract_reports_degraded_missing_benchmark_tools():
     assert payload["supported_capabilities"] == []
 
 
-def test_bundled_descriptor_capabilities_are_supported():
+def test_bundled_manifest_capabilities_are_supported_or_explicitly_fail_closed():
     probe = _load_probe_module()
-    task_file = Path(__file__).resolve().parents[1] / "tasks" / "public_benchmarks.json"
-    tasks = json.loads(task_file.read_text(encoding="utf-8"))
+    task_root = Path(__file__).resolve().parents[1] / "tasks"
+    manifests = [json.loads(path.read_text(encoding="utf-8")) for path in task_root.glob("*/manifest.json")]
     declared = {
         capability
-        for task in tasks
-        for capability in task["benchmark"].get("capabilities", [])
+        for manifest in manifests
+        for capability in manifest.get("capabilities", [])
     }
 
-    assert sorted(declared - probe.HARNESS_SUPPORTED_CAPABILITIES) == []
+    assert declared - probe.HARNESS_SUPPORTED_CAPABILITIES == {
+        "code_execution",
+        "external_judge",
+        "instruction_following_grader",
+        "long_context_generation",
+        "multi_turn_judge",
+        "pairwise_judge",
+        "terminal_execution",
+        "translation_scoring",
+    }
+
+
+def test_nemo_official_grader_requirement_fails_closed_without_native_component(monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.setenv("AGENT_BENCH_REQUIRED_CAPABILITIES", "chat_answer")
+    monkeypatch.setenv(
+        "AGENT_BENCH_BENCHMARK_JSON",
+        json.dumps(
+            {
+                "official_conditions": {
+                    "official_grader_command": "nemo-evaluator-launcher run --config pinned.yaml -t ns_task"
+                }
+            }
+        ),
+    )
+
+    required = probe._required_capabilities("ExampleBench")
+
+    assert required == {"chat_answer", "nemo_evaluator_component"}
+    assert "nemo_evaluator_component" not in probe.HARNESS_SUPPORTED_CAPABILITIES
+
+
+def test_source_adapter_smoke_is_runnable_but_never_official(monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.setenv("AGENT_BENCH_REQUIRED_CAPABILITIES", "chat_answer")
+    monkeypatch.setenv("AGENT_BENCH_EVALUATION_CONTRACT", "source_adapter_smoke")
+    monkeypatch.setenv(
+        "AGENT_BENCH_BENCHMARK_JSON",
+        json.dumps(
+            {
+                "official_conditions": {
+                    "official_grader_command": "nemo-evaluator-launcher run --config pinned.yaml -t ns_task"
+                }
+            }
+        ),
+    )
+
+    assert probe._required_capabilities("ExampleBench") == {"chat_answer"}
+
+    item = probe.BenchmarkItem(
+        question="Choose the correct option.",
+        expected="A",
+        source="huggingface:publisher/dataset/test:1",
+        choices={"A": "correct", "B": "incorrect"},
+    )
+    payload = probe.evaluation_payload(
+        item,
+        "A",
+        1.0,
+        "",
+        capabilities_verified=True,
+    )
+
+    assert payload["score"] == 1.0
+    assert payload["evaluation_contract"] == "source_adapter_smoke"
+    assert payload["score_mode"] == "source_adapter_smoke"
+    assert payload["official_equivalent"] is False
+    assert payload["included_in_official_score"] is False
+
+
+def test_swebench_official_grader_requirement_fails_closed_without_native_grader(monkeypatch):
+    probe = _load_probe_module()
+    monkeypatch.setenv("AGENT_BENCH_REQUIRED_CAPABILITIES", "repo_patch")
+    monkeypatch.setenv(
+        "AGENT_BENCH_BENCHMARK_JSON",
+        json.dumps(
+            {
+                "official_conditions": {
+                    "official_grader_command": "python -m swebench.harness.run_evaluation --split test"
+                }
+            }
+        ),
+    )
+
+    required = probe._required_capabilities("SWE-bench Verified")
+
+    assert required == {"repo_patch", "swebench_official_grader"}
+    assert "swebench_official_grader" not in probe.HARNESS_SUPPORTED_CAPABILITIES
 
 
 def test_probe_base_payload_reports_only_required_supported_capabilities():
@@ -925,6 +1071,31 @@ def test_probe_repo_patch_grading_rejects_reference_diff(monkeypatch):
     assert grade["included_in_official_score"] is False
     assert calls[0][3] == "task_compliance"
     assert "Model patch:" in calls[0][2]
+
+
+def test_probe_swe_oracle_fields_stay_grader_side():
+    probe = _load_probe_module()
+    record = {
+        "instance_id": "owner__repo-1",
+        "repo": "owner/repo",
+        "base_commit": "a" * 40,
+        "problem_statement": "Fix the public bug report.",
+        "patch": "diff --git a/secret.py b/secret.py\n+gold fix",
+        "test_patch": "diff --git a/test_secret.py b/test_secret.py\n+hidden test",
+        "FAIL_TO_PASS": '["test_secret.py::test_fix"]',
+        "PASS_TO_PASS": '["test_public.py::test_existing"]',
+    }
+
+    item = probe.item_from_record(record, "huggingface:swe-bench-verified/test:0")
+
+    assert item is not None
+    assert item.question == "Fix the public bug report."
+    serialized_metadata = json.dumps(item.metadata)
+    assert "gold fix" not in item.expected
+    assert "gold fix" not in serialized_metadata
+    assert "hidden test" not in serialized_metadata
+    assert "test_secret.py::test_fix" not in serialized_metadata
+    assert "test_public.py::test_existing" not in serialized_metadata
 
 
 def test_probe_repo_patch_missing_diff_is_missing_artifact(monkeypatch):

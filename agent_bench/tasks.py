@@ -15,14 +15,14 @@ def load_tasks(
     tasks_dir: str | Path,
     include: set[str] | None = None,
     limit: int | None = None,
-    suite_ids: set[str] | None = None,
+    benchmark_names: set[str] | None = None,
     profile: str = "full_active",
 ) -> list[Task]:
     return select_tasks(
         load_task_registry(tasks_dir),
         include=include,
         limit=limit,
-        suite_ids=suite_ids,
+        benchmark_names=benchmark_names,
         profile=profile,
     )
 
@@ -45,7 +45,7 @@ def load_task_registry(tasks_dir: str | Path) -> list[Task]:
         if skip_legacy_public and path.name == "public_benchmarks.json":
             continue
         category = path.stem
-        for task in _load_task_file(path, category):
+        for task in _load_task_file(path, category, skip_ids=seen_task_ids):
             if task.id in seen_task_ids:
                 continue
             seen_task_ids.add(task.id)
@@ -60,7 +60,7 @@ def select_tasks(
     tasks: list[Task],
     include: set[str] | None = None,
     limit: int | None = None,
-    suite_ids: set[str] | None = None,
+    benchmark_names: set[str] | None = None,
     profile: str = "full_active",
 ) -> list[Task]:
     if limit is not None and limit < 0:
@@ -69,7 +69,7 @@ def select_tasks(
         raise TaskLoadError(f"Unsupported benchmark profile: {profile}")
 
     include_normalized = _normalized_selector_set(include)
-    suite_normalized = _normalized_selector_set(suite_ids)
+    suite_normalized = _normalized_selector_set(benchmark_names)
     matched = [
         task
         for task in tasks
@@ -101,14 +101,19 @@ def _matches_include(task: Task, include: set[str]) -> bool:
     )
 
 
-def _matches_suite_selection(task: Task, suite_ids: set[str]) -> bool:
-    if not suite_ids:
+def _matches_suite_selection(task: Task, benchmark_names: set[str]) -> bool:
+    if not benchmark_names:
         return True
     name = task.benchmark.get("name") if isinstance(task.benchmark, dict) else None
-    return task.id in suite_ids or name in suite_ids
+    return task.id in benchmark_names or name in benchmark_names
 
 
-def _load_task_file(path: Path, category: str) -> list[Task]:
+def _load_task_file(
+    path: Path,
+    category: str,
+    *,
+    skip_ids: set[str] | None = None,
+) -> list[Task]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
@@ -122,6 +127,9 @@ def _load_task_file(path: Path, category: str) -> list[Task]:
     for index, raw in enumerate(payload):
         if not isinstance(raw, dict):
             raise TaskLoadError(f"{path}: item {index} must be an object")
+        raw_id = _raw_task_name(raw)
+        if isinstance(raw_id, str) and raw_id in (skip_ids or set()):
+            continue
         task = _parse_task(raw, category, path.name, path.parent, index)
         if task.id in seen_ids:
             raise TaskLoadError(f"{path}: duplicate task id {task.id}")
@@ -138,7 +146,16 @@ def _parse_task(
     index: int,
 ) -> Task:
     task_type = _required_str(raw, "type", source, index)
-    task_id = _required_str(raw, "id", source, index)
+    if task_type == "external_benchmark":
+        benchmark = raw.get("benchmark")
+        benchmark_name = benchmark.get("name") if isinstance(benchmark, dict) else None
+        task_id = str(benchmark_name or raw.get("id") or "").strip()
+        if not task_id:
+            raise TaskLoadError(
+                f"{source}: item {index} requires benchmark.name for an external benchmark"
+            )
+    else:
+        task_id = _required_str(raw, "id", source, index)
     question = _required_str(raw, "question", source, index)
 
     if task_type == "multiple_choice":
@@ -214,6 +231,14 @@ def _parse_task(
         )
 
     raise TaskLoadError(f"{source}: {task_id} unsupported task type {task_type!r}")
+
+
+def _raw_task_name(raw: dict[str, Any]) -> Any:
+    if raw.get("type") == "external_benchmark":
+        benchmark = raw.get("benchmark")
+        if isinstance(benchmark, dict) and benchmark.get("name"):
+            return benchmark["name"]
+    return raw.get("id")
 
 
 def _required_str(raw: dict[str, Any], key: str, source: str, index: int) -> str:

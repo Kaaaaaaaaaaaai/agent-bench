@@ -1,0 +1,27 @@
+{
+  "schema_version": "agent-bench.benchmark-config.v1",
+  "benchmark_name": "WMT24++ (en-to-xx)",
+  "benchmark_slug": "nemotron-wmt24pp",
+  "display_name": "WMT24++ (en-to-xx)",
+  "source_descriptor": "tasks/nemotron-wmt24pp/manifest.json",
+  "nvidia_model_card_revision": "1d370e47fbc56d1019a471c2339663cdbbb5236f",
+  "nemo_task": "ns_wmt24pp_comet",
+  "required_context_tokens": null,
+  "official_conditions": {
+    "official_split": "English-to-target-language directions",
+    "official_scoring_method": "XCOMET-XXL translation score",
+    "official_prompt_format": "official WMT24++ translation prompt",
+    "official_grader_command": "nemo-evaluator-launcher run --config local_nemotron-3-super-120b-a12b-base.yaml -t ns_wmt24pp_comet",
+    "official_evaluation_config": "tasks/nemotron-wmt24pp/configs/official.json",
+    "hardware_requirements": "",
+    "container_requirements": "Pinned component environment; missing native grader, long-context capacity, judge, gated scorer, or source assets fails closed"
+  },
+  "provenance_blocker": "",
+  "access_policy": {
+    "fail_closed": true,
+    "official_score_requires_native_grader": true,
+    "smoke_score_is_official": false
+  },
+  "container_command": "bash /benchmark/task/harness/run.sh"
+}
+

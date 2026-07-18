@@ -376,7 +376,7 @@ def grade_external_benchmark(task: Task, response: ModelResponse) -> GradeResult
 
 def _add_benchmark_descriptor_details(task: Task, details: dict[str, Any]) -> None:
     benchmark = task.benchmark if isinstance(task.benchmark, dict) else {}
-    details.setdefault("suite_id", task.id)
+    details.setdefault("benchmark_name", task.id)
     details.setdefault("benchmark", benchmark.get("name", task.id))
     details.setdefault("group", benchmark.get("group", task.category))
     details.setdefault("homepage", benchmark.get("homepage", ""))

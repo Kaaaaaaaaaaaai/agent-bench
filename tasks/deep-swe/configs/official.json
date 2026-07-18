@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.benchmark-config.v1",
-  "benchmark_id": "PB_019",
+  "benchmark_name": "DeepSWE",
   "benchmark_slug": "deep-swe",
   "display_name": "DeepSWE",
   "source_descriptor": "tasks/deep-swe/manifest.json",

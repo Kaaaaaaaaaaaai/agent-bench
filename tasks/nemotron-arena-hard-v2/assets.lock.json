@@ -1,0 +1,36 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_name": "Arena-Hard-V2",
+  "benchmark_slug": "nemotron-arena-hard-v2",
+  "asset_root": "agent-bench-assets/nemotron-arena-hard-v2",
+  "source": {
+    "repository_url": "https://github.com/lmarena/arena-hard-auto.git",
+    "commit": "196f6b826783b3da7310e361a805fa36f0be83f3",
+    "dataset_id": "",
+    "dataset_revision": "",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/lmarena/arena-hard-auto.git",
+      "revision": "196f6b826783b3da7310e361a805fa36f0be83f3",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_clone"
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_clone"
+      }
+    ]
+  }
+}
+

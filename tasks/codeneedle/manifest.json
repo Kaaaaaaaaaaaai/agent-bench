@@ -1,6 +1,5 @@
 {
   "version": "agent-bench.manifest.v1",
-  "id": "PB_009",
   "display_name": "codeneedle",
   "task_group": "Long Context",
   "description": "Run codeneedle locally through the Docker-backed public benchmark adapter.",

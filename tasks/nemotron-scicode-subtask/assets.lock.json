@@ -1,0 +1,51 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_name": "SciCode (subtask)",
+  "benchmark_slug": "nemotron-scicode-subtask",
+  "asset_root": "agent-bench-assets/nemotron-scicode-subtask",
+  "source": {
+    "repository_url": "https://github.com/scicode-bench/SciCode.git",
+    "commit": "e3158ea011d4235245a547460d3688d7ccbf9900",
+    "dataset_id": "SciCode1/SciCode",
+    "dataset_revision": "4510f6a6aa27c43fad7b43da2c59602a86e88480",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/scicode-bench/SciCode.git",
+      "revision": "e3158ea011d4235245a547460d3688d7ccbf9900",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_clone"
+      }
+    },
+    {
+      "source": "https://huggingface.co/datasets/SciCode1/SciCode",
+      "revision": "4510f6a6aa27c43fad7b43da2c59602a86e88480",
+      "checksum": "",
+      "expected_local_path": "huggingface:SciCode1/SciCode",
+      "required": true,
+      "validation_rules": {
+        "kind": "huggingface_dataset",
+        "dataset_id": "SciCode1/SciCode"
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_clone"
+      },
+      {
+        "kind": "huggingface_dataset",
+        "dataset_id": "SciCode1/SciCode"
+      }
+    ]
+  }
+}
+

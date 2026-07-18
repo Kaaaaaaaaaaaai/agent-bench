@@ -45,15 +45,15 @@ docker run --rm -it \
   --judge-provider "same-as-target"
 ```
 
-Run directly from a local checkout against an OpenAI-compatible server on your LAN:
+Run directly from a local checkout against an OpenAI-compatible server:
 
 ```bash
-curl http://YOUR_IP_ADDRESS:8000/v1/models
+curl http://<model-server>:<port>/v1/models
 
 UV_CACHE_DIR=/private/tmp/uv-cache-agent-bench \
 uv run agent-bench run \
   --provider openai-compatible \
-  --base-url http://YOUR_IP_ADDRESS:8000/v1 \
+  --base-url http://<model-server>:<port>/v1 \
   --model <model-id-from-/v1/models> \
   --request-concurrency 2 \
   --eval-concurrency 2 \
@@ -124,14 +124,14 @@ For a single local model server, start with `--request-concurrency 1` or `--requ
 
 ## Task Files
 
-The bundled `tasks/` directory contains one production folder per benchmark. New production benchmark suites should be registered with `tasks/<benchmark_id>/manifest.json` plus the benchmark-owned harness, configs, data, and asset lock files. The runner keeps `tasks/public_benchmarks.json` only for backward-compatible descriptor discovery.
+The bundled `tasks/` directory contains one production folder per benchmark. New production benchmark suites should be registered with `tasks/<benchmark-slug>/manifest.json` plus the benchmark-owned harness, configs, data, and asset lock files. The manifest's `display_name` is the canonical name used by the runner; there is no separate synthetic code. The runner keeps `tasks/public_benchmarks.json` only for backward-compatible descriptor discovery.
 
 Strict production manifests must declare official leaderboard-equivalent conditions: pinned source commit or dataset revision, official split, official scoring method, official prompt format, official grader command/config, required assets with validation, container settings, adapter path, scoring normalization, and reporting metadata. Incomplete or moving-ref descriptors fail as `failed_manifest_validation` and are shown in `summary.json` and `summary.html`; the runner does not silently execute sample-only or approximate benchmark variants as supported production entries.
 
 External benchmark folder shape:
 
 ```text
-tasks/<benchmark_id>/
+tasks/<benchmark-slug>/
   manifest.json
   README.md
   harness/
@@ -144,12 +144,12 @@ tasks/<benchmark_id>/
   assets.lock.json
 ```
 
-The active suite currently records 20 public benchmark IDs. Upstream credits, license notes, and citation URLs are recorded in each task folder manifest and summarized in `tasks/README.md`; license metadata is not used as a loader gate.
+The active suite currently records 40 public benchmarks by their canonical names. Upstream credits, license notes, and citation URLs are recorded in each task folder manifest and summarized in `tasks/README.md`; license metadata is not used as a loader gate.
 
 Relevant selection controls:
 
 - `--profile full_active`: all active configured suites.
-- `--suite PB_001`: run a specific active suite by ID or benchmark name.
+- `--suite "SWE-bench Verified"`: run a specific active suite by benchmark name.
 
 When running a remote provider, Agent Bench starts a main-process OpenAI-compatible recording proxy and points the benchmark container at that proxy. The proxy forwards requests to the configured target endpoint, records raw requests/responses into `raw_responses.jsonl`, and keeps upstream API secrets out of the benchmark container. The launcher receives neutral model settings through environment variables:
 
@@ -167,7 +167,7 @@ Most benchmark folders currently use `agent-bench-probe` from their benchmark-ow
 - `collect_outputs(run) -> OutputBundle`
 - `grade(task, outputs) -> GradeResult`
 
-Capabilities are reported only when an adapter can provide the required workspace, tools, output collection, and grader. `tool_call` rows use the stateful agent tool loop, including native OpenAI-compatible tool calls and text tool-call fallbacks for models that emit tagged JSON, JSON arrays, FunctionGemma calls, or Pythonic calls; rows that name a required tool fail preflight as `failed_missing_required_tool` if that tool is not exposed. FinMCP-Bench is evaluated as static transcript reasoning and does not expose live MCP tools. Finance Agent v2 uses a deterministic CRWD fixture backend for smoke coverage; `web_search`, `edgar_search`, `parse_html_page`, `retrieve_information`, and `price_history` are exposed only when fixture checksums and semantic canaries pass. Browser/GUI rows are evaluated from extracted task data and repository files when no live display is available. Repo-patch rows require target repository metadata and a checkout/patch/diff canary; when `AGENT_BENCH_REPO_PATCH_GRADER` is set, that official patch/test grader is used. SWE-Lancer rows with official issue `test.py` assets use the built-in task-test grader, which applies `model.patch` to a fresh target checkout and runs the task test. Other repo-patch rows use a `task_compliance_fallback` to grade the produced diff. File-artifact and office-document rows run a read/write/list/collect canary and use isolated per-item workspaces populated only with declared task inputs. Missing, corrupt, or Git LFS pointer-stub assets are marked `failed_missing_assets`.
+Capabilities are reported only when an adapter can provide the required workspace, tools, output collection, and grader. `tool_call` rows use the stateful agent tool loop, including native OpenAI-compatible tool calls and text tool-call fallbacks for models that emit tagged JSON, JSON arrays, FunctionGemma calls, or Pythonic calls; rows that name a required tool fail preflight as `failed_missing_required_tool` if that tool is not exposed. FinMCP-Bench is evaluated as static transcript reasoning and does not expose live MCP tools. Finance Agent v2 uses a deterministic CRWD fixture backend for smoke coverage; `web_search`, `edgar_search`, `parse_html_page`, `retrieve_information`, and `price_history` are exposed only when fixture checksums and semantic canaries pass. Browser/GUI rows are evaluated from extracted task data and repository files when no live display is available. Repo-patch rows require target repository metadata and a checkout/patch/diff canary; when `AGENT_BENCH_REPO_PATCH_GRADER` is set, that official patch/test grader is used. Otherwise repo-patch generation is reported only as a non-official integration smoke result. File-artifact and office-document rows run a read/write/list/collect canary and use isolated per-item workspaces populated only with declared task inputs. Missing, corrupt, or Git LFS pointer-stub assets are marked `failed_missing_assets`.
 
 The default external asset cache is the git-ignored `agent-bench-assets/` directory. Benchmarks with cache recipes download upstream data into that cache before Docker starts; each benchmark container receives only that benchmark's materialized assets at `/benchmark/assets`.
 

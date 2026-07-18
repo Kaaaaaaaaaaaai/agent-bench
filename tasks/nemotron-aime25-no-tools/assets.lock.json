@@ -1,0 +1,56 @@
+{
+  "schema_version": "agent-bench.assets-lock.v1",
+  "benchmark_name": "AIME25 (no tools)",
+  "benchmark_slug": "nemotron-aime25-no-tools",
+  "asset_root": "agent-bench-assets/nemotron-aime25-no-tools",
+  "source": {
+    "repository_url": "https://github.com/eth-sri/matharena.git",
+    "commit": "a11194deff8c67a232974a383795e8a2776b4c6f",
+    "dataset_id": "MathArena/aime_2025",
+    "dataset_revision": "c94da77eb22bbd6439e62a323bec18493a421302",
+    "subdir": ""
+  },
+  "assets": [
+    {
+      "source": "https://github.com/eth-sri/matharena.git",
+      "revision": "a11194deff8c67a232974a383795e8a2776b4c6f",
+      "checksum": "",
+      "expected_local_path": ".",
+      "required": true,
+      "validation_rules": {
+        "kind": "repository_paths",
+        "required_paths": ["README.md", "pyproject.toml", "scripts", "configs"]
+      }
+    },
+    {
+      "source": "https://huggingface.co/datasets/MathArena/aime_2025",
+      "revision": "c94da77eb22bbd6439e62a323bec18493a421302",
+      "checksum": "",
+      "expected_local_path": "huggingface:MathArena/aime_2025",
+      "required": true,
+      "validation_rules": {
+        "kind": "huggingface_dataset",
+        "dataset_id": "MathArena/aime_2025",
+        "split": "train",
+        "expected_records": 30
+      }
+    }
+  ],
+  "materialization": {
+    "mode": "repository_or_dataset_cache",
+    "mount": "/benchmark/assets",
+    "readonly": true,
+    "validation": [
+      {
+        "kind": "repository_paths",
+        "required_paths": ["README.md", "pyproject.toml", "scripts", "configs"]
+      },
+      {
+        "kind": "huggingface_dataset",
+        "dataset_id": "MathArena/aime_2025",
+        "split": "train",
+        "expected_records": 30
+      }
+    ]
+  }
+}

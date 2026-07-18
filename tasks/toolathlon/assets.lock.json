@@ -1,6 +1,6 @@
 {
   "schema_version": "agent-bench.assets-lock.v1",
-  "benchmark_id": "PB_022",
+  "benchmark_name": "Toolathlon",
   "benchmark_slug": "toolathlon",
   "asset_root": "agent-bench-assets/toolathlon",
   "source": {
