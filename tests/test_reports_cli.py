@@ -13,7 +13,13 @@ from agent_bench.statuses import status_info
 
 def test_render_summary_html_contains_radar_svg():
     summary = {
-        "metadata": {"model": "mock", "created_at_utc": "2026-01-01T00:00:00+00:00"},
+        "metadata": {
+            "model": "mock",
+            "created_at_utc": "2026-01-01T00:00:00+00:00",
+            "git_commit": "abc123",
+            "target_model": {"provider_type": "mock", "model": "mock-model", "base_url": "http://example.test"},
+            "judge": {"provider": "mock", "model": "judge-model", "fallback_used": False},
+        },
         "total_score": 50.0,
         "pass_rate": 50.0,
         "coding_pass_rate": None,
@@ -38,18 +44,57 @@ def test_render_summary_html_contains_radar_svg():
             "alpha": {"task_count": 1, "passed_count": 0, "score": 50.0},
             "beta": {"task_count": 1, "passed_count": 1, "score": 100.0},
         },
+        "coverage_summary": {
+            "total_configured_benchmarks": 2,
+            "attempted_benchmarks": 2,
+            "successfully_scored_benchmarks": 1,
+            "failed_benchmarks": 1,
+            "coverage_rate": 0.5,
+            "per_category": {
+                "Coding": {
+                    "total_configured_benchmarks": 2,
+                    "attempted_benchmarks": 2,
+                    "successfully_scored_benchmarks": 1,
+                    "failed_benchmarks": 1,
+                    "coverage_rate": 0.5,
+                }
+            },
+        },
         "benchmark_results": [
             {
                 "group": "Coding",
                 "benchmark": "ExampleBench",
+                "profile": "repo_patch",
                 "score": 75.0,
+                "raw_score": 50.0,
+                "valid_score": 75.0,
                 "passed": False,
+                "status": "failed_model_answer",
+                "run_status": "completed",
+                "score_status": "partially_correct",
+                "included_in_official_score": True,
+                "evaluated_task_count": 4,
+                "evaluation_passed_count": 3,
                 "homepage": "https://example.com",
                 "citation": "https://example.com/citation",
                 "license": "MIT",
                 "credit": "Example authors",
                 "file_count_sampled": 5,
                 "model_eval": {"answer": "B", "expected": "A", "question": "Pick the best fix."},
+            },
+            {
+                "group": "Coding",
+                "benchmark": "AssetBench",
+                "profile": "file_artifact",
+                "score": None,
+                "raw_score": None,
+                "valid_score": None,
+                "status": "failed_missing_assets",
+                "run_status": "skipped",
+                "score_status": "not_applicable",
+                "included_in_official_score": False,
+                "error_details": "Missing benchmark assets",
+                "blocker_type": "missing_asset",
             }
         ],
     }

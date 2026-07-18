@@ -62,14 +62,38 @@ def test_manifest_validation_requires_pinned_official_metadata():
     assert result.ok is True
 
 
-def test_manifest_validation_accepts_declared_host_docker_socket_without_cli_flag():
+def test_manifest_validation_requires_host_docker_socket_opt_in():
     payload = _manifest_payload()
     payload["container"]["requires_host_docker_socket"] = True
     manifest = BenchmarkManifest.from_mapping(payload, source_path="benchmarks/example/manifest.yaml")
 
-    result = manifest.validate(allow_host_docker_socket=False)
+    denied = manifest.validate(allow_host_docker_socket=False)
+    allowed = manifest.validate(allow_host_docker_socket=True)
 
-    assert result.ok is True
+    assert denied.ok is False
+    assert any(issue.field == "container.requires_host_docker_socket" for issue in denied.issues)
+    assert allowed.ok is True
+
+
+def test_manifest_validation_rejects_unsafe_ids_paths_and_container_values():
+    payload = _manifest_payload()
+    payload["id"] = "../../escape"
+    payload["source"]["subdir"] = "../outside"
+    payload["assets"][0]["expected_local_path"] = "/host/file"
+    payload["container"]["image"] = "--privileged"
+    payload["container"]["run_as_user"] = "root"
+    payload["adapter"]["expected_output_files"] = ["../result.json"]
+
+    result = BenchmarkManifest.from_mapping(payload).validate()
+    issue_fields = {issue.field for issue in result.issues}
+
+    assert result.ok is False
+    assert "id" in issue_fields
+    assert "source.subdir" in issue_fields
+    assert "assets[0].expected_local_path" in issue_fields
+    assert "container.image" in issue_fields
+    assert "container.run_as_user" in issue_fields
+    assert "adapter.expected_output_files[0]" in issue_fields
 
 
 def test_legacy_descriptor_without_official_fields_fails_validation():

@@ -11,6 +11,8 @@ from agent_bench.models import Task
 
 MANIFEST_VERSION = "agent-bench.manifest.v1"
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
+MANIFEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+CONTAINER_USER_RE = re.compile(r"^[0-9]+(?::[0-9]+)?$")
 MOVING_REFS = {"", "main", "master", "latest", "head", "dev", "develop", "trunk"}
 
 
@@ -516,6 +518,13 @@ class BenchmarkManifest:
             prefix = f"assets[{index}]"
             _require_text(issues, f"{prefix}.source", asset.source)
             _require_text(issues, f"{prefix}.expected_local_path", asset.expected_local_path)
+            if asset.expected_local_path and not _is_safe_relative_path(asset.expected_local_path):
+                issues.append(
+                    ValidationIssue(
+                        f"{prefix}.expected_local_path",
+                        "must be a relative path without parent-directory traversal",
+                    )
+                )
             if asset.required and not asset.checksum and not asset.validation_command and not asset.validation_rules:
                 issues.append(
                     ValidationIssue(
@@ -541,6 +550,30 @@ class BenchmarkManifest:
                     "Declare the exact official benchmark image or local build context.",
                 )
             )
+        if self.container.image.startswith("-"):
+            issues.append(ValidationIssue("container.image", "must not begin with '-'"))
+        if self.container.run_as_user and not CONTAINER_USER_RE.fullmatch(self.container.run_as_user):
+            issues.append(
+                ValidationIssue(
+                    "container.run_as_user",
+                    "must be a numeric UID or UID:GID pair",
+                )
+            )
+        if self.container.requires_host_docker_socket and not allow_host_docker_socket:
+            issues.append(
+                ValidationIssue(
+                    "container.requires_host_docker_socket",
+                    "host Docker socket access requires explicit operator opt-in",
+                    "Pass --allow-host-docker-socket only for a trusted benchmark manifest and harness.",
+                )
+            )
+        if self.source.subdir and not _is_safe_relative_path(self.source.subdir):
+            issues.append(
+                ValidationIssue(
+                    "source.subdir",
+                    "must be a relative path without parent-directory traversal",
+                )
+            )
         _require_text(issues, "container.command", self.container.command)
         if self.container.timeout_seconds <= 0:
             issues.append(ValidationIssue("container.timeout", "timeout must be positive"))
@@ -560,6 +593,14 @@ class BenchmarkManifest:
                     "At minimum declare agent_bench_result.json or the official normalized output file.",
                 )
             )
+        for index, output_path in enumerate(self.adapter.expected_output_files):
+            if not _is_safe_relative_path(output_path):
+                issues.append(
+                    ValidationIssue(
+                        f"adapter.expected_output_files[{index}]",
+                        "must be a relative path without parent-directory traversal",
+                    )
+                )
         _require_text(issues, "adapter.result_parser", self.adapter.result_parser)
         _require_text(issues, "scoring.raw_score_field", self.scoring.raw_score_field)
         if self.scoring.direction not in {"higher_is_better", "lower_is_better"}:
@@ -731,3 +772,10 @@ def _is_pinned_commit(value: str) -> bool:
 
 def _is_moving_ref(value: str) -> bool:
     return (value or "").strip().lower() in MOVING_REFS
+
+
+def _is_safe_relative_path(value: str) -> bool:
+    if not value or "\\" in value:
+        return False
+    path = Path(value)
+    return not path.is_absolute() and ".." not in path.parts

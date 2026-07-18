@@ -31,6 +31,8 @@ SECRET_KEYS = {
     "secret",
     "openai_api_key",
 }
+NORMALIZED_SECRET_KEYS = frozenset(item.replace("-", "_") for item in SECRET_KEYS)
+DEFAULT_MAX_REQUEST_BYTES = 16 * 1024 * 1024
 _CURL_STATUS_MARKER = "\n__AGENT_BENCH_CURL_STATUS__"
 CLIENT_DISCONNECT_ERRORS = (BrokenPipeError, ConnectionAbortedError, ConnectionResetError)
 
@@ -81,6 +83,11 @@ class OpenAIRecordingProxy:
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self._client = httpx.Client(timeout=config.timeout_seconds)
+        self._access_token = uuid.uuid4().hex
+
+    @property
+    def _url_prefix(self) -> str:
+        return f"/_agent_bench/{self._access_token}"
 
     @property
     def base_url(self) -> str:
@@ -89,13 +96,16 @@ class OpenAIRecordingProxy:
         host, port = self._server.server_address
         if host in {"0.0.0.0", "::"}:
             host = "127.0.0.1"
-        return f"http://{host}:{port}/v1"
+        return f"http://{host}:{port}{self._url_prefix}/v1"
 
     @property
     def container_base_url(self) -> str:
         if self._server is None:
             raise RuntimeError("Proxy has not been started")
-        return f"http://{_container_reachable_host()}:{self._server.server_address[1]}/v1"
+        return (
+            f"http://{_container_reachable_host()}:{self._server.server_address[1]}"
+            f"{self._url_prefix}/v1"
+        )
 
     def __enter__(self) -> "OpenAIRecordingProxy":
         self.start()
@@ -137,12 +147,23 @@ class OpenAIRecordingProxy:
         self._client.close()
 
     def _handle_get(self, handler: BaseHTTPRequestHandler) -> None:
-        if handler.path.rstrip("/") in {"/health", "/v1/health"}:
+        path = self._authorized_path(handler.path)
+        if path is None:
+            self._send_json(handler, 403, {"error": "forbidden"})
+            return
+        if path.rstrip("/") in {"/health", "/v1/health"}:
             self._send_json(handler, 200, {"ok": True, "proxy": self.config.label})
             return
         self._send_json(handler, 404, {"error": "not found"})
 
     def _handle_post(self, handler: BaseHTTPRequestHandler) -> None:
+        path = self._authorized_path(handler.path)
+        if path is None:
+            self._send_json(handler, 403, {"error": {"message": "forbidden"}})
+            return
+        if path.rstrip("/") != "/v1/chat/completions":
+            self._send_json(handler, 404, {"error": {"message": "not found"}})
+            return
         request_id = handler.headers.get("X-Request-Id") or f"req_{uuid.uuid4().hex}"
         benchmark_name = (
             handler.headers.get("X-Agent-Bench-Benchmark-Name")
@@ -151,7 +172,21 @@ class OpenAIRecordingProxy:
         )
         task_id = handler.headers.get("X-Agent-Bench-Task-Id")
         started = time.perf_counter()
-        request_body = self._read_json(handler)
+        try:
+            request_body = self._read_json(handler)
+        except _RequestBodyTooLarge:
+            self._record(
+                request_id=request_id,
+                benchmark_id=benchmark_id,
+                task_id=task_id,
+                request={},
+                response=None,
+                started=started,
+                status_code=413,
+                error="request body exceeds configured limit",
+            )
+            self._send_json(handler, 413, {"error": {"message": "request body too large"}})
+            return
         if request_body is None:
             self._record(
                 request_id=request_id,
@@ -166,7 +201,7 @@ class OpenAIRecordingProxy:
             self._send_json(handler, 400, {"error": {"message": "request body must be a JSON object"}})
             return
 
-        target_url = _join_upstream_path(self.config.upstream_base_url, handler.path)
+        target_url = _join_upstream_path(self.config.upstream_base_url, path)
         headers = {"Content-Type": "application/json"}
         if self.config.api_key:
             headers["Authorization"] = f"Bearer {self.config.api_key}"
@@ -175,7 +210,7 @@ class OpenAIRecordingProxy:
             status_code = response.status_code
             content = response.content
             content_type = response.headers.get("content-type", "application/json")
-        except Exception as exc:
+        except httpx.ConnectError as exc:
             curl_response = self._post_with_curl(target_url, request_body, headers)
             if curl_response is not None:
                 status_code, content, content_type = curl_response
@@ -195,6 +230,20 @@ class OpenAIRecordingProxy:
                 )
                 self._send_json(handler, 502, {"error": {"message": error_message}})
                 return
+        except Exception as exc:
+            error_message = str(exc)
+            self._record(
+                request_id=request_id,
+                benchmark_id=benchmark_id,
+                task_id=task_id,
+                request=request_body,
+                response=None,
+                started=started,
+                status_code=502,
+                error=error_message,
+            )
+            self._send_json(handler, 502, {"error": {"message": error_message}})
+            return
 
         text = content.decode("utf-8", errors="replace")
         response_payload = _json_or_text(text)
@@ -263,12 +312,25 @@ class OpenAIRecordingProxy:
             length = int(handler.headers.get("Content-Length") or "0")
         except ValueError:
             return None
+        if length < 0:
+            return None
+        if length > self.config.max_request_bytes:
+            raise _RequestBodyTooLarge
         raw = handler.rfile.read(length)
         try:
             payload = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             return None
         return payload if isinstance(payload, dict) else None
+
+    def _authorized_path(self, request_path: str) -> str | None:
+        path = request_path.split("?", 1)[0]
+        prefix = self._url_prefix
+        if path == prefix:
+            return "/"
+        if not path.startswith(f"{prefix}/"):
+            return None
+        return path[len(prefix) :]
 
     def _record(
         self,
@@ -328,15 +390,14 @@ def redact_secrets(value: Any) -> Any:
     if isinstance(value, dict):
         redacted: dict[str, Any] = {}
         for key, item in value.items():
-            lowered = str(key).lower()
-            if any(secret in lowered for secret in SECRET_KEYS):
+            if _is_secret_key(str(key)):
                 redacted[key] = REDACTED
             else:
                 redacted[key] = redact_secrets(item)
         return redacted
     if isinstance(value, list):
         return [redact_secrets(item) for item in value]
-    if isinstance(value, str) and value.startswith("Bearer "):
+    if isinstance(value, str) and value.lower().startswith("bearer "):
         return REDACTED
     return value
 
@@ -349,7 +410,17 @@ def redact_url(url: str) -> str:
         return url
     host = parsed.hostname or parsed.netloc
     port = f":{parsed.port}" if parsed.port else ""
-    return f"{parsed.scheme}://{host}{port}{parsed.path.rstrip('/')}"
+    path_parts = parsed.path.rstrip("/").split("/")
+    if len(path_parts) >= 4 and path_parts[1] == "_agent_bench":
+        path_parts[2] = REDACTED
+    return f"{parsed.scheme}://{host}{port}{'/'.join(path_parts)}"
+
+
+def _is_secret_key(key: str) -> bool:
+    normalized = key.strip().lower().replace("-", "_")
+    if normalized in NORMALIZED_SECRET_KEYS:
+        return True
+    return normalized.endswith(("_api_key", "_access_token", "_password", "_secret"))
 
 
 def _redacted_request_metadata(request: dict[str, Any]) -> dict[str, Any]:
@@ -400,3 +471,7 @@ def _container_ip_address() -> str:
     except OSError:
         pass
     return ""
+
+
+class _RequestBodyTooLarge(ValueError):
+    pass
